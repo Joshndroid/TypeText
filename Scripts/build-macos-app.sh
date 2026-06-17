@@ -23,6 +23,7 @@ cd "$ROOT_DIR"
 "$CARGO_BIN" build --release -p typetext-desktop
 
 APP_DIR="$ROOT_DIR/dist/TypeText.app"
+ZIP_PATH="$ROOT_DIR/dist/TypeText-macOS.zip"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -46,5 +47,9 @@ if [[ -f "$ROOT_DIR/examples/settings.json" ]]; then
   cp "$ROOT_DIR/examples/settings.json" "$MACOS_DIR/data/settings.json"
 fi
 
+rm -f "$ZIP_PATH"
+ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
+
 echo "Built $APP_DIR"
+echo "Archived $ZIP_PATH"
 echo "Open with: open \"$APP_DIR\""

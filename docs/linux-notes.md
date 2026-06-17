@@ -1,17 +1,29 @@
 # Linux Notes
 
-TypeText uses Electron for the window and global hotkey. Text insertion depends on the desktop session.
+TypeText uses the shared Rust/egui desktop window on Linux. The current Linux
+build is packaged as a portable experiment so the UI and data model can be
+tested on target distributions.
 
-## Wayland
+## Portable Build
 
-Install `wtype` and make sure the compositor allows synthetic input.
+Build the Linux portable folder and archive on Linux:
 
-## X11
+```bash
+Scripts/build-linux-portable.sh
+```
 
-Install `xdotool`.
+Output:
+
+```text
+dist/TypeText-Linux/TypeText
+dist/TypeText-Linux-<target>.tar.gz
+```
 
 ## Known Limitations
 
-- Wayland support varies by compositor.
-- Some desktop environments restrict global hotkeys or synthetic input.
-- Linux should be treated as a supported experiment until tested on target distributions.
+- Global hotkey support is not implemented on Linux yet.
+- Synthetic typing is not implemented on Linux yet.
+- Some desktop environments restrict global hotkeys or synthetic input,
+  especially under Wayland.
+- Linux should be treated as a supported experiment until tested on target
+  distributions.

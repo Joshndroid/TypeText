@@ -70,6 +70,25 @@ The same layout is used for packaged builds, so TypeText can be moved as a folde
 
 ## Build And Run
 
+Portable release archives are built natively per operating system. The GitHub
+Actions workflow in `.github/workflows/build-portable.yml` builds and uploads:
+
+```text
+TypeText-macOS.zip
+TypeText-Windows-x64.zip
+TypeText-Linux-<target>.tar.gz
+```
+
+To publish a GitHub Release, push a version tag in `v.X.X.X` format:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds the macOS, Windows, and Linux portable archives, then
+attaches them to the matching GitHub Release.
+
 Check the shared core and desktop app:
 
 ```bash
@@ -88,6 +107,12 @@ Build a portable macOS app bundle:
 ```bash
 Scripts/build-macos-app.sh
 open dist/TypeText.app
+```
+
+The macOS portable archive is written to:
+
+```text
+dist/TypeText-macOS.zip
 ```
 
 Build the portable Windows app:
@@ -115,6 +140,32 @@ dist\TypeText-Windows\TypeText.exe
 ```
 
 That folder also includes `data\`, `TypeText.ico`, and `build-info.txt`.
+The Windows portable archive is written to:
+
+```text
+dist\TypeText-Windows-x64.zip
+```
+
+Build the portable Linux app:
+
+```bash
+Scripts/build-linux-portable.sh
+```
+
+The portable Linux output is written to:
+
+```text
+dist/TypeText-Linux/TypeText
+```
+
+The Linux portable archive is written to:
+
+```text
+dist/TypeText-Linux-<target>.tar.gz
+```
+
+Linux currently uses the shared Rust UI with fallback platform hooks. Global
+hotkey and synthetic typing support are not implemented on Linux yet.
 
 ## macOS Permissions
 

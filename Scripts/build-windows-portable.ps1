@@ -7,6 +7,7 @@ if ([string]::IsNullOrWhiteSpace($WindowsTarget)) {
 }
 
 $DistDir = Join-Path $RootDir "dist\TypeText-Windows"
+$ZipPath = Join-Path $RootDir "dist\TypeText-Windows-x64.zip"
 $DataDir = Join-Path $DistDir "data"
 $ReleaseDir = Join-Path $RootDir "target\$WindowsTarget\release"
 $ExeSource = Join-Path $ReleaseDir "typetext-desktop.exe"
@@ -49,5 +50,11 @@ entry=TypeText.exe
 "@
 $BuildInfo | Set-Content -Path (Join-Path $DistDir "build-info.txt") -Encoding UTF8
 
+if (Test-Path $ZipPath) {
+    Remove-Item $ZipPath -Force
+}
+Compress-Archive -Path $DistDir -DestinationPath $ZipPath -Force
+
 Write-Host "Built $DistDir"
+Write-Host "Archived $ZipPath"
 Write-Host "Run with: $ExeDest"
