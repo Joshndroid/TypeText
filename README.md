@@ -56,9 +56,9 @@ examples/
   settings.json
 ```
 
-## Portable Data
+## App Data
 
-At runtime, TypeText stores data beside the executable:
+Portable builds store runtime data beside the executable:
 
 ```text
 TypeText.exe
@@ -67,17 +67,29 @@ data/
   settings.json
 ```
 
-The same layout is used for packaged builds, so TypeText can be moved as a folder without installing it.
+Installable builds first try that portable `data/` folder, then fall back to the
+normal per-user app data location when the install directory is not writable:
+
+```text
+Windows: %LOCALAPPDATA%\TypeText\data
+macOS:   ~/Library/Application Support/TypeText/data
+Linux:   $XDG_DATA_HOME/typetext/data or ~/.local/share/typetext/data
+```
 
 ## Build And Run
 
-Portable release archives are built natively per operating system. The GitHub
-Actions workflow in `.github/workflows/build-portable.yml` builds and uploads:
+Portable and installable releases are built natively per operating system by
+the GitHub Actions workflow in `.github/workflows/build-portable.yml`.
+
+Release artifacts:
 
 ```text
 TypeText-macOS.zip
+TypeText-macOS.dmg
 TypeText-Windows-x64.zip
+TypeText-Windows-x64-Setup.exe
 TypeText-Linux-<target>.tar.gz
+typetext_<version>_amd64.deb
 ```
 
 To publish a GitHub Release, push a version tag in `v.X.X.X` format:
@@ -87,12 +99,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow builds the macOS, Windows, and Linux portable archives, then
-attaches them to the matching GitHub Release.
+The workflow builds the macOS, Windows, and Linux portable archives and
+installable packages, then attaches them to the matching GitHub Release.
 
 TypeText checks that release feed at most once per day when update checks are
-enabled. When a newer platform-specific archive is available, the app offers a
-download link; it does not replace the running app automatically.
+enabled. When a newer platform-specific package is available, the app offers a
+download link and prefers installable packages over portable archives; it does
+not replace the running app automatically.
 
 Check the shared core and desktop app:
 
@@ -107,20 +120,32 @@ Run the desktop app during development:
 cargo run -p typetext-desktop
 ```
 
-Build a portable macOS app bundle:
+### macOS
+
+Build the portable app bundle and zip:
 
 ```bash
 Scripts/build-macos-app.sh
 open dist/TypeText.app
 ```
 
-The macOS portable archive is written to:
+Build the installable DMG:
 
-```text
-dist/TypeText-macOS.zip
+```bash
+Scripts/build-macos-dmg.sh
 ```
 
-Build the portable Windows app:
+Outputs:
+
+```text
+dist/TypeText.app
+dist/TypeText-macOS.zip
+dist/TypeText-macOS.dmg
+```
+
+### Windows
+
+Build the portable app:
 
 ```powershell
 Scripts\build-windows-portable.ps1
@@ -138,35 +163,43 @@ If Rust says the target is missing, install it once:
 rustup target add x86_64-pc-windows-msvc
 ```
 
-The portable Windows output is written to:
+Build the installer:
+
+```powershell
+Scripts\build-windows-installer.ps1
+```
+
+The installer script requires Inno Setup 6. On GitHub Actions this is installed
+with Chocolatey before the script runs.
+
+Outputs:
 
 ```text
 dist\TypeText-Windows\TypeText.exe
-```
-
-That folder also includes `data\`, `TypeText.ico`, and `build-info.txt`.
-The Windows portable archive is written to:
-
-```text
 dist\TypeText-Windows-x64.zip
+dist\TypeText-Windows-x64-Setup.exe
 ```
 
-Build the portable Linux app:
+### Linux
+
+Build the portable app:
 
 ```bash
 Scripts/build-linux-portable.sh
 ```
 
-The portable Linux output is written to:
+Build the DEB package:
+
+```bash
+Scripts/build-linux-deb.sh
+```
+
+Outputs:
 
 ```text
 dist/TypeText-Linux/TypeText
-```
-
-The Linux portable archive is written to:
-
-```text
 dist/TypeText-Linux-<target>.tar.gz
+dist/typetext_<version>_amd64.deb
 ```
 
 Linux currently uses the shared Rust UI with fallback platform hooks. Global

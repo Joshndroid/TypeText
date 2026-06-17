@@ -1,4 +1,4 @@
-name: Build portable apps
+name: Build release apps
 
 on:
   push:
@@ -11,54 +11,64 @@ on:
 
 jobs:
   macos:
-    name: macOS portable app
+    name: macOS app
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build portable app
-        run: Scripts/build-macos-app.sh
+      - name: Build portable and installable apps
+        run: |
+          Scripts/build-macos-app.sh
+          Scripts/build-macos-dmg.sh
 
       - name: Upload macOS app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: TypeText-macOS
-          path: dist/TypeText-macOS.zip
+          path: |
+            dist/TypeText-macOS.zip
+            dist/TypeText-macOS.dmg
           if-no-files-found: error
 
   windows:
-    name: Windows portable app
+    name: Windows app
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Build portable app
+      - name: Install Inno Setup
         shell: pwsh
-        run: Scripts\build-windows-portable.ps1
+        run: choco install innosetup --no-progress -y
+
+      - name: Build portable and installable apps
+        shell: pwsh
+        run: Scripts\build-windows-installer.ps1
 
       - name: Upload Windows app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: TypeText-Windows-x64
-          path: dist/TypeText-Windows-x64.zip
+          path: |
+            dist/TypeText-Windows-x64.zip
+            dist/TypeText-Windows-x64-Setup.exe
           if-no-files-found: error
 
   linux:
-    name: Linux portable app
+    name: Linux app
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system dependencies
         run: |
@@ -82,14 +92,18 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build portable app
-        run: bash Scripts/build-linux-portable.sh
+      - name: Build portable and installable apps
+        run: |
+          bash Scripts/build-linux-portable.sh
+          bash Scripts/build-linux-deb.sh
 
       - name: Upload Linux app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: TypeText-Linux-x64
-          path: dist/TypeText-Linux-*.tar.gz
+          path: |
+            dist/TypeText-Linux-*.tar.gz
+            dist/typetext_*_amd64.deb
           if-no-files-found: error
 
   release:
@@ -111,18 +125,21 @@ jobs:
           fi
 
       - name: Download portable artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: release-assets
           merge-multiple: true
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: TypeText ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
           fail_on_unmatched_files: true
           files: |
             release-assets/TypeText-macOS.zip
+            release-assets/TypeText-macOS.dmg
             release-assets/TypeText-Windows-x64.zip
+            release-assets/TypeText-Windows-x64-Setup.exe
             release-assets/TypeText-Linux-*.tar.gz
+            release-assets/typetext_*_amd64.deb

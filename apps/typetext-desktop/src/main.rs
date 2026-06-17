@@ -1761,7 +1761,9 @@ fn check_latest_release() -> anyhow::Result<Option<UpdateInfo>> {
     let Some(asset) = release
         .assets
         .into_iter()
-        .find(|asset| asset_matches_platform(&asset.name))
+        .filter_map(|asset| asset_platform_rank(&asset.name).map(|rank| (rank, asset)))
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(_, asset)| asset)
     else {
         return Ok(None);
     };
@@ -1775,14 +1777,32 @@ fn check_latest_release() -> anyhow::Result<Option<UpdateInfo>> {
 }
 
 fn asset_matches_platform(name: &str) -> bool {
+    asset_platform_rank(name).is_some()
+}
+
+fn asset_platform_rank(name: &str) -> Option<u8> {
     if cfg!(target_os = "macos") {
-        name == "TypeText-macOS.zip"
+        match name {
+            "TypeText-macOS.dmg" => Some(0),
+            "TypeText-macOS.zip" => Some(1),
+            _ => None,
+        }
     } else if cfg!(windows) {
-        name == "TypeText-Windows-x64.zip"
+        match name {
+            "TypeText-Windows-x64-Setup.exe" => Some(0),
+            "TypeText-Windows-x64.zip" => Some(1),
+            _ => None,
+        }
     } else if cfg!(target_os = "linux") {
-        name.starts_with("TypeText-Linux-") && name.ends_with(".tar.gz")
+        if name.starts_with("typetext_") && name.ends_with("_amd64.deb") {
+            Some(0)
+        } else if name.starts_with("TypeText-Linux-") && name.ends_with(".tar.gz") {
+            Some(1)
+        } else {
+            None
+        }
     } else {
-        false
+        None
     }
 }
 
@@ -1927,11 +1947,11 @@ mod tests {
     #[test]
     fn matches_current_platform_release_asset() {
         let matching_asset = if cfg!(target_os = "macos") {
-            "TypeText-macOS.zip"
+            "TypeText-macOS.dmg"
         } else if cfg!(windows) {
-            "TypeText-Windows-x64.zip"
+            "TypeText-Windows-x64-Setup.exe"
         } else if cfg!(target_os = "linux") {
-            "TypeText-Linux-x86_64-unknown-linux-gnu.tar.gz"
+            "typetext_0.1.0_amd64.deb"
         } else {
             "unsupported"
         };

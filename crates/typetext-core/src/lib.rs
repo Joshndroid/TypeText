@@ -110,11 +110,25 @@ impl PortablePaths {
         let app_dir = exe
             .parent()
             .ok_or_else(|| anyhow!("Could not determine executable directory"))?;
-        Ok(Self::from_app_dir(app_dir))
+        let portable_paths = Self::from_app_dir(app_dir);
+        if portable_paths.data_dir.exists() || fs::create_dir_all(&portable_paths.data_dir).is_ok()
+        {
+            return Ok(portable_paths);
+        }
+
+        let data_dir = platform_data_dir().ok_or_else(|| {
+            anyhow!("Could not create portable data folder or locate user data folder")
+        })?;
+        Ok(Self::from_data_dir(data_dir))
     }
 
     pub fn from_app_dir(app_dir: impl AsRef<Path>) -> Self {
         let data_dir = app_dir.as_ref().join("data");
+        Self::from_data_dir(data_dir)
+    }
+
+    pub fn from_data_dir(data_dir: impl Into<PathBuf>) -> Self {
+        let data_dir = data_dir.into();
         Self {
             snippets_path: data_dir.join("snippets.json"),
             settings_path: data_dir.join("settings.json"),
@@ -306,6 +320,30 @@ where
         )
     })?;
     Ok(())
+}
+
+fn platform_data_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")
+            .or_else(|| std::env::var_os("APPDATA"))
+            .map(PathBuf::from)
+            .map(|path| path.join("TypeText").join("data"))
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|home| {
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("TypeText")
+                .join("data")
+        })
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+            })
+            .map(|path| path.join("typetext").join("data"))
+    }
 }
 
 fn parse_droptext_value(raw: &str, line_number: usize) -> Result<String> {
