@@ -177,6 +177,33 @@ mod windows_platform {
             .map_err(Into::into)
     }
 
+    pub fn open_url(url: &str) -> Result<()> {
+        Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn()
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub fn fetch_text(url: &str) -> Result<String> {
+        let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "$ProgressPreference='SilentlyContinue'; (Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='TypeText'} -Uri $args[0]).Content",
+            ])
+            .arg(url)
+            .output()
+            .context("Could not run PowerShell update check")?;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow!("Update request failed. {}", stderr.trim()))
+        }
+    }
+
     pub fn open_droptext_file_dialog() -> Result<Option<PathBuf>> {
         let script = r#"
 Add-Type -AssemblyName System.Windows.Forms
@@ -408,6 +435,28 @@ mod macos_platform {
             .spawn()
             .map(|_| ())
             .map_err(Into::into)
+    }
+
+    pub fn open_url(url: &str) -> Result<()> {
+        Command::new("open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub fn fetch_text(url: &str) -> Result<String> {
+        let output = Command::new("curl")
+            .args(["-fsSL", "-H", "User-Agent: TypeText", url])
+            .output()
+            .context("Could not run curl update check")?;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow!("Update request failed. {}", stderr.trim()))
+        }
     }
 
     pub fn open_droptext_file_dialog() -> Result<Option<PathBuf>> {
@@ -778,6 +827,28 @@ mod fallback_platform {
             .map_err(Into::into)
     }
 
+    pub fn open_url(url: &str) -> Result<()> {
+        Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub fn fetch_text(url: &str) -> Result<String> {
+        let output = Command::new("curl")
+            .args(["-fsSL", "-H", "User-Agent: TypeText", url])
+            .output()
+            .context("Could not run curl update check")?;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow!("Update request failed. {}", stderr.trim()))
+        }
+    }
+
     pub fn open_droptext_file_dialog() -> Result<Option<std::path::PathBuf>> {
         Err(anyhow!(
             "Native DropText file picker is only implemented on macOS and Windows."
@@ -811,16 +882,19 @@ mod fallback_platform {
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub use fallback_platform::{
-    open_droptext_file_dialog, open_folder, open_snippets_export_dialog, register_hotkey,
-    set_startup_enabled, startup_enabled, tray_status, type_text, type_text_current_focus,
+    fetch_text, open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url,
+    register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
+    type_text_current_focus,
 };
 #[cfg(target_os = "macos")]
 pub use macos_platform::{
-    open_droptext_file_dialog, open_folder, open_snippets_export_dialog, register_hotkey,
-    set_startup_enabled, startup_enabled, tray_status, type_text, type_text_current_focus,
+    fetch_text, open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url,
+    register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
+    type_text_current_focus,
 };
 #[cfg(windows)]
 pub use windows_platform::{
-    open_droptext_file_dialog, open_folder, open_snippets_export_dialog, register_hotkey,
-    set_startup_enabled, startup_enabled, tray_status, type_text, type_text_current_focus,
+    fetch_text, open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url,
+    register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
+    type_text_current_focus,
 };

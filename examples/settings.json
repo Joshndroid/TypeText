@@ -4,5 +4,7 @@
   "closeAfterInsert": true,
   "openOnStartup": false,
   "theme": "system",
-  "queuedSnippetClickAction": "addAgain"
+  "queuedSnippetClickAction": "addAgain",
+  "checkForUpdates": true,
+  "lastUpdateCheckUnix": null
 }

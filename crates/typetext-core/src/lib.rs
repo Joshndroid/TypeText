@@ -39,6 +39,10 @@ pub struct AppSettings {
     pub theme: String,
     #[serde(default = "default_queued_snippet_click_action")]
     pub queued_snippet_click_action: QueuedSnippetClickAction,
+    #[serde(default = "default_check_for_updates")]
+    pub check_for_updates: bool,
+    #[serde(default)]
+    pub last_update_check_unix: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,6 +98,8 @@ impl Default for AppSettings {
             open_on_startup: false,
             theme: default_theme(),
             queued_snippet_click_action: default_queued_snippet_click_action(),
+            check_for_updates: default_check_for_updates(),
+            last_update_check_unix: None,
         }
     }
 }
@@ -371,6 +377,10 @@ fn default_theme() -> String {
 
 fn default_queued_snippet_click_action() -> QueuedSnippetClickAction {
     QueuedSnippetClickAction::AddAgain
+}
+
+fn default_check_for_updates() -> bool {
+    true
 }
 
 #[cfg(test)]

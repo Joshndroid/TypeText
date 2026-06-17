@@ -1,8 +1,9 @@
 mod platform;
 
 use eframe::egui;
+use serde::Deserialize;
 use std::sync::mpsc::{self, Receiver};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use typetext_core::{
     export_snippets, import_droptext_ini, load_or_create_settings, load_or_create_snippets,
     save_settings, save_snippets, search_snippets, AppSettings, PortablePaths,
@@ -11,6 +12,9 @@ use typetext_core::{
 
 const APP_VERSION: &str = "0.1.0";
 const APP_TITLE: &str = "TypeText 0.1.0";
+const UPDATE_CHECK_INTERVAL_SECONDS: u64 = 60 * 60 * 24;
+const LATEST_RELEASE_API_URL: &str =
+    "https://api.github.com/repos/Joshndroid/TypeText/releases/latest";
 
 fn main() -> eframe::Result {
     let icon =
@@ -48,6 +52,34 @@ struct ChainInsertion {
     body: String,
 }
 
+#[derive(Debug, Clone)]
+struct UpdateInfo {
+    version: String,
+    release_url: String,
+    download_url: String,
+    asset_name: String,
+}
+
+#[derive(Debug)]
+enum UpdateCheckMessage {
+    Available(UpdateInfo),
+    Current { notify: bool },
+    Failed { error: String, notify: bool },
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    html_url: String,
+    assets: Vec<GitHubReleaseAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
 struct TypeTextApp {
     paths: PortablePaths,
     snippets: SnippetFile,
@@ -69,6 +101,9 @@ struct TypeTextApp {
     snippet_chain: Vec<SearchResult>,
     insert_when_focus_lost: bool,
     hotkey_rx: Receiver<()>,
+    update_rx: Receiver<UpdateCheckMessage>,
+    update_info: Option<UpdateInfo>,
+    update_check_in_progress: bool,
 }
 
 fn apply_modern_style(ctx: &egui::Context) {
@@ -445,6 +480,7 @@ impl TypeTextApp {
         apply_theme(&cc.egui_ctx, &settings.theme);
         let results = search_snippets(&snippets, "");
         let (tx, rx) = mpsc::channel();
+        let (_update_tx, update_rx) = mpsc::channel();
         let (status, error_message) = match platform::register_hotkey(settings.hotkey.clone(), tx) {
             Ok(()) => (format!("Ready - {}", settings.hotkey), None),
             Err(error) => (
@@ -474,7 +510,11 @@ impl TypeTextApp {
             snippet_chain: Vec::new(),
             insert_when_focus_lost: false,
             hotkey_rx: rx,
+            update_rx,
+            update_info: None,
+            update_check_in_progress: false,
         };
+        app.schedule_update_check(false);
         app.load_selected_editor_snippet();
         app
     }
@@ -613,6 +653,83 @@ impl TypeTextApp {
                 self.status = format!("Exported snippets to {}", path.display());
             }
             Err(error) => self.show_error(error.to_string()),
+        }
+    }
+
+    fn schedule_update_check(&mut self, force: bool) {
+        if self.update_check_in_progress {
+            return;
+        }
+        if !force && !self.settings.check_for_updates {
+            return;
+        }
+
+        let now = current_unix_time();
+        if !force
+            && self
+                .settings
+                .last_update_check_unix
+                .is_some_and(|checked_at| {
+                    now.saturating_sub(checked_at) < UPDATE_CHECK_INTERVAL_SECONDS
+                })
+        {
+            return;
+        }
+
+        self.settings.last_update_check_unix = Some(now);
+        let _ = save_settings(&self.paths, &self.settings);
+
+        let (tx, rx) = mpsc::channel();
+        self.update_rx = rx;
+        self.update_check_in_progress = true;
+        if force {
+            self.status = "Checking for updates...".to_string();
+        }
+
+        std::thread::spawn(move || {
+            let message = match check_latest_release() {
+                Ok(Some(update)) => UpdateCheckMessage::Available(update),
+                Ok(None) => UpdateCheckMessage::Current { notify: force },
+                Err(error) => UpdateCheckMessage::Failed {
+                    error: error.to_string(),
+                    notify: force,
+                },
+            };
+            let _ = tx.send(message);
+        });
+    }
+
+    fn handle_update_messages(&mut self) {
+        while let Ok(message) = self.update_rx.try_recv() {
+            self.update_check_in_progress = false;
+            match message {
+                UpdateCheckMessage::Available(update) => {
+                    self.status = format!("Update available: {}", update.version);
+                    self.update_info = Some(update);
+                }
+                UpdateCheckMessage::Current { notify } => {
+                    if notify {
+                        self.status = "TypeText is up to date".to_string();
+                    }
+                    self.update_info = None;
+                }
+                UpdateCheckMessage::Failed { error, notify } => {
+                    if notify {
+                        self.status = "Update check failed".to_string();
+                        self.show_error(format!("Could not check for updates: {error}"));
+                    }
+                }
+            }
+        }
+    }
+
+    fn open_update_download(&mut self) {
+        let Some(update) = self.update_info.as_ref() else {
+            return;
+        };
+
+        if let Err(error) = platform::open_url(&update.download_url) {
+            self.show_error(error.to_string());
         }
     }
 
@@ -796,6 +913,8 @@ impl TypeTextApp {
 impl eframe::App for TypeTextApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_hotkey_capture(ctx);
+        self.handle_update_messages();
+        self.schedule_update_check(false);
 
         while self.hotkey_rx.try_recv().is_ok() {
             self.view = View::Choose;
@@ -987,6 +1106,9 @@ impl TypeTextApp {
                 nav_button(ui, &mut self.view, View::Settings, "Settings");
                 nav_button(ui, &mut self.view, View::Edit, "Edit");
                 nav_button(ui, &mut self.view, View::Choose, "Choose");
+                if self.update_info.is_some() && ui.button("Download Update").clicked() {
+                    self.open_update_download();
+                }
             });
         });
     }
@@ -1532,6 +1654,61 @@ impl TypeTextApp {
                 });
 
                 section_gap(ui);
+                framed_section(ui, "Updates", "GitHub releases", |ui| {
+                    ui.checkbox(
+                        &mut self.settings.check_for_updates,
+                        "Check for updates once per day",
+                    );
+                    ui.horizontal(|ui| {
+                        let check_label = if self.update_check_in_progress {
+                            "Checking..."
+                        } else {
+                            "Check Now"
+                        };
+                        if ui
+                            .add_enabled(
+                                !self.update_check_in_progress,
+                                egui::Button::new(check_label),
+                            )
+                            .clicked()
+                        {
+                            self.schedule_update_check(true);
+                        }
+                        if let Some(checked_at) = self.settings.last_update_check_unix {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Last checked {}",
+                                    relative_time_label(checked_at)
+                                ))
+                                .small()
+                                .weak(),
+                            );
+                        }
+                    });
+                    if let Some(update) = self.update_info.clone() {
+                        ui.add_space(3.0);
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} is available for this platform",
+                                update.version
+                            ))
+                            .strong(),
+                        );
+                        ui.label(egui::RichText::new(&update.asset_name).small().weak());
+                        ui.horizontal(|ui| {
+                            if ui.button("Download").clicked() {
+                                self.open_update_download();
+                            }
+                            if ui.button("Release Notes").clicked() {
+                                if let Err(error) = platform::open_url(&update.release_url) {
+                                    self.show_error(error.to_string());
+                                }
+                            }
+                        });
+                    }
+                });
+
+                section_gap(ui);
                 framed_section(ui, "Snippet Data", "import, export, and reset", |ui| {
                     ui.horizontal(|ui| {
                         if ui.button("Import").clicked() {
@@ -1570,6 +1747,78 @@ impl TypeTextApp {
                     });
                 });
             });
+    }
+}
+
+fn check_latest_release() -> anyhow::Result<Option<UpdateInfo>> {
+    let raw = platform::fetch_text(LATEST_RELEASE_API_URL)?;
+    let release: GitHubRelease = serde_json::from_str(&raw)?;
+
+    if compare_versions(&release.tag_name, APP_VERSION) != std::cmp::Ordering::Greater {
+        return Ok(None);
+    }
+
+    let Some(asset) = release
+        .assets
+        .into_iter()
+        .find(|asset| asset_matches_platform(&asset.name))
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(UpdateInfo {
+        version: release.tag_name,
+        release_url: release.html_url,
+        download_url: asset.browser_download_url,
+        asset_name: asset.name,
+    }))
+}
+
+fn asset_matches_platform(name: &str) -> bool {
+    if cfg!(target_os = "macos") {
+        name == "TypeText-macOS.zip"
+    } else if cfg!(windows) {
+        name == "TypeText-Windows-x64.zip"
+    } else if cfg!(target_os = "linux") {
+        name.starts_with("TypeText-Linux-") && name.ends_with(".tar.gz")
+    } else {
+        false
+    }
+}
+
+fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
+    parse_version_triplet(left).cmp(&parse_version_triplet(right))
+}
+
+fn parse_version_triplet(value: &str) -> Option<(u64, u64, u64)> {
+    let value = value.trim().trim_start_matches('v');
+    let mut parts = value.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+fn current_unix_time() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn relative_time_label(timestamp: u64) -> String {
+    let elapsed = current_unix_time().saturating_sub(timestamp);
+    if elapsed < 60 {
+        "just now".to_string()
+    } else if elapsed < 60 * 60 {
+        format!("{} minutes ago", elapsed / 60)
+    } else if elapsed < 60 * 60 * 24 {
+        format!("{} hours ago", elapsed / (60 * 60))
+    } else {
+        format!("{} days ago", elapsed / (60 * 60 * 24))
     }
 }
 
@@ -1659,5 +1908,38 @@ fn hotkey_key_name(key: egui::Key) -> Option<&'static str> {
         egui::Key::F11 => Some("F11"),
         egui::Key::F12 => Some("F12"),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn compares_release_tags_against_app_versions() {
+        assert_eq!(compare_versions("v0.1.1", "0.1.0"), Ordering::Greater);
+        assert_eq!(compare_versions("v0.1.0", "0.1.0"), Ordering::Equal);
+        assert_eq!(compare_versions("v0.0.9", "0.1.0"), Ordering::Less);
+        assert_eq!(compare_versions("not-a-version", "0.1.0"), Ordering::Less);
+    }
+
+    #[test]
+    fn matches_current_platform_release_asset() {
+        let matching_asset = if cfg!(target_os = "macos") {
+            "TypeText-macOS.zip"
+        } else if cfg!(windows) {
+            "TypeText-Windows-x64.zip"
+        } else if cfg!(target_os = "linux") {
+            "TypeText-Linux-x86_64-unknown-linux-gnu.tar.gz"
+        } else {
+            "unsupported"
+        };
+
+        assert_eq!(
+            asset_matches_platform(matching_asset),
+            cfg!(any(target_os = "macos", windows, target_os = "linux"))
+        );
+        assert!(!asset_matches_platform("TypeText-source.zip"));
     }
 }

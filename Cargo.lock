@@ -3135,6 +3135,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "eframe",
+ "serde",
+ "serde_json",
  "typetext-core",
  "windows",
 ]

@@ -18,6 +18,7 @@ The app is portable by design: no installer is required, and runtime data lives 
 - Configurable typing delay and close-after-insert behavior
 - Open-on-startup setting for macOS and Windows
 - Light, dark, and system theme support
+- Daily GitHub release update checks with platform-specific download links
 - Bundled JetBrains Mono UI font for consistent rendering
 - Low-footprint native Rust/egui desktop app
 
@@ -88,6 +89,10 @@ git push origin v0.1.0
 
 The workflow builds the macOS, Windows, and Linux portable archives, then
 attaches them to the matching GitHub Release.
+
+TypeText checks that release feed at most once per day when update checks are
+enabled. When a newer platform-specific archive is available, the app offers a
+download link; it does not replace the running app automatically.
 
 Check the shared core and desktop app:
 
@@ -186,7 +191,9 @@ System Settings > Privacy & Security > Accessibility
   "closeAfterInsert": true,
   "openOnStartup": false,
   "theme": "system",
-  "queuedSnippetClickAction": "addAgain"
+  "queuedSnippetClickAction": "addAgain",
+  "checkForUpdates": true,
+  "lastUpdateCheckUnix": null
 }
 ```
 
