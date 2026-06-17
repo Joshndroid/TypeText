@@ -1,0 +1,8 @@
+{
+  "hotkey": "Ctrl+Alt+Space",
+  "typingDelayMs": 80,
+  "closeAfterInsert": true,
+  "openOnStartup": false,
+  "theme": "system",
+  "queuedSnippetClickAction": "addAgain"
+}

@@ -1,0 +1,29 @@
+# Rust build output
+target/
+
+# Packaged application output
+dist/
+
+# Local runtime data generated beside development binaries
+data/
+**/data/settings.json
+**/data/snippets.json
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Editor and IDE state
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and local environment files
+*.log
+.env
+.env.*
+
+# Temporary files
+*.tmp
+*.bak

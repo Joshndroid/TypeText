@@ -1,0 +1,1663 @@
+mod platform;
+
+use eframe::egui;
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
+use typetext_core::{
+    export_snippets, import_droptext_ini, load_or_create_settings, load_or_create_snippets,
+    save_settings, save_snippets, search_snippets, AppSettings, PortablePaths,
+    QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
+};
+
+const APP_VERSION: &str = "0.1.0";
+const APP_TITLE: &str = "TypeText 0.1.0";
+
+fn main() -> eframe::Result {
+    let icon =
+        eframe::icon_data::from_png_bytes(include_bytes!("../../../icon/typetext-appicon.png"))
+            .ok();
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(APP_TITLE)
+        .with_inner_size([780.0, 520.0])
+        .with_min_inner_size([560.0, 380.0]);
+    if let Some(icon) = icon {
+        viewport = viewport.with_icon(icon);
+    }
+
+    let options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        APP_TITLE,
+        options,
+        Box::new(|cc| Ok(Box::new(TypeTextApp::new(cc)))),
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum View {
+    Choose,
+    Edit,
+    Settings,
+}
+
+struct ChainInsertion {
+    title: String,
+    body: String,
+}
+
+struct TypeTextApp {
+    paths: PortablePaths,
+    snippets: SnippetFile,
+    settings: AppSettings,
+    results: Vec<SearchResult>,
+    search: String,
+    view: View,
+    chooser_group: Option<usize>,
+    selected_result: usize,
+    selected_group: usize,
+    selected_snippet: usize,
+    edit_group_name: String,
+    edit_title: String,
+    edit_body: String,
+    status: String,
+    error_message: Option<String>,
+    confirm_clear_all: bool,
+    capturing_hotkey: bool,
+    snippet_chain: Vec<SearchResult>,
+    insert_when_focus_lost: bool,
+    hotkey_rx: Receiver<()>,
+}
+
+fn apply_modern_style(ctx: &egui::Context) {
+    ctx.all_styles_mut(|style| {
+        let dark = style.visuals.dark_mode;
+        let (
+            panel,
+            raised,
+            raised_hover,
+            text,
+            weak_text,
+            border,
+            accent,
+            accent_hover,
+            accent_text,
+            input_bg,
+        ) = if dark {
+            (
+                egui::Color32::from_rgb(18, 19, 20),
+                egui::Color32::from_rgb(31, 33, 34),
+                egui::Color32::from_rgb(42, 45, 46),
+                egui::Color32::from_rgb(234, 238, 238),
+                egui::Color32::from_rgb(153, 161, 161),
+                egui::Color32::from_rgb(58, 63, 64),
+                egui::Color32::from_rgb(18, 132, 122),
+                egui::Color32::from_rgb(25, 154, 142),
+                egui::Color32::from_rgb(236, 255, 251),
+                egui::Color32::from_rgb(10, 11, 12),
+            )
+        } else {
+            (
+                egui::Color32::from_rgb(246, 247, 245),
+                egui::Color32::from_rgb(255, 255, 253),
+                egui::Color32::from_rgb(235, 241, 238),
+                egui::Color32::from_rgb(32, 36, 34),
+                egui::Color32::from_rgb(96, 105, 101),
+                egui::Color32::from_rgb(206, 213, 209),
+                egui::Color32::from_rgb(10, 126, 118),
+                egui::Color32::from_rgb(13, 145, 136),
+                egui::Color32::from_rgb(248, 255, 253),
+                egui::Color32::from_rgb(255, 255, 255),
+            )
+        };
+
+        style.spacing.item_spacing = egui::vec2(6.0, 4.0);
+        style.spacing.window_margin = egui::Margin::same(8);
+        style.spacing.button_padding = egui::vec2(8.0, 4.0);
+        style.spacing.menu_margin = egui::Margin::same(6);
+        style.spacing.indent = 10.0;
+        style.text_styles.insert(
+            egui::TextStyle::Heading,
+            egui::FontId::new(17.0, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Body,
+            egui::FontId::new(12.5, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Button,
+            egui::FontId::new(12.5, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Small,
+            egui::FontId::new(10.5, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Monospace,
+            egui::FontId::new(12.5, egui::FontFamily::Monospace),
+        );
+
+        let visuals = &mut style.visuals;
+        visuals.panel_fill = panel;
+        visuals.window_fill = panel;
+        visuals.faint_bg_color = raised;
+        visuals.extreme_bg_color = input_bg;
+        visuals.text_edit_bg_color = Some(input_bg);
+        visuals.code_bg_color = raised;
+        visuals.weak_text_color = Some(weak_text);
+        visuals.hyperlink_color = accent_hover;
+        visuals.selection.bg_fill = accent;
+        visuals.selection.stroke = egui::Stroke::new(1.0, accent_text);
+        visuals.window_stroke = egui::Stroke::new(1.0, border);
+        visuals.window_corner_radius = egui::CornerRadius::same(8);
+        visuals.menu_corner_radius = egui::CornerRadius::same(8);
+        visuals.button_frame = true;
+        visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
+
+        for widget in [
+            &mut visuals.widgets.noninteractive,
+            &mut visuals.widgets.inactive,
+            &mut visuals.widgets.hovered,
+            &mut visuals.widgets.active,
+            &mut visuals.widgets.open,
+        ] {
+            widget.corner_radius = egui::CornerRadius::same(6);
+        }
+
+        visuals.widgets.noninteractive.bg_fill = panel;
+        visuals.widgets.noninteractive.weak_bg_fill = raised;
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, border);
+        visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, text);
+
+        visuals.widgets.inactive.bg_fill = raised;
+        visuals.widgets.inactive.weak_bg_fill = raised;
+        visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, border);
+        visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, text);
+
+        visuals.widgets.hovered.bg_fill = raised_hover;
+        visuals.widgets.hovered.weak_bg_fill = raised_hover;
+        visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent_hover);
+        visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, text);
+
+        visuals.widgets.active.bg_fill = accent;
+        visuals.widgets.active.weak_bg_fill = accent;
+        visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, accent_hover);
+        visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, accent_text);
+
+        visuals.widgets.open = visuals.widgets.hovered;
+    });
+}
+
+fn apply_theme(ctx: &egui::Context, theme: &str) {
+    ctx.set_theme(theme_preference(theme));
+    apply_modern_style(ctx);
+}
+
+fn configure_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "JetBrainsMono".to_string(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/JetBrainsMono-Regular.ttf"
+        ))),
+    );
+
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .insert(0, "JetBrainsMono".to_string());
+    }
+
+    ctx.set_fonts(fonts);
+}
+
+fn theme_preference(theme: &str) -> egui::ThemePreference {
+    match theme.trim().to_ascii_lowercase().as_str() {
+        "light" => egui::ThemePreference::Light,
+        "dark" => egui::ThemePreference::Dark,
+        _ => egui::ThemePreference::System,
+    }
+}
+
+fn normalize_theme(theme: &str) -> String {
+    match theme.trim().to_ascii_lowercase().as_str() {
+        "light" => "light".to_string(),
+        "dark" => "dark".to_string(),
+        _ => "system".to_string(),
+    }
+}
+
+fn snippet_preview(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn title_from_body(body: &str) -> Option<String> {
+    let preview = snippet_preview(body);
+    if preview.is_empty() {
+        return None;
+    }
+
+    let max_chars = 48;
+    let mut title = preview.chars().take(max_chars).collect::<String>();
+    if preview.chars().count() > max_chars {
+        title.push_str("...");
+    }
+    Some(title)
+}
+
+fn nav_button(ui: &mut egui::Ui, current: &mut View, view: View, label: &str) {
+    let selected = *current == view;
+    if ui
+        .add(egui::Button::selectable(selected, label).min_size(egui::vec2(74.0, 24.0)))
+        .clicked()
+    {
+        *current = view;
+    }
+}
+
+fn section_header(ui: &mut egui::Ui, title: &str, meta: impl Into<String>) {
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(title)
+                .strong()
+                .size(13.5)
+                .color(ui.visuals().strong_text_color()),
+        );
+        let meta = meta.into();
+        if !meta.is_empty() {
+            ui.label(
+                egui::RichText::new(meta)
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+        }
+    });
+}
+
+fn section_gap(ui: &mut egui::Ui) {
+    ui.add_space(6.0);
+}
+
+fn framed_section(
+    ui: &mut egui::Ui,
+    title: &str,
+    meta: impl Into<String>,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    egui::Frame::new()
+        .fill(ui.visuals().faint_bg_color)
+        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_header(ui, title, meta);
+            ui.add_space(5.0);
+            add_contents(ui);
+        });
+}
+
+fn compact_snippet_row(
+    ui: &mut egui::Ui,
+    result: &SearchResult,
+    selected: bool,
+    queued: bool,
+) -> egui::Response {
+    let visuals = ui.visuals();
+    let fill = if selected {
+        visuals.selection.bg_fill
+    } else if queued {
+        visuals.widgets.active.bg_fill
+    } else {
+        visuals.widgets.inactive.weak_bg_fill
+    };
+    let stroke = if queued {
+        visuals.selection.stroke
+    } else {
+        visuals.widgets.noninteractive.bg_stroke
+    };
+
+    let active = selected || queued;
+    let text_color = if active {
+        visuals.selection.stroke.color
+    } else {
+        visuals.text_color()
+    };
+    let weak_color = if active {
+        visuals.selection.stroke.color
+    } else {
+        visuals.weak_text_color()
+    };
+    let marker_color = visuals.selection.stroke.color;
+
+    let frame_response = egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(8, 5))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                if queued {
+                    let (marker_rect, _) =
+                        ui.allocate_exact_size(egui::vec2(3.0, 28.0), egui::Sense::hover());
+                    ui.painter().rect_filled(marker_rect, 2.0, marker_color);
+                }
+
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(&result.title)
+                                .text_style(egui::TextStyle::Button)
+                                .color(text_color),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(&result.group_name)
+                                    .text_style(egui::TextStyle::Small)
+                                    .color(weak_color),
+                            );
+                        });
+                    });
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(snippet_preview(&result.body))
+                                .text_style(egui::TextStyle::Small)
+                                .color(weak_color),
+                        )
+                        .wrap(),
+                    );
+                });
+            });
+        });
+
+    frame_response.response.interact(egui::Sense::click())
+}
+
+fn sidebar_group_row(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Response {
+    const SINGLE_ROW_HEIGHT: f32 = 30.0;
+    const DOUBLE_ROW_HEIGHT: f32 = 46.0;
+    const TEXT_HORIZONTAL_INSET: f32 = 8.0;
+    const TEXT_VERTICAL_INSET: f32 = 3.0;
+
+    let row_width = ui.available_width().max(120.0);
+    let font_id = egui::TextStyle::Button.resolve(ui.style());
+    let text_color = ui.visuals().text_color();
+    let text_width = (row_width - TEXT_HORIZONTAL_INSET * 2.0).max(1.0);
+    let mut job = egui::text::LayoutJob::simple(name.to_string(), font_id, text_color, text_width);
+    job.wrap.max_rows = 2;
+    job.wrap.break_anywhere = false;
+    let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
+    let row_height = if galley.size().y > SINGLE_ROW_HEIGHT - TEXT_VERTICAL_INSET * 2.0 {
+        DOUBLE_ROW_HEIGHT
+    } else {
+        SINGLE_ROW_HEIGHT
+    };
+
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(row_width, row_height), egui::Sense::click());
+    let visuals = ui.visuals();
+    let fill = if selected {
+        visuals.selection.bg_fill
+    } else if response.hovered() {
+        visuals.widgets.hovered.weak_bg_fill
+    } else {
+        visuals.widgets.inactive.weak_bg_fill
+    };
+    let stroke = if selected {
+        visuals.selection.stroke
+    } else {
+        visuals.widgets.noninteractive.bg_stroke
+    };
+
+    ui.painter().rect_filled(rect, 6.0, fill);
+    ui.painter()
+        .rect_stroke(rect, 6.0, stroke, egui::StrokeKind::Inside);
+
+    let text_rect = rect.shrink2(egui::vec2(TEXT_HORIZONTAL_INSET, TEXT_VERTICAL_INSET));
+    let text_y = text_rect.center().y - galley.size().y / 2.0;
+    ui.painter().with_clip_rect(text_rect).galley(
+        egui::pos2(text_rect.left(), text_y),
+        galley,
+        text_color,
+    );
+
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+
+    response
+}
+
+impl TypeTextApp {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let paths =
+            PortablePaths::beside_executable().unwrap_or_else(|_| PortablePaths::from_app_dir("."));
+        let snippets = load_or_create_snippets(&paths).unwrap_or_default();
+        let mut settings = load_or_create_settings(&paths).unwrap_or_default();
+        settings.open_on_startup = platform::startup_enabled();
+        settings.theme = normalize_theme(&settings.theme);
+        configure_fonts(&cc.egui_ctx);
+        apply_theme(&cc.egui_ctx, &settings.theme);
+        let results = search_snippets(&snippets, "");
+        let (tx, rx) = mpsc::channel();
+        let (status, error_message) = match platform::register_hotkey(settings.hotkey.clone(), tx) {
+            Ok(()) => (format!("Ready - {}", settings.hotkey), None),
+            Err(error) => (
+                "Ready".to_string(),
+                Some(format!("Hotkey unavailable: {error}")),
+            ),
+        };
+
+        let mut app = Self {
+            paths,
+            snippets,
+            settings,
+            results,
+            search: String::new(),
+            view: View::Choose,
+            chooser_group: None,
+            selected_result: 0,
+            selected_group: 0,
+            selected_snippet: 0,
+            edit_group_name: String::new(),
+            edit_title: String::new(),
+            edit_body: String::new(),
+            status,
+            error_message,
+            confirm_clear_all: false,
+            capturing_hotkey: false,
+            snippet_chain: Vec::new(),
+            insert_when_focus_lost: false,
+            hotkey_rx: rx,
+        };
+        app.load_selected_editor_snippet();
+        app
+    }
+
+    fn refresh_results(&mut self) {
+        if self
+            .chooser_group
+            .is_some_and(|group_index| group_index >= self.snippets.groups.len())
+        {
+            self.chooser_group = None;
+        }
+
+        self.results = search_snippets(&self.snippets, &self.search)
+            .into_iter()
+            .filter(|result| {
+                self.chooser_group
+                    .is_none_or(|group_index| result.group_index == group_index)
+            })
+            .collect();
+        if self.selected_result >= self.results.len() {
+            self.selected_result = self.results.len().saturating_sub(1);
+        }
+    }
+
+    fn select_chooser_group(&mut self, group: Option<usize>) {
+        self.chooser_group = group;
+        self.selected_result = 0;
+        self.refresh_results();
+    }
+
+    fn insert_selected(&mut self, ctx: &egui::Context) {
+        let used_chain = !self.snippet_chain.is_empty();
+        let insertion = if self.snippet_chain.is_empty() {
+            let Some(result) = self.results.get(self.selected_result).cloned() else {
+                return;
+            };
+            ChainInsertion {
+                title: result.title,
+                body: result.body,
+            }
+        } else {
+            ChainInsertion {
+                title: format!("{} snippets", self.snippet_chain.len()),
+                body: self
+                    .snippet_chain
+                    .iter()
+                    .map(|result| result.body.as_str())
+                    .collect::<Vec<_>>()
+                    .join(""),
+            }
+        };
+
+        if insertion.body.is_empty() {
+            return;
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
+        self.insert_when_focus_lost = false;
+
+        match platform::type_text(&insertion.body) {
+            Ok(()) => {
+                self.status = format!("Typed {}", insertion.title);
+                if used_chain {
+                    self.snippet_chain.clear();
+                }
+            }
+            Err(error) => {
+                self.show_error(error.to_string());
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            }
+        }
+
+        if !self.settings.close_after_insert {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        }
+    }
+
+    fn save_snippets(&mut self) {
+        match save_snippets(&self.paths, &self.snippets) {
+            Ok(()) => {
+                self.refresh_results();
+                self.status = "Snippets saved".to_string();
+            }
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+
+    fn import_droptext_snippets(&mut self) {
+        let path = match platform::open_droptext_file_dialog() {
+            Ok(Some(path)) => path,
+            Ok(None) => return,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+
+        match import_droptext_ini(&path) {
+            Ok(imported) => {
+                let group_count = imported.groups.len();
+                let snippet_count = imported
+                    .groups
+                    .iter()
+                    .map(|group| group.snippets.len())
+                    .sum::<usize>();
+                merge_snippet_file(&mut self.snippets, imported);
+                self.selected_group = 0;
+                self.selected_snippet = 0;
+                self.load_selected_editor_snippet();
+                match save_snippets(&self.paths, &self.snippets) {
+                    Ok(()) => {
+                        self.refresh_results();
+                        self.status =
+                            format!("Imported {snippet_count} snippets from {group_count} groups");
+                    }
+                    Err(error) => self.show_error(error.to_string()),
+                }
+            }
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+
+    fn export_typetext_snippets(&mut self) {
+        let path = match platform::open_snippets_export_dialog() {
+            Ok(Some(path)) => path,
+            Ok(None) => return,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+
+        match export_snippets(&path, &self.snippets) {
+            Ok(()) => {
+                self.status = format!("Exported snippets to {}", path.display());
+            }
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+
+    fn clear_all_snippets(&mut self) {
+        self.snippets = SnippetFile {
+            version: 1,
+            groups: Vec::new(),
+        };
+        self.selected_group = 0;
+        self.selected_snippet = 0;
+        self.chooser_group = None;
+        self.selected_result = 0;
+        self.snippet_chain.clear();
+        self.insert_when_focus_lost = false;
+        self.load_selected_editor_snippet();
+
+        match save_snippets(&self.paths, &self.snippets) {
+            Ok(()) => {
+                self.refresh_results();
+                self.status = "Cleared all snippets".to_string();
+            }
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+
+    fn add_result_to_chain(&mut self, index: usize) {
+        let Some(result) = self.results.get(index).cloned() else {
+            return;
+        };
+        self.snippet_chain.push(result);
+        self.insert_when_focus_lost = true;
+        self.status = format!(
+            "Queued {} snippets - click the target text field",
+            self.snippet_chain.len()
+        );
+    }
+
+    fn remove_result_from_chain(&mut self, index: usize) {
+        let Some(result) = self.results.get(index) else {
+            return;
+        };
+
+        if let Some(chain_index) = self.snippet_chain.iter().rposition(|queued| {
+            queued.group_index == result.group_index && queued.snippet_index == result.snippet_index
+        }) {
+            self.snippet_chain.remove(chain_index);
+            self.insert_when_focus_lost = !self.snippet_chain.is_empty();
+            self.status = if self.snippet_chain.is_empty() {
+                "Chain cleared".to_string()
+            } else {
+                format!(
+                    "Queued {} snippets - click the target text field",
+                    self.snippet_chain.len()
+                )
+            };
+        }
+    }
+
+    fn result_is_queued(&self, result: &SearchResult) -> bool {
+        self.snippet_chain.iter().any(|queued| {
+            queued.group_index == result.group_index && queued.snippet_index == result.snippet_index
+        })
+    }
+
+    fn insert_queued_into_current_focus(&mut self, ctx: &egui::Context) {
+        if !self.insert_when_focus_lost || self.snippet_chain.is_empty() {
+            return;
+        }
+
+        let insertion = ChainInsertion {
+            title: format!("{} snippets", self.snippet_chain.len()),
+            body: self
+                .snippet_chain
+                .iter()
+                .map(|result| result.body.as_str())
+                .collect::<Vec<_>>()
+                .join(""),
+        };
+
+        if insertion.body.is_empty() {
+            return;
+        }
+
+        self.insert_when_focus_lost = false;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
+
+        match platform::type_text_current_focus(&insertion.body) {
+            Ok(()) => {
+                self.status = format!("Typed {}", insertion.title);
+                self.snippet_chain.clear();
+            }
+            Err(error) => {
+                self.show_error(error.to_string());
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            }
+        }
+    }
+
+    fn save_settings(&mut self) {
+        self.settings.theme = normalize_theme(&self.settings.theme);
+        let startup_result = platform::set_startup_enabled(self.settings.open_on_startup);
+        if let Err(error) = startup_result {
+            self.show_error(error.to_string());
+            return;
+        }
+
+        match save_settings(&self.paths, &self.settings) {
+            Ok(()) => {
+                self.status =
+                    "Settings saved. Restart TypeText to apply hotkey changes.".to_string();
+            }
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+
+    fn handle_hotkey_capture(&mut self, ctx: &egui::Context) {
+        if !self.capturing_hotkey {
+            return;
+        }
+
+        let captured = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Key {
+                    key,
+                    physical_key: _,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                } => hotkey_from_event(*key, *modifiers),
+                _ => None,
+            })
+        });
+
+        if let Some(hotkey) = captured {
+            self.settings.hotkey = hotkey;
+            self.capturing_hotkey = false;
+            self.status = "Hotkey captured. Save settings and restart to apply it.".to_string();
+        }
+    }
+
+    fn selected_group_mut(&mut self) -> Option<&mut SnippetGroup> {
+        self.snippets.groups.get_mut(self.selected_group)
+    }
+
+    fn selected_snippet_mut(&mut self) -> Option<&mut Snippet> {
+        self.snippets
+            .groups
+            .get_mut(self.selected_group)?
+            .snippets
+            .get_mut(self.selected_snippet)
+    }
+
+    fn show_error(&mut self, message: impl Into<String>) {
+        self.error_message = Some(message.into());
+    }
+
+    fn load_selected_editor_snippet(&mut self) {
+        self.edit_group_name = self
+            .snippets
+            .groups
+            .get(self.selected_group)
+            .map(|group| group.name.clone())
+            .unwrap_or_default();
+
+        if let Some(snippet) = self
+            .snippets
+            .groups
+            .get(self.selected_group)
+            .and_then(|group| group.snippets.get(self.selected_snippet))
+        {
+            self.edit_title = snippet.title.clone();
+            self.edit_body = snippet.body.clone();
+        } else {
+            self.edit_title.clear();
+            self.edit_body.clear();
+        }
+    }
+}
+
+impl eframe::App for TypeTextApp {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_hotkey_capture(ctx);
+
+        while self.hotkey_rx.try_recv().is_ok() {
+            self.view = View::Choose;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+
+        let lost_focus = ctx.input(|input| {
+            input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+        });
+        if lost_focus {
+            self.insert_queued_into_current_focus(ctx);
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        let style = ctx.global_style();
+
+        egui::Panel::top("header")
+            .frame(
+                egui::Frame::new()
+                    .fill(style.visuals.panel_fill)
+                    .stroke(style.visuals.window_stroke)
+                    .inner_margin(egui::Margin::symmetric(10, 5)),
+            )
+            .show_inside(ui, |ui| self.ui_header(ui, &ctx));
+
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(style.visuals.panel_fill)
+                    .inner_margin(egui::Margin::same(8)),
+            )
+            .show_inside(ui, |ui| match self.view {
+                View::Choose => self.ui_choose(ui, &ctx),
+                View::Edit => self.ui_edit(ui),
+                View::Settings => self.ui_settings(ui, &ctx),
+            });
+
+        self.ui_clear_all_confirmation(&ctx);
+        self.ui_error_popup(&ctx);
+    }
+}
+
+impl TypeTextApp {
+    fn ui_clear_all_confirmation(&mut self, ctx: &egui::Context) {
+        if !self.confirm_clear_all {
+            return;
+        }
+
+        let snippet_count = self
+            .snippets
+            .groups
+            .iter()
+            .map(|group| group.snippets.len())
+            .sum::<usize>();
+        let group_count = self.snippets.groups.len();
+        let mut cancel = false;
+        let mut confirm = false;
+
+        egui::Area::new(egui::Id::new("clear_all_confirmation_dialog"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.set_max_width(460.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new("Clear all snippets?")
+                                    .strong()
+                                    .size(17.0),
+                            );
+                        });
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!(
+                                    "This will permanently remove {snippet_count} snippets from {group_count} groups."
+                                ))
+                                .size(12.5),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui
+                                    .add_sized([92.0, 26.0], egui::Button::new("Clear All"))
+                                    .clicked()
+                                {
+                                    confirm = true;
+                                }
+                                if ui
+                                    .add_sized([82.0, 26.0], egui::Button::new("Cancel"))
+                                    .clicked()
+                                {
+                                    cancel = true;
+                                }
+                            });
+                        });
+                    });
+            });
+
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            cancel = true;
+        }
+
+        if confirm {
+            self.confirm_clear_all = false;
+            self.clear_all_snippets();
+        } else if cancel {
+            self.confirm_clear_all = false;
+        }
+    }
+
+    fn ui_error_popup(&mut self, ctx: &egui::Context) {
+        let Some(message) = self.error_message.as_deref() else {
+            return;
+        };
+
+        let mut dismiss = false;
+        egui::Area::new(egui::Id::new("error_popup_dialog"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.set_max_width(460.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(egui::RichText::new("Error").strong().size(17.0));
+                        });
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.add(egui::Label::new(egui::RichText::new(message).size(12.5)).wrap());
+                        ui.add_space(10.0);
+                        ui.vertical_centered(|ui| {
+                            if ui
+                                .add_sized([82.0, 26.0], egui::Button::new("OK"))
+                                .clicked()
+                            {
+                                dismiss = true;
+                            }
+                        });
+                    });
+            });
+
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            dismiss = true;
+        }
+
+        if dismiss {
+            self.error_message = None;
+        }
+    }
+
+    fn ui_header(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.horizontal_centered(|ui| {
+            ui.label(
+                egui::RichText::new("TypeText")
+                    .strong()
+                    .size(16.0)
+                    .color(ui.visuals().strong_text_color()),
+            );
+            ui.label(
+                egui::RichText::new(format!("v{APP_VERSION}"))
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            ui.label(
+                egui::RichText::new(&self.status)
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Hide").clicked() {
+                    self.insert_when_focus_lost = false;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                }
+                nav_button(ui, &mut self.view, View::Settings, "Settings");
+                nav_button(ui, &mut self.view, View::Edit, "Edit");
+                nav_button(ui, &mut self.view, View::Choose, "Choose");
+            });
+        });
+    }
+
+    fn ui_choose(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        section_header(
+            ui,
+            "Choose Snippet",
+            format!("{} available", self.results.len()),
+        );
+        section_gap(ui);
+
+        framed_section(ui, "Search", "filter snippets", |ui| {
+            ui.horizontal(|ui| {
+                let response = ui.add_sized(
+                    [ui.available_width() - 88.0, 26.0],
+                    egui::TextEdit::singleline(&mut self.search).hint_text("Search snippets"),
+                );
+                if response.changed() {
+                    self.refresh_results();
+                }
+                if ui.button("Reload").clicked() {
+                    match load_or_create_snippets(&self.paths) {
+                        Ok(snippets) => {
+                            self.snippets = snippets;
+                            self.refresh_results();
+                            self.status = "Reloaded".to_string();
+                        }
+                        Err(error) => self.show_error(error.to_string()),
+                    }
+                }
+            });
+
+            ui.add_space(5.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add(egui::Button::selectable(
+                        self.chooser_group.is_none(),
+                        "All",
+                    ))
+                    .clicked()
+                {
+                    self.select_chooser_group(None);
+                }
+
+                let group_tabs: Vec<(usize, String)> = self
+                    .snippets
+                    .groups
+                    .iter()
+                    .enumerate()
+                    .map(|(index, group)| (index, group.name.clone()))
+                    .collect();
+
+                for (index, name) in group_tabs {
+                    if ui
+                        .add(egui::Button::selectable(
+                            self.chooser_group == Some(index),
+                            name,
+                        ))
+                        .clicked()
+                    {
+                        self.select_chooser_group(Some(index));
+                    }
+                }
+            });
+        });
+
+        if !self.snippet_chain.is_empty() {
+            section_gap(ui);
+            framed_section(
+                ui,
+                "Queue",
+                format!("{} snippets", self.snippet_chain.len()),
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Type Chain").clicked() {
+                            self.insert_selected(ctx);
+                        }
+                        if ui.button("Undo Last").clicked() {
+                            self.snippet_chain.pop();
+                            self.insert_when_focus_lost = !self.snippet_chain.is_empty();
+                            self.status = if self.snippet_chain.is_empty() {
+                                "Chain cleared".to_string()
+                            } else {
+                                format!(
+                                    "Queued {} snippets - click the target text field",
+                                    self.snippet_chain.len()
+                                )
+                            };
+                        }
+                        if ui.button("Clear").clicked() {
+                            self.snippet_chain.clear();
+                            self.insert_when_focus_lost = false;
+                            self.status = "Chain cleared".to_string();
+                        }
+                    });
+                    ui.add_space(3.0);
+                    ui.horizontal_wrapped(|ui| {
+                        for (index, result) in self.snippet_chain.iter().enumerate() {
+                            ui.label(
+                                egui::RichText::new(format!("{}. {}", index + 1, result.title))
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                        }
+                    });
+                },
+            );
+        }
+
+        section_gap(ui);
+        if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            self.insert_selected(ctx);
+        }
+
+        egui::ScrollArea::vertical()
+            .id_salt("choose_results")
+            .show(ui, |ui| {
+                for index in 0..self.results.len() {
+                    let result = self.results[index].clone();
+                    let selected = self.selected_result == index;
+                    let queued = self.result_is_queued(&result);
+                    let response = compact_snippet_row(ui, &result, selected, queued);
+                    if response.clicked() {
+                        self.selected_result = index;
+                        if queued
+                            && self.settings.queued_snippet_click_action
+                                == QueuedSnippetClickAction::Remove
+                        {
+                            self.remove_result_from_chain(index);
+                        } else {
+                            self.add_result_to_chain(index);
+                        }
+                    }
+                    if response.double_clicked() {
+                        self.selected_result = index;
+                        if self.snippet_chain.len() == 1 {
+                            self.insert_selected(ctx);
+                        }
+                    }
+                }
+            });
+    }
+
+    fn ui_edit(&mut self, ui: &mut egui::Ui) {
+        const MIN_LIST_HEIGHT: f32 = 82.0;
+        const MAX_SNIPPET_LIST_HEIGHT: f32 = 150.0;
+
+        let edit_size = ui.available_size();
+        let sidebar_width = edit_size
+            .x
+            .mul_add(0.24, 0.0)
+            .clamp(230.0, 310.0)
+            .min(edit_size.x * 0.36);
+
+        let (edit_rect, _) = ui.allocate_exact_size(edit_size, egui::Sense::hover());
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(edit_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Min)),
+            |ui| {
+                let (sidebar_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(sidebar_width, edit_rect.height()),
+                    egui::Sense::hover(),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(sidebar_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                    |ui| self.ui_edit_groups_sidebar(ui, sidebar_rect, sidebar_width),
+                );
+
+                ui.separator();
+
+                let editor_width = ui.available_width();
+                let editor_height = edit_rect.height();
+                let (editor_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(editor_width, editor_height),
+                    egui::Sense::hover(),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(editor_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                    |ui| self.ui_edit_snippet_editor(ui, MIN_LIST_HEIGHT, MAX_SNIPPET_LIST_HEIGHT),
+                );
+            },
+        );
+    }
+
+    fn ui_edit_groups_sidebar(
+        &mut self,
+        ui: &mut egui::Ui,
+        sidebar_rect: egui::Rect,
+        sidebar_width: f32,
+    ) {
+        ui.set_clip_rect(sidebar_rect);
+        ui.set_width_range(sidebar_width..=sidebar_width);
+        ui.set_height_range(sidebar_rect.height()..=sidebar_rect.height());
+
+        ui.horizontal(|ui| {
+            section_header(ui, "Groups", format!("{}", self.snippets.groups.len()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Add").on_hover_text("Add group").clicked() {
+                    self.add_editor_group();
+                }
+            });
+        });
+
+        section_gap(ui);
+        framed_section(ui, "Group Details", "selected group", |ui| {
+            ui.label(egui::RichText::new("Name").small());
+            ui.text_edit_singleline(&mut self.edit_group_name);
+            ui.add_space(3.0);
+            ui.horizontal(|ui| {
+                if ui.button("Save").clicked() {
+                    let name = self.edit_group_name.trim().to_string();
+                    if name.is_empty() {
+                        self.show_error("Group name is required");
+                    } else if let Some(group) = self.selected_group_mut() {
+                        group.name = name;
+                        self.save_snippets();
+                    }
+                }
+
+                if ui.button("Delete").clicked() && self.selected_group < self.snippets.groups.len()
+                {
+                    self.snippets.groups.remove(self.selected_group);
+                    self.selected_group = self.selected_group.saturating_sub(1);
+                    self.selected_snippet = 0;
+                    self.load_selected_editor_snippet();
+                    self.save_snippets();
+                }
+            });
+        });
+
+        section_gap(ui);
+
+        let list_top = ui.cursor().top();
+        let list_height = (sidebar_rect.bottom() - list_top).max(0.0);
+        let list_rect = egui::Rect::from_min_size(
+            egui::pos2(sidebar_rect.left(), list_top),
+            egui::vec2(sidebar_width, list_height),
+        );
+        ui.painter().rect_filled(
+            list_rect,
+            6.0,
+            ui.visuals().widgets.noninteractive.weak_bg_fill,
+        );
+        ui.painter().rect_stroke(
+            list_rect,
+            6.0,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+
+        let group_names: Vec<String> = self
+            .snippets
+            .groups
+            .iter()
+            .map(|group| group.name.clone())
+            .collect();
+
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(list_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+            |ui| {
+                ui.set_clip_rect(list_rect);
+                ui.set_width_range((list_rect.width() - 10.0)..=(list_rect.width() - 10.0));
+                ui.set_min_height(list_rect.height());
+                egui::ScrollArea::vertical()
+                    .id_salt("edit_groups")
+                    .max_height(list_rect.height())
+                    .min_scrolled_height(list_rect.height())
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add_space(3.0);
+                        for (index, name) in group_names.iter().enumerate() {
+                            if sidebar_group_row(ui, name, self.selected_group == index).clicked() {
+                                self.selected_group = index;
+                                self.selected_snippet = 0;
+                                self.load_selected_editor_snippet();
+                            }
+                            ui.add_space(1.0);
+                        }
+                    });
+            },
+        );
+    }
+
+    fn ui_edit_snippet_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        min_list_height: f32,
+        max_snippet_list_height: f32,
+    ) {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            let snippet_count = self
+                .snippets
+                .groups
+                .get(self.selected_group)
+                .map(|group| group.snippets.len())
+                .unwrap_or_default();
+            section_header(ui, "Snippets", format!("{snippet_count} in group"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Add").on_hover_text("Add snippet").clicked() {
+                    self.add_editor_snippet();
+                }
+            });
+        });
+
+        section_gap(ui);
+
+        let snippet_list_height =
+            (ui.available_height() * 0.28).clamp(min_list_height, max_snippet_list_height);
+        let snippet_titles: Vec<String> = self
+            .snippets
+            .groups
+            .get(self.selected_group)
+            .map(|group| {
+                group
+                    .snippets
+                    .iter()
+                    .map(|snippet| snippet.title.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        egui::ScrollArea::vertical()
+            .id_salt("edit_snippets")
+            .max_height(snippet_list_height)
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for (index, title) in snippet_titles.iter().enumerate() {
+                        let button_width =
+                            (title.chars().count() as f32 * 7.5 + 24.0).clamp(86.0, 200.0);
+                        if ui
+                            .add_sized(
+                                [button_width, 26.0],
+                                egui::Button::selectable(self.selected_snippet == index, title),
+                            )
+                            .clicked()
+                        {
+                            self.selected_snippet = index;
+                            self.load_selected_editor_snippet();
+                        }
+                    }
+                });
+            });
+
+        section_gap(ui);
+
+        framed_section(ui, "Edit Snippet", "draft autosaves when saved", |ui| {
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Delete").clicked() {
+                        self.delete_selected_editor_snippet();
+                    }
+                    if ui.button("Save").clicked() {
+                        self.save_selected_editor_snippet();
+                    }
+                });
+            });
+            ui.add_space(3.0);
+            ui.label(egui::RichText::new("Title").small());
+            ui.text_edit_singleline(&mut self.edit_title);
+            ui.label(egui::RichText::new("Body").small());
+            let body_height = (ui.available_height() - 2.0).max(108.0);
+            ui.add_sized(
+                [ui.available_width(), body_height],
+                egui::TextEdit::multiline(&mut self.edit_body),
+            );
+        });
+    }
+
+    fn add_editor_group(&mut self) {
+        self.snippets.groups.push(SnippetGroup {
+            name: "New Group".to_string(),
+            snippets: Vec::new(),
+        });
+        self.selected_group = self.snippets.groups.len() - 1;
+        self.selected_snippet = 0;
+        self.load_selected_editor_snippet();
+        self.save_snippets();
+    }
+
+    fn add_editor_snippet(&mut self) {
+        if self.snippets.groups.is_empty() {
+            self.snippets.groups.push(SnippetGroup {
+                name: "Common Replies".to_string(),
+                snippets: Vec::new(),
+            });
+            self.selected_group = 0;
+        }
+
+        if let Some(group) = self.selected_group_mut() {
+            group.snippets.push(Snippet {
+                title: "New Snippet".to_string(),
+                body: "Type your reusable text here.".to_string(),
+            });
+            self.selected_snippet = group.snippets.len() - 1;
+            self.load_selected_editor_snippet();
+            self.save_snippets();
+        }
+    }
+
+    fn save_selected_editor_snippet(&mut self) {
+        let body = self.edit_body.clone();
+        let title = self.edit_title.trim().to_string();
+        let title = if title.is_empty() {
+            title_from_body(&body)
+        } else {
+            Some(title)
+        };
+
+        let Some(title) = title else {
+            self.show_error("Snippet title or body is required");
+            return;
+        };
+
+        if let Some(snippet) = self.selected_snippet_mut() {
+            snippet.title = title.clone();
+            snippet.body = body;
+            self.edit_title = title;
+            self.save_snippets();
+            return;
+        }
+
+        if self.snippets.groups.is_empty() {
+            self.snippets.groups.push(SnippetGroup {
+                name: "Common Replies".to_string(),
+                snippets: Vec::new(),
+            });
+            self.selected_group = 0;
+        }
+
+        if let Some(group) = self.selected_group_mut() {
+            group.snippets.push(Snippet { title, body });
+            self.selected_snippet = group.snippets.len() - 1;
+            self.load_selected_editor_snippet();
+            self.save_snippets();
+        }
+    }
+
+    fn delete_selected_editor_snippet(&mut self) {
+        let selected_snippet = self.selected_snippet;
+        if let Some(group) = self.selected_group_mut() {
+            if selected_snippet < group.snippets.len() {
+                group.snippets.remove(selected_snippet);
+                self.selected_snippet = self.selected_snippet.saturating_sub(1);
+                self.load_selected_editor_snippet();
+                self.save_snippets();
+            }
+        }
+    }
+
+    fn ui_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        section_header(ui, "Settings", "preferences and app data");
+        section_gap(ui);
+
+        egui::ScrollArea::vertical()
+            .id_salt("settings_sections")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                framed_section(ui, "Hotkey", "global summon shortcut", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [230.0, 26.0],
+                            egui::TextEdit::singleline(&mut self.settings.hotkey),
+                        );
+                        let label = if self.capturing_hotkey {
+                            "Press keys..."
+                        } else {
+                            "Capture Hotkey"
+                        };
+                        if ui.button(label).clicked() {
+                            self.capturing_hotkey = !self.capturing_hotkey;
+                        }
+                    });
+                });
+
+                section_gap(ui);
+                framed_section(ui, "Startup", "launch behavior", |ui| {
+                    ui.checkbox(&mut self.settings.open_on_startup, "Open on Startup");
+                });
+
+                section_gap(ui);
+                framed_section(ui, "Typing", "insertion behavior", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Delay").small());
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.typing_delay_ms)
+                                .range(0..=2_000),
+                        );
+                        ui.label(egui::RichText::new("milliseconds").small().weak());
+                    });
+                    ui.checkbox(
+                        &mut self.settings.close_after_insert,
+                        "Hide after inserting text",
+                    );
+                });
+
+                section_gap(ui);
+                framed_section(ui, "Selection", "queued snippet clicks", |ui| {
+                    ui.horizontal(|ui| {
+                        for (value, label) in [
+                            (QueuedSnippetClickAction::AddAgain, "Add again"),
+                            (QueuedSnippetClickAction::Remove, "Remove from chain"),
+                        ] {
+                            if ui
+                                .selectable_label(
+                                    self.settings.queued_snippet_click_action == value,
+                                    label,
+                                )
+                                .clicked()
+                            {
+                                self.settings.queued_snippet_click_action = value;
+                            }
+                        }
+                    });
+                });
+
+                section_gap(ui);
+                framed_section(ui, "Appearance", "theme", |ui| {
+                    ui.horizontal(|ui| {
+                        for (value, label) in
+                            [("system", "System"), ("light", "Light"), ("dark", "Dark")]
+                        {
+                            if ui
+                                .add(egui::Button::selectable(
+                                    self.settings.theme == value,
+                                    label,
+                                ))
+                                .clicked()
+                            {
+                                self.settings.theme = value.to_string();
+                                apply_theme(ctx, &self.settings.theme);
+                                self.status = format!("Theme set to {label}");
+                            }
+                        }
+                    });
+                });
+
+                section_gap(ui);
+                framed_section(ui, "Snippet Data", "import, export, and reset", |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("Import").clicked() {
+                            self.import_droptext_snippets();
+                        }
+                        if ui.button("Export").clicked() {
+                            self.export_typetext_snippets();
+                        }
+                        if ui.button("Clear All").clicked() {
+                            self.confirm_clear_all = true;
+                        }
+                    });
+                });
+
+                section_gap(ui);
+                framed_section(ui, "Storage", "portable data folder", |ui| {
+                    ui.monospace(self.paths.data_dir.display().to_string());
+                    ui.label(egui::RichText::new(platform::tray_status()).small().weak());
+                    ui.add_space(2.0);
+                    if ui.button("Open Data").clicked() {
+                        if let Err(error) = platform::open_folder(&self.paths.data_dir) {
+                            self.show_error(error.to_string());
+                        }
+                    }
+                });
+
+                section_gap(ui);
+                framed_section(ui, "App", "save preferences or exit", |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("Save").clicked() {
+                            self.save_settings();
+                        }
+                        if ui.button("Quit").clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+                });
+            });
+    }
+}
+
+fn merge_snippet_file(target: &mut SnippetFile, imported: SnippetFile) {
+    target.version = target.version.max(imported.version);
+
+    for imported_group in imported.groups {
+        if let Some(group) = target
+            .groups
+            .iter_mut()
+            .find(|group| group.name == imported_group.name)
+        {
+            group.snippets.extend(imported_group.snippets);
+        } else {
+            target.groups.push(imported_group);
+        }
+    }
+}
+
+fn hotkey_from_event(key: egui::Key, modifiers: egui::Modifiers) -> Option<String> {
+    let key_name = hotkey_key_name(key)?;
+    let mut parts = Vec::new();
+
+    if modifiers.ctrl {
+        parts.push("Ctrl");
+    }
+    if modifiers.alt {
+        parts.push("Alt");
+    }
+    if modifiers.shift {
+        parts.push("Shift");
+    }
+    if modifiers.mac_cmd || modifiers.command {
+        parts.push("Win");
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    parts.push(key_name);
+    Some(parts.join("+"))
+}
+
+fn hotkey_key_name(key: egui::Key) -> Option<&'static str> {
+    match key {
+        egui::Key::Space => Some("Space"),
+        egui::Key::Enter => Some("Enter"),
+        egui::Key::Escape => Some("Escape"),
+        egui::Key::Tab => Some("Tab"),
+        egui::Key::A => Some("A"),
+        egui::Key::B => Some("B"),
+        egui::Key::C => Some("C"),
+        egui::Key::D => Some("D"),
+        egui::Key::E => Some("E"),
+        egui::Key::F => Some("F"),
+        egui::Key::G => Some("G"),
+        egui::Key::H => Some("H"),
+        egui::Key::I => Some("I"),
+        egui::Key::J => Some("J"),
+        egui::Key::K => Some("K"),
+        egui::Key::L => Some("L"),
+        egui::Key::M => Some("M"),
+        egui::Key::N => Some("N"),
+        egui::Key::O => Some("O"),
+        egui::Key::P => Some("P"),
+        egui::Key::Q => Some("Q"),
+        egui::Key::R => Some("R"),
+        egui::Key::S => Some("S"),
+        egui::Key::T => Some("T"),
+        egui::Key::U => Some("U"),
+        egui::Key::V => Some("V"),
+        egui::Key::W => Some("W"),
+        egui::Key::X => Some("X"),
+        egui::Key::Y => Some("Y"),
+        egui::Key::Z => Some("Z"),
+        egui::Key::F1 => Some("F1"),
+        egui::Key::F2 => Some("F2"),
+        egui::Key::F3 => Some("F3"),
+        egui::Key::F4 => Some("F4"),
+        egui::Key::F5 => Some("F5"),
+        egui::Key::F6 => Some("F6"),
+        egui::Key::F7 => Some("F7"),
+        egui::Key::F8 => Some("F8"),
+        egui::Key::F9 => Some("F9"),
+        egui::Key::F10 => Some("F10"),
+        egui::Key::F11 => Some("F11"),
+        egui::Key::F12 => Some("F12"),
+        _ => None,
+    }
+}
