@@ -98,7 +98,7 @@ mod windows_platform {
     }
 
     pub fn tray_status() -> &'static str {
-        "On Windows, TypeText can live hidden after launch and re-open from its global hotkey. Native tray menu wiring is next to the existing Shell_NotifyIcon reference work."
+        "TypeText stays running when hidden or closed, and re-opens from its global hotkey. Use Quit to exit."
     }
 
     fn send_unicode_unit(unit: u16) -> Result<()> {
@@ -541,7 +541,7 @@ end try
     }
 
     pub fn tray_status() -> &'static str {
-        "On macOS and Windows, TypeText can live hidden after launch and re-open from its global hotkey."
+        "TypeText stays running when hidden or closed, and re-opens from its global hotkey. Use Quit to exit."
     }
 
     extern "C" fn hotkey_handler(
@@ -1062,7 +1062,7 @@ mod linux_platform {
     }
 
     pub fn tray_status() -> &'static str {
-        "On Ubuntu, TypeText can re-open from its global hotkey through the desktop portal on Wayland or X11 key grabs on Xorg."
+        "TypeText stays running when hidden or closed, and re-opens from its global hotkey. Ubuntu uses the desktop portal on Wayland or X11 key grabs on Xorg."
     }
 
     fn register_portal_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {

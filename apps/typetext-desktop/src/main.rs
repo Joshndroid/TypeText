@@ -1,3 +1,5 @@
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod platform;
 
 use eframe::egui;
@@ -104,6 +106,7 @@ struct TypeTextApp {
     update_rx: Receiver<UpdateCheckMessage>,
     update_info: Option<UpdateInfo>,
     update_check_in_progress: bool,
+    allow_quit: bool,
 }
 
 fn apply_modern_style(ctx: &egui::Context) {
@@ -513,6 +516,7 @@ impl TypeTextApp {
             update_rx,
             update_info: None,
             update_check_in_progress: false,
+            allow_quit: false,
         };
         app.schedule_update_check(false);
         app.load_selected_editor_snippet();
@@ -571,9 +575,8 @@ impl TypeTextApp {
             return;
         }
 
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        self.hide_to_background(ctx);
         std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
-        self.insert_when_focus_lost = false;
 
         match platform::type_text(&insertion.body) {
             Ok(()) => {
@@ -590,6 +593,28 @@ impl TypeTextApp {
 
         if !self.settings.close_after_insert {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        }
+    }
+
+    fn hide_to_background(&mut self, ctx: &egui::Context) {
+        self.insert_when_focus_lost = false;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+    }
+
+    fn handle_window_lifecycle(&mut self, ctx: &egui::Context) {
+        let (close_requested, minimized) = ctx.input(|input| {
+            (
+                input.viewport().close_requested(),
+                input.viewport().minimized == Some(true),
+            )
+        });
+
+        if close_requested && !self.allow_quit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.hide_to_background(ctx);
+        } else if minimized {
+            self.hide_to_background(ctx);
         }
     }
 
@@ -813,8 +838,7 @@ impl TypeTextApp {
             return;
         }
 
-        self.insert_when_focus_lost = false;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        self.hide_to_background(ctx);
         std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
 
         match platform::type_text_current_focus(&insertion.body) {
@@ -912,12 +936,14 @@ impl TypeTextApp {
 
 impl eframe::App for TypeTextApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_window_lifecycle(ctx);
         self.handle_hotkey_capture(ctx);
         self.handle_update_messages();
         self.schedule_update_check(false);
 
         while self.hotkey_rx.try_recv().is_ok() {
             self.view = View::Choose;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
@@ -1100,8 +1126,7 @@ impl TypeTextApp {
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Hide").clicked() {
-                    self.insert_when_focus_lost = false;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    self.hide_to_background(ctx);
                 }
                 nav_button(ui, &mut self.view, View::Settings, "Settings");
                 nav_button(ui, &mut self.view, View::Edit, "Edit");
@@ -1742,6 +1767,7 @@ impl TypeTextApp {
                             self.save_settings();
                         }
                         if ui.button("Quit").clicked() {
+                            self.allow_quit = true;
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
