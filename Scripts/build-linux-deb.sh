@@ -49,7 +49,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: TypeText <noreply@example.com>
-Depends: libc6, libgcc-s1, libx11-6, libxcb1, libxkbcommon0, libwayland-client0, libasound2 | libasound2t64
+Depends: libc6, libgcc-s1, libx11-6, libxcb1, libxkbcommon0, libwayland-client0, libasound2 | libasound2t64, libgtk-3-0 | libgtk-3-0t64, libappindicator3-1 | libayatana-appindicator3-1
 Description: Reusable text snippets desktop app
  TypeText stores reusable snippets and inserts them into the active app.
 EOF

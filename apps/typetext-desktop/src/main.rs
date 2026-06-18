@@ -19,9 +19,7 @@ const LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/Joshndroid/TypeText/releases/latest";
 
 fn main() -> eframe::Result {
-    let icon =
-        eframe::icon_data::from_png_bytes(include_bytes!("../../../icon/typetext-appicon.png"))
-            .ok();
+    let icon = app_icon_data();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_TITLE)
         .with_inner_size([780.0, 520.0])
@@ -42,11 +40,22 @@ fn main() -> eframe::Result {
     )
 }
 
+fn app_icon_data() -> Option<egui::IconData> {
+    eframe::icon_data::from_png_bytes(include_bytes!("../../../icon/typetext-appicon.png")).ok()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
     Choose,
     Edit,
     Settings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrayCommand {
+    Open,
+    Settings,
+    Exit,
 }
 
 struct ChainInsertion {
@@ -103,10 +112,14 @@ struct TypeTextApp {
     snippet_chain: Vec<SearchResult>,
     insert_when_focus_lost: bool,
     hotkey_rx: Receiver<()>,
+    tray_rx: Receiver<TrayCommand>,
+    tray_handle: Option<platform::TrayHandle>,
     update_rx: Receiver<UpdateCheckMessage>,
     update_info: Option<UpdateInfo>,
     update_check_in_progress: bool,
     allow_quit: bool,
+    show_background_notice: bool,
+    background_notice_seen: bool,
 }
 
 fn apply_modern_style(ctx: &egui::Context) {
@@ -483,6 +496,7 @@ impl TypeTextApp {
         apply_theme(&cc.egui_ctx, &settings.theme);
         let results = search_snippets(&snippets, "");
         let (tx, rx) = mpsc::channel();
+        let (tray_tx, tray_rx) = mpsc::channel();
         let (_update_tx, update_rx) = mpsc::channel();
         let (status, error_message) = match platform::register_hotkey(settings.hotkey.clone(), tx) {
             Ok(()) => (format!("Ready - {}", settings.hotkey), None),
@@ -490,6 +504,14 @@ impl TypeTextApp {
                 "Ready".to_string(),
                 Some(format!("Hotkey unavailable: {error}")),
             ),
+        };
+        let icon_rgba = app_icon_data().map(|icon| (icon.rgba, icon.width, icon.height));
+        let (tray_handle, tray_error) = match platform::install_tray_icon(tray_tx, icon_rgba) {
+            Ok(handle) => (Some(handle), None),
+            Err(error) if cfg!(any(windows, target_os = "macos", target_os = "linux")) => {
+                (None, Some(format!("Tray unavailable: {error}")))
+            }
+            Err(_) => (None, None),
         };
 
         let mut app = Self {
@@ -513,11 +535,18 @@ impl TypeTextApp {
             snippet_chain: Vec::new(),
             insert_when_focus_lost: false,
             hotkey_rx: rx,
+            tray_rx,
+            tray_handle,
             update_rx,
             update_info: None,
             update_check_in_progress: false,
             allow_quit: false,
+            show_background_notice: false,
+            background_notice_seen: false,
         };
+        if let Some(error) = tray_error {
+            app.show_error(error);
+        }
         app.schedule_update_check(false);
         app.load_selected_editor_snippet();
         app
@@ -598,8 +627,28 @@ impl TypeTextApp {
 
     fn hide_to_background(&mut self, ctx: &egui::Context) {
         self.insert_when_focus_lost = false;
+        self.status = "Running in the background".to_string();
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+    }
+
+    fn request_hide_to_background(&mut self, ctx: &egui::Context) {
+        if self.background_notice_seen {
+            self.hide_to_background(ctx);
+        } else {
+            self.show_background_notice = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+    }
+
+    fn show_window(&mut self, ctx: &egui::Context, view: View) {
+        self.view = view;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        self.status = "Ready".to_string();
     }
 
     fn handle_window_lifecycle(&mut self, ctx: &egui::Context) {
@@ -612,9 +661,23 @@ impl TypeTextApp {
 
         if close_requested && !self.allow_quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.hide_to_background(ctx);
+            self.request_hide_to_background(ctx);
         } else if minimized {
-            self.hide_to_background(ctx);
+            self.request_hide_to_background(ctx);
+        }
+    }
+
+    fn handle_tray_commands(&mut self, ctx: &egui::Context) {
+        let _keep_tray_alive = self.tray_handle.as_ref();
+        while let Ok(command) = self.tray_rx.try_recv() {
+            match command {
+                TrayCommand::Open => self.show_window(ctx, View::Choose),
+                TrayCommand::Settings => self.show_window(ctx, View::Settings),
+                TrayCommand::Exit => {
+                    self.allow_quit = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
         }
     }
 
@@ -937,15 +1000,13 @@ impl TypeTextApp {
 impl eframe::App for TypeTextApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_window_lifecycle(ctx);
+        self.handle_tray_commands(ctx);
         self.handle_hotkey_capture(ctx);
         self.handle_update_messages();
         self.schedule_update_check(false);
 
         while self.hotkey_rx.try_recv().is_ok() {
-            self.view = View::Choose;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            self.show_window(ctx, View::Choose);
         }
 
         let lost_focus = ctx.input(|input| {
@@ -985,11 +1046,78 @@ impl eframe::App for TypeTextApp {
             });
 
         self.ui_clear_all_confirmation(&ctx);
+        self.ui_background_notice(&ctx);
         self.ui_error_popup(&ctx);
     }
 }
 
 impl TypeTextApp {
+    fn ui_background_notice(&mut self, ctx: &egui::Context) {
+        if !self.show_background_notice {
+            return;
+        }
+
+        let mut keep_running = false;
+        let mut exit = false;
+        egui::Area::new(egui::Id::new("background_notice_dialog"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.set_max_width(460.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new("TypeText will keep running")
+                                    .strong()
+                                    .size(17.0),
+                            );
+                        });
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(
+                                    "Closing or hiding the window leaves TypeText running in the background. Use the tray icon to Open, go to Settings, or Exit.",
+                                )
+                                .size(12.5),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui
+                                    .add_sized([82.0, 26.0], egui::Button::new("Exit"))
+                                    .clicked()
+                                {
+                                    exit = true;
+                                }
+                                if ui
+                                    .add_sized([128.0, 26.0], egui::Button::new("Keep Running"))
+                                    .clicked()
+                                {
+                                    keep_running = true;
+                                }
+                            });
+                        });
+                    });
+            });
+
+        if keep_running {
+            self.show_background_notice = false;
+            self.background_notice_seen = true;
+            self.hide_to_background(ctx);
+        } else if exit {
+            self.show_background_notice = false;
+            self.background_notice_seen = true;
+            self.allow_quit = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
     fn ui_clear_all_confirmation(&mut self, ctx: &egui::Context) {
         if !self.confirm_clear_all {
             return;
@@ -1126,7 +1254,7 @@ impl TypeTextApp {
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Hide").clicked() {
-                    self.hide_to_background(ctx);
+                    self.request_hide_to_background(ctx);
                 }
                 nav_button(ui, &mut self.view, View::Settings, "Settings");
                 nav_button(ui, &mut self.view, View::Edit, "Edit");

@@ -3,6 +3,82 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::{self, Sender};
 
+use crate::TrayCommand;
+
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+mod tray_integration {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+    use tray_icon::{
+        menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+        Icon, TrayIcon, TrayIconBuilder,
+    };
+
+    pub struct TrayHandle {
+        _tray_icon: TrayIcon,
+    }
+
+    pub fn install_tray_icon(
+        tx: Sender<TrayCommand>,
+        icon_rgba: Option<(Vec<u8>, u32, u32)>,
+    ) -> Result<TrayHandle> {
+        let open_item = MenuItem::new("Open", true, None);
+        let settings_item = MenuItem::new("Settings", true, None);
+        let exit_item = MenuItem::new("Exit", true, None);
+        let open_id = open_item.id().clone();
+        let settings_id = settings_item.id().clone();
+        let exit_id = exit_item.id().clone();
+
+        let menu = Menu::new();
+        let separator = PredefinedMenuItem::separator();
+        menu.append_items(&[&open_item, &settings_item, &separator, &exit_item])
+            .context("Could not build tray menu")?;
+
+        let mut builder = TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("TypeText is running in the background");
+        if let Some((rgba, width, height)) = icon_rgba {
+            match Icon::from_rgba(rgba, width, height) {
+                Ok(icon) => builder = builder.with_icon(icon),
+                Err(error) => eprintln!("Could not load tray icon: {error}"),
+            }
+        }
+
+        let tray_icon = builder.build().context("Could not create tray icon")?;
+
+        thread::spawn(move || {
+            let menu_rx = MenuEvent::receiver();
+            loop {
+                if let Ok(event) = menu_rx.try_recv() {
+                    let command = if event.id == open_id {
+                        Some(TrayCommand::Open)
+                    } else if event.id == settings_id {
+                        Some(TrayCommand::Settings)
+                    } else if event.id == exit_id {
+                        Some(TrayCommand::Exit)
+                    } else {
+                        None
+                    };
+
+                    if let Some(command) = command {
+                        let should_exit = command == TrayCommand::Exit;
+                        let _ = tx.send(command);
+                        if should_exit {
+                            break;
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        });
+
+        Ok(TrayHandle {
+            _tray_icon: tray_icon,
+        })
+    }
+}
+
 #[cfg(windows)]
 mod windows_platform {
     use super::*;
@@ -103,7 +179,7 @@ mod windows_platform {
     }
 
     pub fn tray_status() -> &'static str {
-        "TypeText stays running when hidden or closed, and re-opens from its global hotkey. Use Quit to exit."
+        "TypeText stays running when hidden or closed, and re-opens from its tray icon or global hotkey. Use Exit in the tray menu or Quit here to close it."
     }
 
     fn send_unicode_unit(unit: u16) -> Result<()> {
@@ -583,7 +659,7 @@ end try
     }
 
     pub fn tray_status() -> &'static str {
-        "TypeText stays running when hidden or closed, and re-opens from its global hotkey. Use Quit to exit."
+        "TypeText stays running when hidden or closed, and re-opens from its tray icon or global hotkey. Use Exit in the tray menu or Quit here to close it."
     }
 
     extern "C" fn hotkey_handler(
@@ -854,6 +930,7 @@ mod linux_platform {
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
     use zbus::blocking::{Connection, Proxy};
+
     use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 
     type Display = c_void;
@@ -1104,7 +1181,7 @@ mod linux_platform {
     }
 
     pub fn tray_status() -> &'static str {
-        "TypeText stays running when hidden or closed, and re-opens from its global hotkey. Ubuntu uses the desktop portal on Wayland or X11 key grabs on Xorg."
+        "TypeText stays running when hidden or closed, and re-opens from its tray icon or global hotkey. Ubuntu uses the desktop portal on Wayland or X11 key grabs on Xorg."
     }
 
     fn register_portal_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
@@ -1639,14 +1716,26 @@ mod fallback_platform {
     }
 
     pub fn tray_status() -> &'static str {
-        "Tray integration is targeted at the Windows build."
+        "Tray integration is available on the Windows, macOS, and Linux builds."
+    }
+
+    pub struct TrayHandle;
+
+    pub fn install_tray_icon(
+        _tx: Sender<TrayCommand>,
+        _icon_rgba: Option<(Vec<u8>, u32, u32)>,
+    ) -> Result<TrayHandle> {
+        Err(anyhow!(
+            "Tray integration is available on Windows, macOS, and Linux."
+        ))
     }
 }
 
 #[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
 pub use fallback_platform::{
-    fetch_text, open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url,
-    register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
+    fetch_text, install_tray_icon, open_droptext_file_dialog, open_folder,
+    open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
+    tray_status, type_text, TrayHandle,
     type_text_current_focus,
 };
 #[cfg(target_os = "linux")]
@@ -1667,3 +1756,6 @@ pub use windows_platform::{
     register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
     type_text_current_focus,
 };
+
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+pub use tray_integration::{install_tray_icon, TrayHandle};

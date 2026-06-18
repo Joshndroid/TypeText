@@ -156,8 +156,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             curl \
+            libappindicator3-dev \
             libasound2-dev \
             libgl1-mesa-dev \
+            libgtk-3-dev \
             libwayland-dev \
             libx11-dev \
             libx11-xcb-dev \

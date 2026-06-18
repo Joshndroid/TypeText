@@ -37,7 +37,9 @@ $XDG_DATA_HOME/typetext/data or ~/.local/share/typetext/data
   desktops TypeText will show a hotkey or typing availability error.
 - Some desktop environments restrict synthetic input, especially if their
   portal backend does not expose keyboard input through RemoteDesktop.
-- Building from source on Ubuntu requires the X11 development package, typically
-  `libx11-dev`, in addition to the usual Rust desktop build dependencies.
+- Building from source on Ubuntu requires the X11, GTK, and AppIndicator
+  development packages, typically `libx11-dev`, `libgtk-3-dev`, and
+  `libappindicator3-dev`, in addition to the usual Rust desktop build
+  dependencies.
 - Linux should be treated as a supported experiment until tested on target
   distributions.
