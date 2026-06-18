@@ -35,9 +35,6 @@ runtime data uses simple JSON files.
   - target-application restore
   - text insertion through `osascript` / System Events
   - LaunchAgent startup integration
-- Linux/Ubuntu support for:
-  - XDG Desktop Portal global shortcut registration on Wayland
-  - X11 global hotkey registration on Xorg sessions
 - JSON snippet/settings storage
 
 ## Layout
@@ -69,13 +66,11 @@ data/
   settings.json
 ```
 
-Installable builds and the Linux AppImage use the normal per-user app data
-location:
+Installable builds use the normal per-user app data location:
 
 ```text
 Windows: %LOCALAPPDATA%\TypeText\data
 macOS:   ~/Library/Application Support/TypeText/data
-Linux:   $XDG_DATA_HOME/typetext/data or ~/.local/share/typetext/data
 ```
 
 ## Build And Run
@@ -90,8 +85,6 @@ TypeText-macOS.zip
 TypeText-macOS.dmg
 TypeText-Windows-x64.zip
 TypeText-Windows-x64-Setup.exe
-TypeText-Linux-<target>.AppImage
-typetext_<version>_amd64.deb
 ```
 
 To publish a GitHub Release, push a version tag in `vX.X.X` format:
@@ -101,9 +94,9 @@ git tag v0.2.1
 git push origin v0.2.1
 ```
 
-The workflow passes the tag through as `TYPETEXT_VERSION`, builds the macOS,
-Windows, and Linux portable apps and installable packages, then attaches
-them to the matching GitHub Release. `Scripts/generate-release-notes.sh`
+The workflow passes the tag through as `TYPETEXT_VERSION`, builds the macOS and
+Windows portable apps and installable packages, then attaches them to the
+matching GitHub Release. `Scripts/generate-release-notes.sh`
 generates the release page changelog from commits since the previous `vX.X.X`
 tag, plus a full diff link. That same version is compiled into the app UI and
 written into portable build metadata. GitHub displays a SHA-256 digest for each
@@ -123,7 +116,7 @@ For local builds that are not run from an exact Git tag, update `VERSION` first.
 You can also override any build explicitly:
 
 ```bash
-TYPETEXT_VERSION=v0.2.1 Scripts/build-linux-portable.sh
+TYPETEXT_VERSION=v0.2.1 Scripts/build-macos-app.sh
 ```
 
 TypeText checks that release feed at most once per day when update checks are
@@ -204,31 +197,6 @@ dist\TypeText-Windows-x64.zip
 dist\TypeText-Windows-x64-Setup.exe
 dist\TypeText-Windows-x64-Setup.exe.sha256
 ```
-
-### Linux
-
-Build the portable app:
-
-```bash
-Scripts/build-linux-portable.sh
-```
-
-Build the DEB package:
-
-```bash
-Scripts/build-linux-deb.sh
-```
-
-Outputs:
-
-```text
-dist/TypeText-Linux-<target>.AppImage
-dist/typetext_<version>_amd64.deb
-```
-
-Linux currently uses the shared Rust UI with XDG Desktop Portal support for
-global shortcuts and synthetic typing on Wayland. On X11/Xorg sessions, global
-hotkeys use X11 key grabs and snippet typing uses `xdotool`.
 
 ## macOS Permissions
 

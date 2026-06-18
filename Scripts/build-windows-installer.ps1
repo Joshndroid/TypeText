@@ -13,7 +13,6 @@ $env:TYPETEXT_VERSION = $Version
 
 & $PortableScript
 $ExePath = Join-Path $DistDir "TypeText.exe"
-Invoke-TypeTextOptionalSigning -Path $ExePath
 
 if (Test-Path $InstallerDir) {
     Remove-Item $InstallerDir -Recurse -Force

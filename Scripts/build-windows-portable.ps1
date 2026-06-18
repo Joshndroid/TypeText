@@ -28,11 +28,7 @@ if (Test-Path $DistDir) {
 
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 Copy-Item $ExeSource $ExeDest
-
-$IconSource = Join-Path $RootDir "icon\TypeText.ico"
-if (Test-Path $IconSource) {
-    Copy-Item $IconSource (Join-Path $DistDir "TypeText.ico")
-}
+Invoke-TypeTextOptionalSigning -Path $ExeDest
 
 $SnippetsSource = Join-Path $RootDir "examples\snippets.json"
 if (Test-Path $SnippetsSource) {
@@ -43,16 +39,6 @@ $SettingsSource = Join-Path $RootDir "examples\settings.json"
 if (Test-Path $SettingsSource) {
     Copy-Item $SettingsSource (Join-Path $DataDir "settings.json")
 }
-
-$BuildInfo = @"
-name=TypeText
-version=$Version
-target=$WindowsTarget
-architecture=x64
-portable=true
-entry=TypeText.exe
-"@
-$BuildInfo | Set-Content -Path (Join-Path $DistDir "build-info.txt") -Encoding UTF8
 
 if (Test-Path $ZipPath) {
     Remove-Item $ZipPath -Force

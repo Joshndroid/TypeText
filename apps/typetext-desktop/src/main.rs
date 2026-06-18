@@ -1623,7 +1623,7 @@ impl TypeTextApp {
 
         section_gap(ui);
 
-        framed_section(ui, "Edit Snippet", "draft autosaves when saved", |ui| {
+        framed_section(ui, "Edit Snippet", "", |ui| {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Delete").clicked() {
@@ -1951,16 +1951,6 @@ fn asset_platform_rank(name: &str) -> Option<u8> {
             "TypeText-Windows-x64.zip" => Some(1),
             _ => None,
         }
-    } else if cfg!(target_os = "linux") {
-        if name.starts_with("typetext_") && name.ends_with("_amd64.deb") {
-            Some(0)
-        } else if name.starts_with("TypeText-Linux-") && name.ends_with(".AppImage") {
-            Some(1)
-        } else if name.starts_with("TypeText-Linux-") && name.ends_with(".tar.gz") {
-            Some(2)
-        } else {
-            None
-        }
     } else {
         None
     }
@@ -2168,16 +2158,16 @@ mod tests {
             "TypeText-macOS.dmg"
         } else if cfg!(windows) {
             "TypeText-Windows-x64-Setup.exe"
-        } else if cfg!(target_os = "linux") {
-            "typetext_0.2.1_amd64.deb"
         } else {
             "unsupported"
         };
 
         assert_eq!(
             asset_platform_rank(matching_asset).is_some(),
-            cfg!(any(target_os = "macos", windows, target_os = "linux"))
+            cfg!(any(target_os = "macos", windows))
         );
+        assert!(asset_platform_rank("typetext_0.2.1_amd64.deb").is_none());
+        assert!(asset_platform_rank("TypeText-Linux-x86_64-unknown-linux-gnu.AppImage").is_none());
         assert!(asset_platform_rank("TypeText-source.zip").is_none());
     }
 }
