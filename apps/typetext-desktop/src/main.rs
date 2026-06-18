@@ -4,7 +4,7 @@ mod platform;
 
 use eframe::egui;
 use serde::Deserialize;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use typetext_core::{
     export_snippets, import_droptext_ini, load_or_create_settings, load_or_create_snippets,
@@ -19,6 +19,10 @@ const LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/Joshndroid/TypeText/releases/latest";
 
 fn main() -> eframe::Result {
+    if let Err(error) = platform::install_app_mutex() {
+        eprintln!("Could not install app mutex: {error}");
+    }
+
     let icon = app_icon_data();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_TITLE)
@@ -111,6 +115,8 @@ struct TypeTextApp {
     capturing_hotkey: bool,
     snippet_chain: Vec<SearchResult>,
     insert_when_focus_lost: bool,
+    registered_hotkey: Option<String>,
+    hotkey_tx: Sender<()>,
     hotkey_rx: Receiver<()>,
     tray_rx: Receiver<TrayCommand>,
     tray_handle: Option<platform::TrayHandle>,
@@ -499,13 +505,19 @@ impl TypeTextApp {
         let (tray_tx, tray_rx) = mpsc::channel();
         platform::install_reopen_handler(tray_tx.clone(), cc.egui_ctx.clone());
         let (_update_tx, update_rx) = mpsc::channel();
-        let (status, error_message) = match platform::register_hotkey(settings.hotkey.clone(), tx) {
-            Ok(()) => (format!("Ready - {}", settings.hotkey), None),
-            Err(error) => (
-                "Ready".to_string(),
-                Some(format!("Hotkey unavailable: {error}")),
-            ),
-        };
+        let (status, error_message, registered_hotkey) =
+            match platform::register_hotkey(settings.hotkey.clone(), tx.clone()) {
+                Ok(()) => (
+                    format!("Ready - {}", settings.hotkey),
+                    None,
+                    Some(settings.hotkey.clone()),
+                ),
+                Err(error) => (
+                    "Ready".to_string(),
+                    Some(format!("Hotkey unavailable: {error}")),
+                    None,
+                ),
+            };
         let icon_rgba = app_icon_data().map(|icon| (icon.rgba, icon.width, icon.height));
         let (tray_handle, tray_error) =
             match platform::install_tray_icon(tray_tx, cc.egui_ctx.clone(), icon_rgba) {
@@ -536,6 +548,8 @@ impl TypeTextApp {
             capturing_hotkey: false,
             snippet_chain: Vec::new(),
             insert_when_focus_lost: false,
+            registered_hotkey,
+            hotkey_tx: tx,
             hotkey_rx: rx,
             tray_rx,
             tray_handle,
@@ -734,7 +748,7 @@ impl TypeTextApp {
     }
 
     fn export_typetext_snippets(&mut self) {
-        let path = match platform::open_snippets_export_dialog() {
+        let path = match platform::open_snippets_export_dialog(&self.paths.data_dir) {
             Ok(Some(path)) => path,
             Ok(None) => return,
             Err(error) => {
@@ -925,16 +939,14 @@ impl TypeTextApp {
 
     fn save_settings(&mut self) {
         self.settings.theme = normalize_theme(&self.settings.theme);
-        let startup_result = platform::set_startup_enabled(self.settings.open_on_startup);
-        if let Err(error) = startup_result {
-            self.show_error(error.to_string());
-            return;
-        }
-
-        match save_settings(&self.paths, &self.settings) {
+        match save_settings_with_effects(
+            &self.paths,
+            &mut self.settings,
+            &self.hotkey_tx,
+            &mut self.registered_hotkey,
+        ) {
             Ok(()) => {
-                self.status =
-                    "Settings saved. Restart TypeText to apply hotkey changes.".to_string();
+                self.status = "Settings saved. Hotkey updated.".to_string();
             }
             Err(error) => self.show_error(error.to_string()),
         }
@@ -961,7 +973,7 @@ impl TypeTextApp {
         if let Some(hotkey) = captured {
             self.settings.hotkey = hotkey;
             self.capturing_hotkey = false;
-            self.status = "Hotkey captured. Save settings and restart to apply it.".to_string();
+            self.status = "Hotkey captured. Save settings to apply it.".to_string();
         }
     }
 
@@ -1393,13 +1405,14 @@ impl TypeTextApp {
                     let queued = self.result_is_queued(&result);
                     let response = compact_snippet_row(ui, &result, selected, queued);
                     if response.clicked() {
-                        self.selected_result = index;
                         if queued
                             && self.settings.queued_snippet_click_action
                                 == QueuedSnippetClickAction::Remove
                         {
                             self.remove_result_from_chain(index);
+                            self.selected_result = usize::MAX;
                         } else {
+                            self.selected_result = index;
                             self.add_result_to_chain(index);
                         }
                     }
@@ -1884,7 +1897,7 @@ impl TypeTextApp {
                 });
 
                 section_gap(ui);
-                framed_section(ui, "Storage", "portable data folder", |ui| {
+                framed_section(ui, "Storage", "data folder", |ui| {
                     ui.monospace(self.paths.data_dir.display().to_string());
                     ui.label(egui::RichText::new(platform::tray_status()).small().weak());
                     ui.add_space(2.0);
@@ -1913,7 +1926,11 @@ impl TypeTextApp {
 
 fn check_latest_release() -> anyhow::Result<Option<UpdateInfo>> {
     let raw = platform::fetch_text(LATEST_RELEASE_API_URL)?;
-    let release: GitHubRelease = serde_json::from_str(&raw)?;
+    let raw = raw.trim_start_matches('\u{feff}').trim();
+    let release_start = raw
+        .find('{')
+        .ok_or_else(|| anyhow::anyhow!("Update response did not contain JSON"))?;
+    let release: GitHubRelease = serde_json::from_str(&raw[release_start..])?;
 
     if compare_versions(&release.tag_name, APP_VERSION) != std::cmp::Ordering::Greater {
         return Ok(None);
@@ -2007,6 +2024,61 @@ fn merge_snippet_file(target: &mut SnippetFile, imported: SnippetFile) {
     }
 }
 
+trait SettingsEffects {
+    fn set_startup_enabled(&self, enabled: bool) -> anyhow::Result<()>;
+    fn reregister_hotkey(&self, hotkey: &str, tx: Sender<()>) -> anyhow::Result<()>;
+}
+
+struct PlatformSettingsEffects;
+
+impl SettingsEffects for PlatformSettingsEffects {
+    fn set_startup_enabled(&self, enabled: bool) -> anyhow::Result<()> {
+        platform::set_startup_enabled(enabled)
+    }
+
+    fn reregister_hotkey(&self, hotkey: &str, tx: Sender<()>) -> anyhow::Result<()> {
+        platform::reregister_hotkey(hotkey.to_string(), tx)
+    }
+}
+
+fn save_settings_with_effects(
+    paths: &PortablePaths,
+    settings: &mut AppSettings,
+    hotkey_tx: &Sender<()>,
+    registered_hotkey: &mut Option<String>,
+) -> anyhow::Result<()> {
+    save_settings_with_effects_impl(
+        paths,
+        settings,
+        hotkey_tx,
+        registered_hotkey,
+        &PlatformSettingsEffects,
+    )
+}
+
+fn save_settings_with_effects_impl(
+    paths: &PortablePaths,
+    settings: &mut AppSettings,
+    hotkey_tx: &Sender<()>,
+    registered_hotkey: &mut Option<String>,
+    effects: &dyn SettingsEffects,
+) -> anyhow::Result<()> {
+    settings.theme = normalize_theme(&settings.theme);
+    effects.set_startup_enabled(settings.open_on_startup)?;
+    let requested_hotkey = settings.hotkey.clone();
+    if registered_hotkey.as_deref() != Some(requested_hotkey.as_str()) {
+        if let Err(error) = effects.reregister_hotkey(&requested_hotkey, hotkey_tx.clone()) {
+            if let Some(previous_hotkey) = registered_hotkey.clone() {
+                settings.hotkey = previous_hotkey;
+            }
+            return Err(error);
+        }
+        *registered_hotkey = Some(requested_hotkey);
+    }
+    save_settings(paths, settings)?;
+    Ok(())
+}
+
 fn hotkey_from_event(key: egui::Key, modifiers: egui::Modifiers) -> Option<String> {
     let key_name = hotkey_key_name(key)?;
     let mut parts = Vec::new();
@@ -2087,7 +2159,120 @@ fn hotkey_key_name(key: egui::Key) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
     use std::cmp::Ordering;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[derive(Default)]
+    struct MockSettingsEffects {
+        startup_calls: RefCell<Vec<bool>>,
+        hotkey_calls: RefCell<Vec<String>>,
+        hotkey_result: RefCell<Option<anyhow::Error>>,
+    }
+
+    impl SettingsEffects for MockSettingsEffects {
+        fn set_startup_enabled(&self, enabled: bool) -> anyhow::Result<()> {
+            self.startup_calls.borrow_mut().push(enabled);
+            Ok(())
+        }
+
+        fn reregister_hotkey(&self, hotkey: &str, _tx: Sender<()>) -> anyhow::Result<()> {
+            self.hotkey_calls.borrow_mut().push(hotkey.to_string());
+            if let Some(error) = self.hotkey_result.borrow_mut().take() {
+                Err(error)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn test_paths(name: &str) -> PortablePaths {
+        let data_dir = std::env::temp_dir().join(format!(
+            "typetext-desktop-{name}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&data_dir).unwrap();
+        PortablePaths {
+            snippets_path: data_dir.join("snippets.json"),
+            settings_path: data_dir.join("settings.json"),
+            data_dir,
+        }
+    }
+
+    fn cleanup_paths(paths: &PortablePaths) {
+        let _ = fs::remove_dir_all(&paths.data_dir);
+    }
+
+    fn read_settings_hotkey(settings_path: PathBuf) -> String {
+        let raw = fs::read_to_string(settings_path).unwrap();
+        let saved: AppSettings = serde_json::from_str(&raw).unwrap();
+        saved.hotkey
+    }
+
+    #[test]
+    fn saving_changed_hotkey_reregisters_and_persists_immediately() {
+        let paths = test_paths("hotkey-save-success");
+        let (tx, _rx) = mpsc::channel();
+        let effects = MockSettingsEffects::default();
+        let mut settings = AppSettings {
+            hotkey: "Ctrl+Alt+K".to_string(),
+            open_on_startup: true,
+            ..Default::default()
+        };
+        let mut registered_hotkey = Some("Ctrl+Alt+Space".to_string());
+
+        save_settings_with_effects_impl(
+            &paths,
+            &mut settings,
+            &tx,
+            &mut registered_hotkey,
+            &effects,
+        )
+        .unwrap();
+
+        assert_eq!(
+            effects.hotkey_calls.borrow().as_slice(),
+            &["Ctrl+Alt+K".to_string()]
+        );
+        assert_eq!(registered_hotkey, Some("Ctrl+Alt+K".to_string()));
+        assert_eq!(
+            read_settings_hotkey(paths.settings_path.clone()),
+            "Ctrl+Alt+K"
+        );
+        cleanup_paths(&paths);
+    }
+
+    #[test]
+    fn saving_changed_hotkey_restores_previous_value_when_reregister_fails() {
+        let paths = test_paths("hotkey-save-failure");
+        let (tx, _rx) = mpsc::channel();
+        let effects = MockSettingsEffects::default();
+        *effects.hotkey_result.borrow_mut() = Some(anyhow::anyhow!("taken"));
+        let mut settings = AppSettings {
+            hotkey: "Ctrl+Alt+K".to_string(),
+            ..Default::default()
+        };
+        let mut registered_hotkey = Some("Ctrl+Alt+Space".to_string());
+
+        let error = save_settings_with_effects_impl(
+            &paths,
+            &mut settings,
+            &tx,
+            &mut registered_hotkey,
+            &effects,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "taken");
+        assert_eq!(settings.hotkey, "Ctrl+Alt+Space");
+        assert_eq!(registered_hotkey, Some("Ctrl+Alt+Space".to_string()));
+        assert!(!paths.settings_path.exists());
+        cleanup_paths(&paths);
+    }
 
     #[test]
     fn hotkey_capture_does_not_treat_platform_command_as_win() {

@@ -110,10 +110,17 @@ impl PortablePaths {
         let app_dir = exe
             .parent()
             .ok_or_else(|| anyhow!("Could not determine executable directory"))?;
+        if cfg!(windows) && is_windows_installed_app_dir(app_dir) {
+            let data_dir =
+                platform_data_dir().ok_or_else(|| anyhow!("Could not locate user data folder"))?;
+            let user_paths = Self::from_data_dir(data_dir);
+            copy_seed_data_if_missing(&Self::from_app_dir(app_dir), &user_paths);
+            return Ok(user_paths);
+        }
+
         let portable_paths = Self::from_app_dir(app_dir);
         if !is_macos_app_bundle_executable_dir(app_dir)
-            && (portable_paths.data_dir.exists()
-                || fs::create_dir_all(&portable_paths.data_dir).is_ok())
+            && writable_data_dir(&portable_paths.data_dir)
         {
             return Ok(portable_paths);
         }
@@ -139,6 +146,45 @@ impl PortablePaths {
     }
 }
 
+fn writable_data_dir(data_dir: &Path) -> bool {
+    if fs::create_dir_all(data_dir).is_err() {
+        return false;
+    }
+
+    let probe_path = data_dir.join(".typetext-write-test");
+    match fs::write(&probe_path, b"") {
+        Ok(()) => {
+            let _ = fs::remove_file(probe_path);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn is_windows_installed_app_dir(app_dir: &Path) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+
+    ["ProgramFiles", "ProgramFiles(x86)"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .any(|program_files| app_dir.starts_with(program_files))
+}
+
+fn copy_seed_data_if_missing(source: &PortablePaths, target: &PortablePaths) {
+    let _ = fs::create_dir_all(&target.data_dir);
+    for (source_path, target_path) in [
+        (&source.snippets_path, &target.snippets_path),
+        (&source.settings_path, &target.settings_path),
+    ] {
+        if source_path.exists() && !target_path.exists() {
+            let _ = fs::copy(source_path, target_path);
+        }
+    }
+}
+
 fn is_macos_app_bundle_executable_dir(app_dir: &Path) -> bool {
     if !cfg!(target_os = "macos") {
         return false;
@@ -149,11 +195,19 @@ fn is_macos_app_bundle_executable_dir(app_dir: &Path) -> bool {
         _ => return false,
     };
     let bundle_dir = match contents_dir.parent() {
-        Some(path) if contents_dir.file_name().is_some_and(|name| name == "Contents") => path,
+        Some(path)
+            if contents_dir
+                .file_name()
+                .is_some_and(|name| name == "Contents") =>
+        {
+            path
+        }
         _ => return false,
     };
 
-    bundle_dir.extension().is_some_and(|extension| extension == "app")
+    bundle_dir
+        .extension()
+        .is_some_and(|extension| extension == "app")
 }
 
 pub fn load_or_create_snippets(paths: &PortablePaths) -> Result<SnippetFile> {
@@ -509,5 +563,42 @@ Two="Second"
         assert!(!is_macos_app_bundle_executable_dir(Path::new(
             "/tmp/TypeText/MacOS"
         )));
+    }
+
+    #[test]
+    fn detects_windows_installed_app_dir_only_on_windows() {
+        let app_dir = Path::new(r"C:\Program Files\TypeText");
+
+        assert_eq!(is_windows_installed_app_dir(app_dir), cfg!(windows));
+    }
+
+    #[test]
+    fn copy_seed_data_only_fills_missing_user_files() {
+        let base = std::env::temp_dir().join(format!(
+            "typetext-seed-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source = PortablePaths::from_data_dir(base.join("source"));
+        let target = PortablePaths::from_data_dir(base.join("target"));
+        fs::create_dir_all(&source.data_dir).unwrap();
+        fs::create_dir_all(&target.data_dir).unwrap();
+        fs::write(&source.snippets_path, "source snippets").unwrap();
+        fs::write(&source.settings_path, "source settings").unwrap();
+        fs::write(&target.settings_path, "user settings").unwrap();
+
+        copy_seed_data_if_missing(&source, &target);
+
+        assert_eq!(
+            fs::read_to_string(&target.snippets_path).unwrap(),
+            "source snippets"
+        );
+        assert_eq!(
+            fs::read_to_string(&target.settings_path).unwrap(),
+            "user settings"
+        );
+        let _ = fs::remove_dir_all(base);
     }
 }

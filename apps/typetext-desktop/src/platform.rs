@@ -89,49 +89,145 @@ mod windows_platform {
     use std::os::windows::process::CommandExt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicIsize, Ordering};
+    use std::sync::mpsc::Receiver;
+    use std::sync::OnceLock;
     use std::thread;
+    use std::time::Duration;
+    use windows::core::w;
     use windows::Win32::Foundation::{HWND, WPARAM};
+    use windows::Win32::System::Threading::CreateMutexW;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         RegisterHotKey, SendInput, UnregisterHotKey, HOT_KEY_MODIFIERS, INPUT, INPUT_0,
         INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOD_ALT, MOD_CONTROL,
-        MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
+        MOD_SHIFT, MOD_WIN, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetForegroundWindow, GetMessageW, SetForegroundWindow, TranslateMessage,
-        MSG, WM_HOTKEY,
+        DispatchMessageW, GetForegroundWindow, PeekMessageW, SetForegroundWindow, TranslateMessage,
+        MSG, PM_REMOVE, WM_HOTKEY,
     };
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const HOTKEY_ID: i32 = 0x5454;
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
+    static HOTKEY_MANAGER: OnceLock<Sender<HotkeyCommand>> = OnceLock::new();
+
+    pub fn install_app_mutex() -> Result<()> {
+        unsafe {
+            CreateMutexW(None, false, w!("TypeTextAppMutex"))
+                .context("Could not create TypeText app mutex")?;
+        }
+        Ok(())
+    }
+
+    enum HotkeyCommand {
+        Reregister {
+            hotkey: String,
+            reply_tx: Sender<Result<(), String>>,
+        },
+    }
+
+    struct ActiveHotkey {
+        hotkey: String,
+        modifiers: HOT_KEY_MODIFIERS,
+        key: u32,
+        tx: Sender<()>,
+    }
 
     pub fn register_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
         let (modifiers, key) =
             parse_hotkey(&hotkey).ok_or_else(|| anyhow!("Invalid hotkey: {hotkey}"))?;
         let (ready_tx, ready_rx) = mpsc::channel();
-        thread::spawn(move || unsafe {
-            if let Err(error) = RegisterHotKey(None, HOTKEY_ID, modifiers, key) {
-                let _ = ready_tx.send(Err(format!("RegisterHotKey failed: {error}")));
-                return;
-            }
-            let _ = ready_tx.send(Ok(()));
-
-            let mut msg = MSG::default();
-            while GetMessageW(&mut msg, None, 0, 0).into() {
-                if msg.message == WM_HOTKEY && msg.wParam == WPARAM(HOTKEY_ID as usize) {
-                    remember_target_window();
-                    let _ = tx.send(());
-                }
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-
-            let _ = UnregisterHotKey(None, HOTKEY_ID);
+        let (command_tx, command_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let active = ActiveHotkey {
+                hotkey,
+                modifiers,
+                key,
+                tx,
+            };
+            run_hotkey_manager(active, command_rx, ready_tx);
         });
+        let _ = HOTKEY_MANAGER.set(command_tx);
         ready_rx
             .recv()
             .unwrap_or_else(|_| Err("Hotkey registration thread stopped".to_string()))
             .map_err(|error| anyhow!(error))
+    }
+
+    pub fn reregister_hotkey(hotkey: String, _tx: Sender<()>) -> Result<()> {
+        parse_hotkey(&hotkey).ok_or_else(|| anyhow!("Invalid hotkey: {hotkey}"))?;
+        let manager = HOTKEY_MANAGER
+            .get()
+            .ok_or_else(|| anyhow!("Hotkey registration thread is not running"))?;
+        let (reply_tx, reply_rx) = mpsc::channel();
+        manager
+            .send(HotkeyCommand::Reregister { hotkey, reply_tx })
+            .map_err(|_| anyhow!("Hotkey registration thread stopped"))?;
+        reply_rx
+            .recv()
+            .unwrap_or_else(|_| Err("Hotkey registration thread stopped".to_string()))
+            .map_err(|error| anyhow!(error))
+    }
+
+    fn run_hotkey_manager(
+        mut active: ActiveHotkey,
+        command_rx: Receiver<HotkeyCommand>,
+        ready_tx: Sender<Result<(), String>>,
+    ) {
+        unsafe {
+            if let Err(error) = RegisterHotKey(None, HOTKEY_ID, active.modifiers, active.key) {
+                let _ = ready_tx.send(Err(format!("RegisterHotKey failed: {error}")));
+                return;
+            }
+        }
+        let _ = ready_tx.send(Ok(()));
+
+        loop {
+            while let Ok(command) = command_rx.try_recv() {
+                match command {
+                    HotkeyCommand::Reregister { hotkey, reply_tx } => {
+                        let result = replace_hotkey(&mut active, hotkey);
+                        let _ = reply_tx.send(result);
+                    }
+                }
+            }
+
+            unsafe {
+                let mut msg = MSG::default();
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).into() {
+                    if msg.message == WM_HOTKEY && msg.wParam == WPARAM(HOTKEY_ID as usize) {
+                        remember_target_window();
+                        let _ = active.tx.send(());
+                    }
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn replace_hotkey(active: &mut ActiveHotkey, hotkey: String) -> Result<(), String> {
+        let (modifiers, key) =
+            parse_hotkey(&hotkey).ok_or_else(|| format!("Invalid hotkey: {hotkey}"))?;
+        unsafe {
+            let _ = UnregisterHotKey(None, HOTKEY_ID);
+            if let Err(error) = RegisterHotKey(None, HOTKEY_ID, modifiers, key) {
+                let restore_result = RegisterHotKey(None, HOTKEY_ID, active.modifiers, active.key);
+                if let Err(restore_error) = restore_result {
+                    return Err(format!(
+                        "RegisterHotKey failed: {error}; could not restore {}: {restore_error}",
+                        active.hotkey
+                    ));
+                }
+                return Err(format!("RegisterHotKey failed: {error}"));
+            }
+        }
+        active.hotkey = hotkey;
+        active.modifiers = modifiers;
+        active.key = key;
+        Ok(())
     }
 
     pub fn type_text(text: &str) -> Result<()> {
@@ -144,6 +240,8 @@ mod windows_platform {
     }
 
     fn send_text(text: &str) -> Result<()> {
+        release_modifier_keys()?;
+        thread::sleep(Duration::from_millis(20));
         for unit in text.encode_utf16() {
             send_unicode_unit(unit)?;
         }
@@ -321,13 +419,14 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
     }
 
-    pub fn open_snippets_export_dialog() -> Result<Option<PathBuf>> {
+    pub fn open_snippets_export_dialog(initial_dir: &Path) -> Result<Option<PathBuf>> {
         let script = r#"
 Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.SaveFileDialog
 $dialog.Title = 'Export TypeText snippets'
 $dialog.Filter = 'TypeText snippets (*.json)|*.json|All files (*.*)|*.*'
 $dialog.FileName = 'snippets.json'
+$dialog.InitialDirectory = $args[0]
 $dialog.DefaultExt = 'json'
 $dialog.AddExtension = $true
 $dialog.OverwritePrompt = $true
@@ -338,6 +437,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 "#;
         let output = hidden_command("powershell")
             .args(["-NoProfile", "-STA", "-Command", script])
+            .arg(initial_dir)
             .output()
             .context("Could not open Windows save dialog")?;
 
@@ -351,6 +451,35 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             Ok(None)
         } else {
             Ok(Some(PathBuf::from(path)))
+        }
+    }
+
+    fn release_modifier_keys() -> Result<()> {
+        for key in [VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN] {
+            send_key_up(key)?;
+        }
+        Ok(())
+    }
+
+    fn send_key_up(key: VIRTUAL_KEY) -> Result<()> {
+        let mut inputs = [INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: key,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        }];
+
+        let sent = unsafe { SendInput(&mut inputs, size_of::<INPUT>() as i32) };
+        if sent == 0 {
+            Err(anyhow!("SendInput failed"))
+        } else {
+            Ok(())
         }
     }
 
@@ -469,6 +598,7 @@ mod macos_platform {
             options: UInt32,
             hot_key_ref: *mut EventHotKeyRef,
         ) -> OSStatus;
+        fn UnregisterEventHotKey(hot_key_ref: EventHotKeyRef) -> OSStatus;
         fn RunApplicationEventLoop();
     }
 
@@ -498,6 +628,15 @@ mod macos_platform {
     static TARGET_APPLICATION: OnceLock<Mutex<Option<String>>> = OnceLock::new();
     static REOPEN_TX: OnceLock<Sender<TrayCommand>> = OnceLock::new();
     static REOPEN_REPAINT_CTX: OnceLock<egui::Context> = OnceLock::new();
+    static HOTKEY_STATE: OnceLock<Mutex<Option<ActiveHotkey>>> = OnceLock::new();
+
+    #[derive(Clone)]
+    struct ActiveHotkey {
+        hotkey: String,
+        modifiers: UInt32,
+        key_code: UInt32,
+        hotkey_ref: usize,
+    }
 
     pub fn register_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
         let (modifiers, key_code) =
@@ -527,19 +666,23 @@ mod macos_platform {
                 return;
             }
 
-            let hotkey_id = EventHotKeyID {
-                signature: HOTKEY_SIGNATURE,
-                id: HOTKEY_ID,
-            };
-            let mut hotkey_ref = ptr::null_mut();
-            let register_status =
-                RegisterEventHotKey(key_code, modifiers, hotkey_id, target, 0, &mut hotkey_ref);
-            if register_status != NO_ERR {
-                let _ = Box::from_raw(tx);
-                let _ = ready_tx.send(Err(format!(
-                    "RegisterEventHotKey failed with status {register_status}"
-                )));
-                return;
+            match register_carbon_hotkey(key_code, modifiers, target) {
+                Ok(hotkey_ref) => {
+                    let state = HOTKEY_STATE.get_or_init(|| Mutex::new(None));
+                    *state.lock().expect("hotkey state poisoned") = Some(ActiveHotkey {
+                        hotkey,
+                        modifiers,
+                        key_code,
+                        hotkey_ref: hotkey_ref as usize,
+                    });
+                }
+                Err(register_status) => {
+                    let _ = Box::from_raw(tx);
+                    let _ = ready_tx.send(Err(format!(
+                        "RegisterEventHotKey failed with status {register_status}"
+                    )));
+                    return;
+                }
             }
             let _ = ready_tx.send(Ok(()));
 
@@ -549,6 +692,80 @@ mod macos_platform {
             .recv()
             .unwrap_or_else(|_| Err("Hotkey registration thread stopped".to_string()))
             .map_err(|error| anyhow!(error))
+    }
+
+    pub fn install_app_mutex() -> Result<()> {
+        Ok(())
+    }
+
+    pub fn reregister_hotkey(hotkey: String, _tx: Sender<()>) -> Result<()> {
+        let (modifiers, key_code) =
+            parse_hotkey(&hotkey).ok_or_else(|| anyhow!("Invalid hotkey: {hotkey}"))?;
+        let state = HOTKEY_STATE
+            .get()
+            .ok_or_else(|| anyhow!("Hotkey registration thread is not running"))?;
+        let mut state = state.lock().expect("hotkey state poisoned");
+        let active = state
+            .clone()
+            .ok_or_else(|| anyhow!("Hotkey is not currently registered"))?;
+
+        unsafe {
+            let unregister_status = UnregisterEventHotKey(active.hotkey_ref as EventHotKeyRef);
+            if unregister_status != NO_ERR {
+                return Err(anyhow!(
+                    "UnregisterEventHotKey failed with status {unregister_status}"
+                ));
+            }
+
+            let target = GetApplicationEventTarget();
+            match register_carbon_hotkey(key_code, modifiers, target) {
+                Ok(hotkey_ref) => {
+                    *state = Some(ActiveHotkey {
+                        hotkey,
+                        modifiers,
+                        key_code,
+                        hotkey_ref: hotkey_ref as usize,
+                    });
+                    Ok(())
+                }
+                Err(register_status) => {
+                    match register_carbon_hotkey(active.key_code, active.modifiers, target) {
+                        Ok(restored_ref) => {
+                            *state = Some(ActiveHotkey {
+                                hotkey_ref: restored_ref as usize,
+                                ..active
+                            });
+                            Err(anyhow!(
+                                "RegisterEventHotKey failed with status {register_status}"
+                            ))
+                        }
+                        Err(restore_status) => Err(anyhow!(
+                            "RegisterEventHotKey failed with status {register_status}; could not restore {}: {restore_status}",
+                            active.hotkey
+                        )),
+                    }
+                }
+            }
+        }
+    }
+
+    unsafe fn register_carbon_hotkey(
+        key_code: UInt32,
+        modifiers: UInt32,
+        target: EventTargetRef,
+    ) -> std::result::Result<EventHotKeyRef, OSStatus> {
+        let hotkey_id = EventHotKeyID {
+            signature: HOTKEY_SIGNATURE,
+            id: HOTKEY_ID,
+        };
+        let mut hotkey_ref = ptr::null_mut();
+        let register_status =
+            RegisterEventHotKey(key_code, modifiers, hotkey_id, target, 0, &mut hotkey_ref);
+        if register_status != NO_ERR {
+            Err(register_status)
+        } else {
+            Ok(hotkey_ref)
+        }
     }
 
     pub fn install_reopen_handler(tx: Sender<TrayCommand>, repaint_ctx: egui::Context) {
@@ -662,16 +879,19 @@ end try
         }
     }
 
-    pub fn open_snippets_export_dialog() -> Result<Option<PathBuf>> {
+    pub fn open_snippets_export_dialog(initial_dir: &Path) -> Result<Option<PathBuf>> {
+        let initial_dir = initial_dir.display().to_string();
         let script = r#"
 try
-    set chosenFile to choose file name with prompt "Export TypeText snippets" default name "snippets.json"
+    set initialFolder to POSIX file (system attribute "TYPETEXT_EXPORT_DIR")
+    set chosenFile to choose file name with prompt "Export TypeText snippets" default name "snippets.json" default location initialFolder
     return POSIX path of chosenFile
 on error number -128
     return ""
 end try
 "#;
         let output = Command::new("osascript")
+            .env("TYPETEXT_EXPORT_DIR", initial_dir)
             .arg("-e")
             .arg(script)
             .output()
@@ -1004,6 +1224,10 @@ mod fallback_platform {
         ))
     }
 
+    pub fn reregister_hotkey(_hotkey: String, _tx: Sender<()>) -> Result<()> {
+        Ok(())
+    }
+
     pub fn type_text(_text: &str) -> Result<()> {
         Err(anyhow!("Typing is not implemented on this platform yet."))
     }
@@ -1048,7 +1272,7 @@ mod fallback_platform {
         ))
     }
 
-    pub fn open_snippets_export_dialog() -> Result<Option<std::path::PathBuf>> {
+    pub fn open_snippets_export_dialog(_initial_dir: &Path) -> Result<Option<std::path::PathBuf>> {
         Err(anyhow!(
             "Native snippets export picker is only implemented on macOS and Windows."
         ))
@@ -1076,6 +1300,10 @@ mod fallback_platform {
 
     pub struct TrayHandle;
 
+    pub fn install_app_mutex() -> Result<()> {
+        Ok(())
+    }
+
     pub fn install_tray_icon(
         _tx: Sender<TrayCommand>,
         _repaint_ctx: eframe::egui::Context,
@@ -1089,21 +1317,22 @@ mod fallback_platform {
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub use fallback_platform::{
-    fetch_text, install_reopen_handler, install_tray_icon, open_droptext_file_dialog, open_folder,
-    open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
-    tray_status, type_text, type_text_current_focus, TrayHandle,
+    fetch_text, install_app_mutex, install_reopen_handler, install_tray_icon,
+    open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url, register_hotkey,
+    reregister_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
+    type_text_current_focus, TrayHandle,
 };
 #[cfg(target_os = "macos")]
 pub use macos_platform::{
-    fetch_text, install_reopen_handler, open_droptext_file_dialog, open_folder,
-    open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
-    tray_status, type_text, type_text_current_focus,
+    fetch_text, install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
+    open_snippets_export_dialog, open_url, register_hotkey, reregister_hotkey, set_startup_enabled,
+    startup_enabled, tray_status, type_text, type_text_current_focus,
 };
 #[cfg(windows)]
 pub use windows_platform::{
-    fetch_text, install_reopen_handler, open_droptext_file_dialog, open_folder,
-    open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
-    tray_status, type_text, type_text_current_focus,
+    fetch_text, install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
+    open_snippets_export_dialog, open_url, register_hotkey, reregister_hotkey, set_startup_enabled,
+    startup_enabled, tray_status, type_text, type_text_current_focus,
 };
 
 #[cfg(any(windows, target_os = "macos"))]

@@ -41,11 +41,13 @@ $InnoScript = @"
 #define MyAppVersion "$PackageVersion"
 #define MyAppPublisher "TypeText"
 #define MyAppExeName "TypeText.exe"
+#define MyAppMutex "TypeTextAppMutex"
 
 [Setup]
 AppId={{7D8E72A7-6E72-4B3B-9E50-7E03C792D98F}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
@@ -58,20 +60,48 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=$IconPath
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\{#MyAppExeName},0
+AppMutex={#MyAppMutex}
+CloseApplications=yes
+RestartApplications=no
 
 [Files]
 Source: "$DistDirForInno\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; IconIndex: 0
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; IconIndex: 0; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{localappdata}\TypeText"
+Type: filesandordirs; Name: "{userappdata}\TypeText"
+Type: files; Name: "{userappdata}\Microsoft\Windows\Start Menu\Programs\Startup\TypeText.lnk"
+Type: files; Name: "{userappdata}\Microsoft\Windows\Start Menu\Programs\Startup\TypeText.cmd"
+
+[Code]
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+  if CheckForMutexes('{#MyAppMutex}') then
+  begin
+    if MsgBox('{#MyAppName} is currently running. Click OK to close it and continue uninstalling, or Cancel to leave it installed.', mbConfirmation, MB_OKCANCEL) <> IDOK then
+    begin
+      Result := False;
+      Exit;
+    end;
+
+    Exec(ExpandConstant('{cmd}'), '/C taskkill /IM "{#MyAppExeName}" /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
 "@
 
 $InnoScript | Set-Content -Path $IssPath -Encoding UTF8
