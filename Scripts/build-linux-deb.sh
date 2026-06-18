@@ -26,8 +26,8 @@ cp "$BIN_SOURCE" "$PACKAGE_ROOT/usr/lib/typetext/TypeText"
 chmod 0755 "$PACKAGE_ROOT/usr/lib/typetext/TypeText"
 ln -s ../lib/typetext/TypeText "$PACKAGE_ROOT/usr/bin/typetext"
 
-if [[ -f "$ROOT_DIR/icon/typetext-appicon.png" ]]; then
-  cp "$ROOT_DIR/icon/typetext-appicon.png" \
+if [[ -f "$ROOT_DIR/icon/TypeText.iconset/icon_256x256.png" ]]; then
+  cp "$ROOT_DIR/icon/TypeText.iconset/icon_256x256.png" \
     "$PACKAGE_ROOT/usr/share/icons/hicolor/256x256/apps/typetext.png"
 fi
 
