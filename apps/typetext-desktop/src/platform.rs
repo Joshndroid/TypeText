@@ -83,6 +83,7 @@ mod tray_integration {
 mod windows_platform {
     use super::*;
     use std::mem::size_of;
+    use std::os::windows::process::CommandExt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicIsize, Ordering};
     use std::thread;
@@ -97,6 +98,7 @@ mod windows_platform {
         MSG, WM_HOTKEY,
     };
 
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const HOTKEY_ID: i32 = 0x5454;
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
 
@@ -251,15 +253,13 @@ mod windows_platform {
     }
 
     pub fn open_folder(path: &Path) -> Result<()> {
-        Command::new("explorer")
-            .arg(path)
-            .spawn()
-            .map(|_| ())
-            .map_err(Into::into)
+        let mut command = hidden_command("explorer");
+        command.arg(path).spawn().map(|_| ()).map_err(Into::into)
     }
 
     pub fn open_url(url: &str) -> Result<()> {
-        Command::new("rundll32")
+        let mut command = hidden_command("rundll32");
+        command
             .args(["url.dll,FileProtocolHandler", url])
             .spawn()
             .map(|_| ())
@@ -267,7 +267,7 @@ mod windows_platform {
     }
 
     pub fn fetch_text(url: &str) -> Result<String> {
-        let output = Command::new("powershell")
+        let output = hidden_command("powershell")
             .args([
                 "-NoProfile",
                 "-Command",
@@ -297,7 +297,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     [Console]::Out.Write($dialog.FileName)
 }
 "#;
-        let output = Command::new("powershell")
+        let output = hidden_command("powershell")
             .args(["-NoProfile", "-STA", "-Command", script])
             .output()
             .context("Could not open Windows file dialog")?;
@@ -330,7 +330,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     [Console]::Out.Write($dialog.FileName)
 }
 "#;
-        let output = Command::new("powershell")
+        let output = hidden_command("powershell")
             .args(["-NoProfile", "-STA", "-Command", script])
             .output()
             .context("Could not open Windows save dialog")?;
@@ -367,7 +367,7 @@ $shortcut.WorkingDirectory = Split-Path -Parent $targetPath
 $shortcut.IconLocation = "$targetPath,0"
 $shortcut.Save()
 "#;
-        let output = Command::new("powershell")
+        let output = hidden_command("powershell")
             .args(["-NoProfile", "-Command", script])
             .arg(shortcut_path)
             .arg(exe_path)
@@ -399,6 +399,12 @@ $shortcut.Save()
             PathBuf::from(appdata)
                 .join("Microsoft\\Windows\\Start Menu\\Programs\\Startup\\TypeText.cmd"),
         )
+    }
+
+    fn hidden_command(program: &str) -> Command {
+        let mut command = Command::new(program);
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
     }
 }
 
@@ -1746,8 +1752,7 @@ mod fallback_platform {
 pub use fallback_platform::{
     fetch_text, install_tray_icon, open_droptext_file_dialog, open_folder,
     open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
-    tray_status, type_text, TrayHandle,
-    type_text_current_focus,
+    tray_status, type_text, type_text_current_focus, TrayHandle,
 };
 #[cfg(target_os = "linux")]
 pub use linux_platform::{
