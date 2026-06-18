@@ -1776,10 +1776,6 @@ fn check_latest_release() -> anyhow::Result<Option<UpdateInfo>> {
     }))
 }
 
-fn asset_matches_platform(name: &str) -> bool {
-    asset_platform_rank(name).is_some()
-}
-
 fn asset_platform_rank(name: &str) -> Option<u8> {
     if cfg!(target_os = "macos") {
         match name {
@@ -1957,9 +1953,9 @@ mod tests {
         };
 
         assert_eq!(
-            asset_matches_platform(matching_asset),
+            asset_platform_rank(matching_asset).is_some(),
             cfg!(any(target_os = "macos", windows, target_os = "linux"))
         );
-        assert!(!asset_matches_platform("TypeText-source.zip"));
+        assert!(asset_platform_rank("TypeText-source.zip").is_none());
     }
 }
