@@ -498,6 +498,7 @@ impl TypeTextApp {
         let results = search_snippets(&snippets, "");
         let (tx, rx) = mpsc::channel();
         let (tray_tx, tray_rx) = mpsc::channel();
+        platform::install_reopen_handler(tray_tx.clone(), cc.egui_ctx.clone());
         let (_update_tx, update_rx) = mpsc::channel();
         let (status, error_message) = match platform::register_hotkey(settings.hotkey.clone(), tx) {
             Ok(()) => (format!("Ready - {}", settings.hotkey), None),
@@ -507,13 +508,14 @@ impl TypeTextApp {
             ),
         };
         let icon_rgba = app_icon_data().map(|icon| (icon.rgba, icon.width, icon.height));
-        let (tray_handle, tray_error) = match platform::install_tray_icon(tray_tx, icon_rgba) {
-            Ok(handle) => (Some(handle), None),
-            Err(error) if cfg!(any(windows, target_os = "macos", target_os = "linux")) => {
-                (None, Some(format!("Tray unavailable: {error}")))
-            }
-            Err(_) => (None, None),
-        };
+        let (tray_handle, tray_error) =
+            match platform::install_tray_icon(tray_tx, cc.egui_ctx.clone(), icon_rgba) {
+                Ok(handle) => (Some(handle), None),
+                Err(error) if cfg!(any(windows, target_os = "macos", target_os = "linux")) => {
+                    (None, Some(format!("Tray unavailable: {error}")))
+                }
+                Err(_) => (None, None),
+            };
 
         let mut app = Self {
             paths,
@@ -617,12 +619,12 @@ impl TypeTextApp {
             }
             Err(error) => {
                 self.show_error(error.to_string());
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                self.bring_window_to_front(ctx);
             }
         }
 
         if !self.settings.close_after_insert {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            self.bring_window_to_front(ctx);
         }
     }
 
@@ -646,10 +648,15 @@ impl TypeTextApp {
 
     fn show_window(&mut self, ctx: &egui::Context, view: View) {
         self.view = view;
+        self.bring_window_to_front(ctx);
+        self.status = "Ready".to_string();
+    }
+
+    fn bring_window_to_front(&self, ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        self.status = "Ready".to_string();
+        ctx.request_repaint();
     }
 
     fn handle_window_lifecycle(&mut self, ctx: &egui::Context) {
@@ -912,7 +919,7 @@ impl TypeTextApp {
             }
             Err(error) => {
                 self.show_error(error.to_string());
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                self.show_window(ctx, View::Choose);
             }
         }
     }

@@ -8,6 +8,7 @@ use crate::TrayCommand;
 #[cfg(any(windows, target_os = "macos"))]
 mod tray_integration {
     use super::*;
+    use eframe::egui;
     use std::thread;
     use std::time::Duration;
     use tray_icon::{
@@ -21,6 +22,7 @@ mod tray_integration {
 
     pub fn install_tray_icon(
         tx: Sender<TrayCommand>,
+        repaint_ctx: egui::Context,
         icon_rgba: Option<(Vec<u8>, u32, u32)>,
     ) -> Result<TrayHandle> {
         let open_item = MenuItem::new("Open", true, None);
@@ -64,6 +66,7 @@ mod tray_integration {
                     if let Some(command) = command {
                         let should_exit = command == TrayCommand::Exit;
                         let _ = tx.send(command);
+                        repaint_ctx.request_repaint();
                         if should_exit {
                             break;
                         }
@@ -183,6 +186,8 @@ mod windows_platform {
     pub fn tray_status() -> &'static str {
         "TypeText stays running when hidden or closed, and re-opens from its tray icon or global hotkey. Use Exit in the tray menu or Quit here to close it."
     }
+
+    pub fn install_reopen_handler(_tx: Sender<TrayCommand>, _repaint_ctx: eframe::egui::Context) {}
 
     fn send_unicode_unit(unit: u16) -> Result<()> {
         let mut inputs = [
@@ -411,6 +416,8 @@ $shortcut.Save()
 #[cfg(target_os = "macos")]
 mod macos_platform {
     use super::*;
+    use eframe::egui;
+    use std::ffi::c_char;
     use std::ffi::c_void;
     use std::path::PathBuf;
     use std::ptr;
@@ -425,6 +432,10 @@ mod macos_platform {
     type EventHandlerRef = *mut c_void;
     type EventHotKeyRef = *mut c_void;
     type EventHandlerUPP = extern "C" fn(EventHandlerCallRef, EventRef, *mut c_void) -> OSStatus;
+    type ObjcId = *mut c_void;
+    type ObjcSel = *mut c_void;
+    type ObjcClass = *mut c_void;
+    type ObjcImp = extern "C" fn(ObjcId, ObjcSel, ObjcId, bool) -> bool;
 
     #[repr(C)]
     struct EventTypeSpec {
@@ -460,6 +471,18 @@ mod macos_platform {
         fn RunApplicationEventLoop();
     }
 
+    #[link(name = "objc", kind = "dylib")]
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> ObjcClass;
+        fn sel_registerName(name: *const c_char) -> ObjcSel;
+        fn class_addMethod(
+            class: ObjcClass,
+            name: ObjcSel,
+            imp: ObjcImp,
+            types: *const c_char,
+        ) -> bool;
+    }
+
     const HOTKEY_SIGNATURE: UInt32 = u32::from_be_bytes(*b"TyTx");
     const HOTKEY_ID: UInt32 = 1;
     const K_EVENT_CLASS_KEYBOARD: UInt32 = u32::from_be_bytes(*b"keyb");
@@ -472,6 +495,8 @@ mod macos_platform {
 
     const NO_ERR: OSStatus = 0;
     static TARGET_APPLICATION: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    static REOPEN_TX: OnceLock<Sender<TrayCommand>> = OnceLock::new();
+    static REOPEN_REPAINT_CTX: OnceLock<egui::Context> = OnceLock::new();
 
     pub fn register_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
         let (modifiers, key_code) =
@@ -523,6 +548,31 @@ mod macos_platform {
             .recv()
             .unwrap_or_else(|_| Err("Hotkey registration thread stopped".to_string()))
             .map_err(|error| anyhow!(error))
+    }
+
+    pub fn install_reopen_handler(tx: Sender<TrayCommand>, repaint_ctx: egui::Context) {
+        let _ = REOPEN_TX.set(tx);
+        let _ = REOPEN_REPAINT_CTX.set(repaint_ctx);
+
+        unsafe {
+            let class = objc_getClass(c"WinitApplicationDelegate".as_ptr());
+            if class.is_null() {
+                return;
+            }
+
+            let selector =
+                sel_registerName(c"applicationShouldHandleReopen:hasVisibleWindows:".as_ptr());
+            if selector.is_null() {
+                return;
+            }
+
+            let _ = class_addMethod(
+                class,
+                selector,
+                application_should_handle_reopen,
+                c"B@:@B".as_ptr(),
+            );
+        }
     }
 
     pub fn type_text(text: &str) -> Result<()> {
@@ -677,6 +727,24 @@ end try
         let tx = unsafe { &*(user_data.cast::<Sender<()>>()) };
         let _ = tx.send(());
         NO_ERR
+    }
+
+    extern "C" fn application_should_handle_reopen(
+        _self: ObjcId,
+        _cmd: ObjcSel,
+        _application: ObjcId,
+        has_visible_windows: bool,
+    ) -> bool {
+        if !has_visible_windows {
+            if let Some(tx) = REOPEN_TX.get() {
+                let _ = tx.send(TrayCommand::Open);
+            }
+            if let Some(ctx) = REOPEN_REPAINT_CTX.get() {
+                ctx.request_repaint();
+            }
+        }
+
+        true
     }
 
     fn parse_hotkey(value: &str) -> Option<(UInt32, UInt32)> {
@@ -1194,6 +1262,7 @@ mod linux_platform {
 
     pub fn install_tray_icon(
         _tx: Sender<TrayCommand>,
+        _repaint_ctx: eframe::egui::Context,
         _icon_rgba: Option<(Vec<u8>, u32, u32)>,
     ) -> Result<TrayHandle> {
         Err(anyhow!(
@@ -1736,10 +1805,13 @@ mod fallback_platform {
         "Tray integration is available on the Windows, macOS, and Linux builds."
     }
 
+    pub fn install_reopen_handler(_tx: Sender<TrayCommand>, _repaint_ctx: eframe::egui::Context) {}
+
     pub struct TrayHandle;
 
     pub fn install_tray_icon(
         _tx: Sender<TrayCommand>,
+        _repaint_ctx: eframe::egui::Context,
         _icon_rgba: Option<(Vec<u8>, u32, u32)>,
     ) -> Result<TrayHandle> {
         Err(anyhow!(
@@ -1750,27 +1822,27 @@ mod fallback_platform {
 
 #[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
 pub use fallback_platform::{
-    fetch_text, install_tray_icon, open_droptext_file_dialog, open_folder,
+    fetch_text, install_reopen_handler, install_tray_icon, open_droptext_file_dialog, open_folder,
     open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
     tray_status, type_text, type_text_current_focus, TrayHandle,
 };
 #[cfg(target_os = "linux")]
 pub use linux_platform::{
-    fetch_text, install_tray_icon, open_droptext_file_dialog, open_folder,
+    fetch_text, install_reopen_handler, install_tray_icon, open_droptext_file_dialog, open_folder,
     open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
     tray_status, type_text, type_text_current_focus, TrayHandle,
 };
 #[cfg(target_os = "macos")]
 pub use macos_platform::{
-    fetch_text, open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url,
-    register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
-    type_text_current_focus,
+    fetch_text, install_reopen_handler, open_droptext_file_dialog, open_folder,
+    open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
+    tray_status, type_text, type_text_current_focus,
 };
 #[cfg(windows)]
 pub use windows_platform::{
-    fetch_text, open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url,
-    register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
-    type_text_current_focus,
+    fetch_text, install_reopen_handler, open_droptext_file_dialog, open_folder,
+    open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
+    tray_status, type_text, type_text_current_focus,
 };
 
 #[cfg(any(windows, target_os = "macos"))]
