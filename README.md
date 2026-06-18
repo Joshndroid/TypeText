@@ -109,8 +109,10 @@ git push origin v0.2.1
 
 The workflow passes the tag through as `TYPETEXT_VERSION`, builds the macOS,
 Windows, and Linux portable apps and installable packages, then attaches
-them to the matching GitHub Release. That same version is compiled into the app
-UI and written into portable build metadata.
+them to the matching GitHub Release. `Scripts/generate-release-notes.sh`
+generates the release page changelog from commits since the previous `vX.X.X`
+tag, plus a full diff link. That same version is compiled into the app UI and
+written into portable build metadata.
 
 Each release artifact is published with a matching `.sha256` checksum file.
 
