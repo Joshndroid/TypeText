@@ -2,8 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/Scripts/version.sh"
 CARGO_BIN="${CARGO_BIN:-cargo}"
 LINUX_TARGET="${TYPETEXT_LINUX_TARGET:-$(rustc -vV | awk '/host:/ { print $2 }')}"
+VERSION="$(typetext_version "$ROOT_DIR")"
+export TYPETEXT_VERSION="$VERSION"
 
 DIST_DIR="$ROOT_DIR/dist/TypeText-Linux"
 DATA_DIR="$DIST_DIR/data"
@@ -14,6 +17,7 @@ ARCHIVE_PATH="$ROOT_DIR/dist/TypeText-Linux-${LINUX_TARGET}.tar.gz"
 
 cd "$ROOT_DIR"
 echo "Building TypeText for Linux target: $LINUX_TARGET"
+echo "Version: $VERSION"
 "$CARGO_BIN" build --release --target "$LINUX_TARGET" -p typetext-desktop
 
 rm -rf "$DIST_DIR"
@@ -36,7 +40,7 @@ fi
 
 cat >"$DIST_DIR/build-info.txt" <<EOF
 name=TypeText
-version=0.1.0
+version=$VERSION
 target=$LINUX_TARGET
 portable=true
 entry=TypeText

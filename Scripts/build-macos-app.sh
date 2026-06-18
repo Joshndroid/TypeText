@@ -2,7 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/Scripts/version.sh"
 CARGO_BIN="${CARGO_BIN:-cargo}"
+VERSION="$(typetext_version "$ROOT_DIR")"
+PACKAGE_VERSION="$(typetext_package_version "$VERSION")"
+export TYPETEXT_VERSION="$VERSION"
 
 if ! command -v "$CARGO_BIN" >/dev/null 2>&1; then
   RUSTUP_CARGO="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo"
@@ -20,6 +24,7 @@ if [[ -d "$RUSTUP_TOOLCHAIN_BIN" ]]; then
 fi
 
 cd "$ROOT_DIR"
+echo "Version: $VERSION"
 "$CARGO_BIN" build --release -p typetext-desktop
 
 APP_DIR="$ROOT_DIR/dist/TypeText.app"
@@ -33,7 +38,9 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$MACOS_DIR/data"
 
 cp "$ROOT_DIR/target/release/typetext-desktop" "$MACOS_DIR/TypeText"
 chmod +x "$MACOS_DIR/TypeText"
-cp "$ROOT_DIR/apps/typetext-desktop/macos/Info.plist" "$CONTENTS_DIR/Info.plist"
+sed "s/__TYPETEXT_PACKAGE_VERSION__/$PACKAGE_VERSION/g" \
+  "$ROOT_DIR/apps/typetext-desktop/macos/Info.plist" \
+  >"$CONTENTS_DIR/Info.plist"
 
 if [[ -f "$ROOT_DIR/icon/TypeText.icns" ]]; then
   cp "$ROOT_DIR/icon/TypeText.icns" "$RESOURCES_DIR/TypeText.icns"

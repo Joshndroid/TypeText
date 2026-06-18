@@ -1,6 +1,9 @@
 $ErrorActionPreference = "Stop"
 
 $RootDir = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "version.ps1")
+$Version = Get-TypeTextVersion -RootDir $RootDir
+$env:TYPETEXT_VERSION = $Version
 $WindowsTarget = $env:TYPETEXT_WINDOWS_TARGET
 if ([string]::IsNullOrWhiteSpace($WindowsTarget)) {
     $WindowsTarget = "x86_64-pc-windows-msvc"
@@ -15,6 +18,7 @@ $ExeDest = Join-Path $DistDir "TypeText.exe"
 
 Set-Location $RootDir
 Write-Host "Building TypeText for Windows target: $WindowsTarget"
+Write-Host "Version: $Version"
 Write-Host "If the target is missing, run: rustup target add $WindowsTarget"
 cargo build --release --target $WindowsTarget -p typetext-desktop
 
@@ -42,7 +46,7 @@ if (Test-Path $SettingsSource) {
 
 $BuildInfo = @"
 name=TypeText
-version=0.1.0
+version=$Version
 target=$WindowsTarget
 architecture=x64
 portable=true

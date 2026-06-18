@@ -1,12 +1,15 @@
 $ErrorActionPreference = "Stop"
 
 $RootDir = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "version.ps1")
 $PortableScript = Join-Path $PSScriptRoot "build-windows-portable.ps1"
 $DistDir = Join-Path $RootDir "dist\TypeText-Windows"
 $InstallerDir = Join-Path $RootDir "dist\installer-windows"
 $OutputDir = Join-Path $RootDir "dist"
 $IssPath = Join-Path $InstallerDir "TypeText.iss"
-$Version = "0.1.0"
+$Version = Get-TypeTextVersion -RootDir $RootDir
+$PackageVersion = Get-TypeTextPackageVersion -Version $Version
+$env:TYPETEXT_VERSION = $Version
 
 & $PortableScript
 
@@ -34,7 +37,7 @@ $IconPath = (Join-Path $RootDir "icon\TypeText.ico").Replace("\", "\\")
 
 $InnoScript = @"
 #define MyAppName "TypeText"
-#define MyAppVersion "$Version"
+#define MyAppVersion "$PackageVersion"
 #define MyAppPublisher "TypeText"
 #define MyAppExeName "TypeText.exe"
 

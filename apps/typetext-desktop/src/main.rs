@@ -10,8 +10,8 @@ use typetext_core::{
     QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
 };
 
-const APP_VERSION: &str = "0.1.0";
-const APP_TITLE: &str = "TypeText 0.1.0";
+const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
+const APP_TITLE: &str = concat!("TypeText ", env!("TYPETEXT_APP_VERSION"));
 const UPDATE_CHECK_INTERVAL_SECONDS: u64 = 60 * 60 * 24;
 const LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/Joshndroid/TypeText/releases/latest";
@@ -1089,7 +1089,7 @@ impl TypeTextApp {
                     .color(ui.visuals().strong_text_color()),
             );
             ui.label(
-                egui::RichText::new(format!("v{APP_VERSION}"))
+                egui::RichText::new(APP_VERSION)
                     .small()
                     .color(ui.visuals().weak_text_color()),
             );
@@ -1938,10 +1938,10 @@ mod tests {
 
     #[test]
     fn compares_release_tags_against_app_versions() {
-        assert_eq!(compare_versions("v0.1.1", "0.1.0"), Ordering::Greater);
-        assert_eq!(compare_versions("v0.1.0", "0.1.0"), Ordering::Equal);
-        assert_eq!(compare_versions("v0.0.9", "0.1.0"), Ordering::Less);
-        assert_eq!(compare_versions("not-a-version", "0.1.0"), Ordering::Less);
+        assert_eq!(compare_versions("v0.2.2", "v0.2.1"), Ordering::Greater);
+        assert_eq!(compare_versions("v0.2.1", "v0.2.1"), Ordering::Equal);
+        assert_eq!(compare_versions("v0.2.0", "v0.2.1"), Ordering::Less);
+        assert_eq!(compare_versions("not-a-version", "v0.2.1"), Ordering::Less);
     }
 
     #[test]
@@ -1951,7 +1951,7 @@ mod tests {
         } else if cfg!(windows) {
             "TypeText-Windows-x64-Setup.exe"
         } else if cfg!(target_os = "linux") {
-            "typetext_0.1.0_amd64.deb"
+            "typetext_0.2.1_amd64.deb"
         } else {
             "unsupported"
         };

@@ -5,6 +5,9 @@ on:
     tags:
       - "v*.*.*"
 
+env:
+  TYPETEXT_VERSION: ${{ github.ref_name }}
+
 jobs:
   macos:
     name: macOS app
@@ -18,7 +21,6 @@ jobs:
 
       - name: Build portable and installable apps
         run: |
-          Scripts/build-macos-app.sh
           Scripts/build-macos-dmg.sh
 
       - name: Upload macOS app
@@ -90,7 +92,6 @@ jobs:
 
       - name: Build portable and installable apps
         run: |
-          bash Scripts/build-linux-portable.sh
           bash Scripts/build-linux-deb.sh
 
       - name: Upload Linux app

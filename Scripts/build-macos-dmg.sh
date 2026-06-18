@@ -6,9 +6,7 @@ APP_DIR="$ROOT_DIR/dist/TypeText.app"
 DMG_ROOT="$ROOT_DIR/dist/dmg-root"
 DMG_PATH="$ROOT_DIR/dist/TypeText-macOS.dmg"
 
-if [[ ! -d "$APP_DIR" ]]; then
-  "$ROOT_DIR/Scripts/build-macos-app.sh"
-fi
+"$ROOT_DIR/Scripts/build-macos-app.sh"
 
 rm -rf "$DMG_ROOT"
 mkdir -p "$DMG_ROOT"

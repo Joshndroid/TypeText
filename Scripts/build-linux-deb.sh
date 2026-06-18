@@ -2,16 +2,17 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${TYPETEXT_VERSION:-0.1.0}"
+source "$ROOT_DIR/Scripts/version.sh"
+VERSION="$(typetext_version "$ROOT_DIR")"
+PACKAGE_VERSION="$(typetext_package_version "$VERSION")"
+export TYPETEXT_VERSION="$VERSION"
 ARCH="${TYPETEXT_DEB_ARCH:-amd64}"
 LINUX_TARGET="${TYPETEXT_LINUX_TARGET:-$(rustc -vV | awk '/host:/ { print $2 }')}"
 PACKAGE_ROOT="$ROOT_DIR/dist/deb-root"
-DEB_PATH="$ROOT_DIR/dist/typetext_${VERSION}_${ARCH}.deb"
+DEB_PATH="$ROOT_DIR/dist/typetext_${PACKAGE_VERSION}_${ARCH}.deb"
 BIN_SOURCE="$ROOT_DIR/target/$LINUX_TARGET/release/typetext-desktop"
 
-if [[ ! -x "$BIN_SOURCE" ]]; then
-  "$ROOT_DIR/Scripts/build-linux-portable.sh"
-fi
+"$ROOT_DIR/Scripts/build-linux-portable.sh"
 
 rm -rf "$PACKAGE_ROOT"
 mkdir -p \
@@ -43,7 +44,7 @@ EOF
 
 cat >"$PACKAGE_ROOT/DEBIAN/control" <<EOF
 Package: typetext
-Version: $VERSION
+Version: $PACKAGE_VERSION
 Section: utils
 Priority: optional
 Architecture: $ARCH

@@ -3122,7 +3122,7 @@ dependencies = [
 
 [[package]]
 name = "typetext-core"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -3131,7 +3131,7 @@ dependencies = [
 
 [[package]]
 name = "typetext-desktop"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "eframe",

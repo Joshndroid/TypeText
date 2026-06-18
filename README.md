@@ -1,6 +1,6 @@
 # TypeText
 
-Version: `0.1.0`
+Version: `v0.2.1`
 
 TypeText is a small native Rust desktop app for storing reusable text snippets and typing them into the active app. Keep snippets in simple JSON files, open the chooser with a global hotkey, search or filter by group, then insert one snippet or a queued chain of snippets.
 
@@ -95,15 +95,24 @@ TypeText-Linux-<target>.tar.gz
 typetext_<version>_amd64.deb
 ```
 
-To publish a GitHub Release, push a version tag in `v.X.X.X` format:
+To publish a GitHub Release, push a version tag in `vX.X.X` format:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
-The workflow builds the macOS, Windows, and Linux portable archives and
-installable packages, then attaches them to the matching GitHub Release.
+The workflow passes the tag through as `TYPETEXT_VERSION`, builds the macOS,
+Windows, and Linux portable archives and installable packages, then attaches
+them to the matching GitHub Release. That same version is compiled into the app
+UI and written into portable build metadata.
+
+For local builds that are not run from an exact Git tag, update `VERSION` first.
+You can also override any build explicitly:
+
+```bash
+TYPETEXT_VERSION=v0.2.1 Scripts/build-linux-portable.sh
+```
 
 TypeText checks that release feed at most once per day when update checks are
 enabled. When a newer platform-specific package is available, the app offers a
