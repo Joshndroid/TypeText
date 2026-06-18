@@ -1,7 +1,5 @@
 # TypeText
 
-Version: `v0.2.1`
-
 TypeText is a small native Rust desktop app for storing reusable text snippets and typing them into the active app. Keep snippets in simple JSON files, open the chooser with a global hotkey, search or filter by group, then insert one snippet or a queued chain of snippets.
 
 The app is portable by design: no installer is required, and runtime data lives beside the executable in a local `data/` folder.
