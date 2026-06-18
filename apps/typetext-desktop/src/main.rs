@@ -2031,12 +2031,12 @@ fn hotkey_from_event(key: egui::Key, modifiers: egui::Modifiers) -> Option<Strin
     if modifiers.shift {
         parts.push("Shift");
     }
-    if modifiers.mac_cmd {
-        parts.push(if cfg!(target_os = "macos") {
-            "Cmd"
-        } else {
-            "Win"
-        });
+    if cfg!(target_os = "macos") {
+        if modifiers.mac_cmd || modifiers.command {
+            parts.push("Cmd");
+        }
+    } else if modifiers.mac_cmd {
+        parts.push("Win");
     }
 
     if parts.is_empty() {
@@ -2107,10 +2107,15 @@ mod tests {
             command: true,
             ..Default::default()
         };
+        let expected = if cfg!(target_os = "macos") {
+            "Ctrl+Cmd+Space"
+        } else {
+            "Ctrl+Space"
+        };
 
         assert_eq!(
             hotkey_from_event(egui::Key::Space, modifiers),
-            Some("Ctrl+Space".to_string())
+            Some(expected.to_string())
         );
     }
 
@@ -2132,6 +2137,21 @@ mod tests {
             hotkey_from_event(egui::Key::Space, modifiers),
             Some(format!("Ctrl+{command_name}+Space"))
         );
+    }
+
+    #[test]
+    fn hotkey_capture_accepts_macos_command_alias() {
+        let modifiers = egui::Modifiers {
+            command: true,
+            ..Default::default()
+        };
+        let expected = if cfg!(target_os = "macos") {
+            Some("Cmd+Space".to_string())
+        } else {
+            None
+        };
+
+        assert_eq!(hotkey_from_event(egui::Key::Space, modifiers), expected);
     }
 
     #[test]
