@@ -198,6 +198,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - name: Checkout release history
         uses: actions/checkout@v6
@@ -220,6 +223,17 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release-assets/TypeText-macOS.zip
+            release-assets/TypeText-macOS.dmg
+            release-assets/TypeText-Windows-x64.zip
+            release-assets/TypeText-Windows-x64-Setup.exe
+            release-assets/TypeText-Linux-*.AppImage
+            release-assets/typetext_*_amd64.deb
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3

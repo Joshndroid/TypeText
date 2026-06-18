@@ -81,7 +81,7 @@ Linux:   $XDG_DATA_HOME/typetext/data or ~/.local/share/typetext/data
 ## Build And Run
 
 Portable and installable releases are built natively per operating system by
-the GitHub Actions workflow in `.github/workflows/build-portable.yml`.
+the GitHub Actions workflow in `.github/workflows/release-builds.yml`.
 
 Release artifacts:
 
@@ -108,6 +108,16 @@ generates the release page changelog from commits since the previous `vX.X.X`
 tag, plus a full diff link. That same version is compiled into the app UI and
 written into portable build metadata. GitHub displays a SHA-256 digest for each
 release asset, so separate `.sha256` files are not attached.
+
+GitHub release artifacts also include build provenance attestations. Verify a
+downloaded artifact with the GitHub CLI:
+
+```bash
+gh attestation verify TypeText-Windows-x64.zip --repo fruitmac/TypeText
+```
+
+Attestations prove the artifact was produced by this repository's GitHub Actions
+workflow. They do not replace operating-system code signing.
 
 For local builds that are not run from an exact Git tag, update `VERSION` first.
 You can also override any build explicitly:
