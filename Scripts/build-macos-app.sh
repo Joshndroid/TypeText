@@ -112,20 +112,29 @@ fi
 
 if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
   echo "Ad-hoc signing TypeText.app for local testing."
-  run_codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+  run_codesign --force --sign "$CODESIGN_IDENTITY" "$MACOS_DIR/TypeText"
+  run_codesign --force --sign "$CODESIGN_IDENTITY" "$APP_DIR"
 else
-  echo "Developer ID signing TypeText.app."
+  echo "Developer ID signing TypeText executable."
   TIMESTAMP_ARG="$(codesign_timestamp_arg)"
   run_codesign \
     --force \
-    --deep \
     --options runtime \
     "$TIMESTAMP_ARG" \
     --entitlements "$ENTITLEMENTS_PATH" \
     --sign "$CODESIGN_IDENTITY" \
+    "$MACOS_DIR/TypeText"
+
+  echo "Developer ID signing TypeText.app."
+  run_codesign \
+    --force \
+    --options runtime \
+    "$TIMESTAMP_ARG" \
+    --sign "$CODESIGN_IDENTITY" \
     "$APP_DIR"
 fi
-codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+codesign --verify --strict --verbose=2 "$MACOS_DIR/TypeText"
+codesign --verify --strict --verbose=2 "$APP_DIR"
 
 rm -f "$ZIP_PATH"
 ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
