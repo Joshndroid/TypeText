@@ -2031,8 +2031,12 @@ fn hotkey_from_event(key: egui::Key, modifiers: egui::Modifiers) -> Option<Strin
     if modifiers.shift {
         parts.push("Shift");
     }
-    if modifiers.mac_cmd || modifiers.command {
-        parts.push("Win");
+    if modifiers.mac_cmd {
+        parts.push(if cfg!(target_os = "macos") {
+            "Cmd"
+        } else {
+            "Win"
+        });
     }
 
     if parts.is_empty() {
@@ -2095,6 +2099,40 @@ fn hotkey_key_name(key: egui::Key) -> Option<&'static str> {
 mod tests {
     use super::*;
     use std::cmp::Ordering;
+
+    #[test]
+    fn hotkey_capture_does_not_treat_platform_command_as_win() {
+        let modifiers = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            hotkey_from_event(egui::Key::Space, modifiers),
+            Some("Ctrl+Space".to_string())
+        );
+    }
+
+    #[test]
+    fn hotkey_capture_keeps_actual_command_modifier_separate() {
+        let modifiers = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            mac_cmd: true,
+            ..Default::default()
+        };
+        let command_name = if cfg!(target_os = "macos") {
+            "Cmd"
+        } else {
+            "Win"
+        };
+
+        assert_eq!(
+            hotkey_from_event(egui::Key::Space, modifiers),
+            Some(format!("Ctrl+{command_name}+Space"))
+        );
+    }
 
     #[test]
     fn compares_release_tags_against_app_versions() {

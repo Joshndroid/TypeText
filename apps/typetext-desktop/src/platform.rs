@@ -241,6 +241,7 @@ mod windows_platform {
                 "space" => key = Some(0x20),
                 "enter" | "return" => key = Some(0x0D),
                 "escape" | "esc" => key = Some(0x1B),
+                "tab" => key = Some(0x09),
                 part if part.len() == 1 => {
                     key = Some(part.as_bytes()[0].to_ascii_uppercase() as u32)
                 }
