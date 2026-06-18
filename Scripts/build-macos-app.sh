@@ -6,6 +6,8 @@ source "$ROOT_DIR/Scripts/version.sh"
 CARGO_BIN="${CARGO_BIN:-cargo}"
 MACOS_TARGET="${MACOS_TARGET:-aarch64-apple-darwin}"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+CODESIGN_TIMESTAMP="${CODESIGN_TIMESTAMP:-1}"
+CODESIGN_TIMEOUT_SECONDS="${CODESIGN_TIMEOUT_SECONDS:-900}"
 NOTARIZE="${NOTARIZE:-0}"
 APPLE_NOTARY_PROFILE="${APPLE_NOTARY_PROFILE:-}"
 APPLE_ID="${APPLE_ID:-}"
@@ -27,6 +29,27 @@ set_notarytool_args() {
   fi
 
   NOTARY_ARGS=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD")
+}
+
+run_codesign() {
+  if [[ "$CODESIGN_TIMEOUT_SECONDS" != "0" ]] && command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift @ARGV; exec @ARGV or die "exec failed: $!\n"' \
+      "$CODESIGN_TIMEOUT_SECONDS" \
+      codesign "$@"
+  else
+    codesign "$@"
+  fi
+}
+
+codesign_timestamp_arg() {
+  if [[ "$CODESIGN_TIMESTAMP" == "1" ]]; then
+    printf '%s' "--timestamp"
+  elif [[ "$CODESIGN_TIMESTAMP" == "0" ]]; then
+    printf '%s' "--timestamp=none"
+  else
+    echo "CODESIGN_TIMESTAMP must be 1 or 0." >&2
+    exit 1
+  fi
 }
 
 if [[ "$NOTARIZE" == "1" ]]; then
@@ -89,14 +112,15 @@ fi
 
 if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
   echo "Ad-hoc signing TypeText.app for local testing."
-  codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+  run_codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_DIR"
 else
   echo "Developer ID signing TypeText.app."
-  codesign \
+  TIMESTAMP_ARG="$(codesign_timestamp_arg)"
+  run_codesign \
     --force \
     --deep \
     --options runtime \
-    --timestamp \
+    "$TIMESTAMP_ARG" \
     --entitlements "$ENTITLEMENTS_PATH" \
     --sign "$CODESIGN_IDENTITY" \
     "$APP_DIR"

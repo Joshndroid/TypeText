@@ -7,6 +7,8 @@ APP_DIR="$ROOT_DIR/dist/TypeText.app"
 DMG_ROOT="$ROOT_DIR/dist/dmg-root"
 DMG_PATH="$ROOT_DIR/dist/TypeText-macOS.dmg"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+CODESIGN_TIMESTAMP="${CODESIGN_TIMESTAMP:-1}"
+CODESIGN_TIMEOUT_SECONDS="${CODESIGN_TIMEOUT_SECONDS:-900}"
 NOTARIZE="${NOTARIZE:-0}"
 APPLE_NOTARY_PROFILE="${APPLE_NOTARY_PROFILE:-}"
 APPLE_ID="${APPLE_ID:-}"
@@ -25,6 +27,27 @@ set_notarytool_args() {
   fi
 
   NOTARY_ARGS=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD")
+}
+
+run_codesign() {
+  if [[ "$CODESIGN_TIMEOUT_SECONDS" != "0" ]] && command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift @ARGV; exec @ARGV or die "exec failed: $!\n"' \
+      "$CODESIGN_TIMEOUT_SECONDS" \
+      codesign "$@"
+  else
+    codesign "$@"
+  fi
+}
+
+codesign_timestamp_arg() {
+  if [[ "$CODESIGN_TIMESTAMP" == "1" ]]; then
+    printf '%s' "--timestamp"
+  elif [[ "$CODESIGN_TIMESTAMP" == "0" ]]; then
+    printf '%s' "--timestamp=none"
+  else
+    echo "CODESIGN_TIMESTAMP must be 1 or 0." >&2
+    exit 1
+  fi
 }
 
 if [[ "$NOTARIZE" == "1" ]]; then
@@ -56,7 +79,8 @@ hdiutil create \
 rm -rf "$DMG_ROOT"
 
 if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
-  codesign --force --timestamp --sign "$CODESIGN_IDENTITY" "$DMG_PATH"
+  TIMESTAMP_ARG="$(codesign_timestamp_arg)"
+  run_codesign --force "$TIMESTAMP_ARG" --sign "$CODESIGN_IDENTITY" "$DMG_PATH"
   codesign --verify --verbose=2 "$DMG_PATH"
 fi
 
