@@ -48,6 +48,7 @@ EOF
 
 rm -f "$ARCHIVE_PATH"
 tar -C "$ROOT_DIR/dist" -czf "$ARCHIVE_PATH" "TypeText-Linux"
+typetext_write_md5_checksum "$ARCHIVE_PATH"
 
 echo "Built $DIST_DIR"
 echo "Archived $ARCHIVE_PATH"

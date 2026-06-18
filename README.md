@@ -86,11 +86,17 @@ Release artifacts:
 
 ```text
 TypeText-macOS.zip
+TypeText-macOS.zip.md5
 TypeText-macOS.dmg
+TypeText-macOS.dmg.md5
 TypeText-Windows-x64.zip
+TypeText-Windows-x64.zip.md5
 TypeText-Windows-x64-Setup.exe
+TypeText-Windows-x64-Setup.exe.md5
 TypeText-Linux-<target>.tar.gz
+TypeText-Linux-<target>.tar.gz.md5
 typetext_<version>_amd64.deb
+typetext_<version>_amd64.deb.md5
 ```
 
 To publish a GitHub Release, push a version tag in `vX.X.X` format:
@@ -104,6 +110,9 @@ The workflow passes the tag through as `TYPETEXT_VERSION`, builds the macOS,
 Windows, and Linux portable archives and installable packages, then attaches
 them to the matching GitHub Release. That same version is compiled into the app
 UI and written into portable build metadata.
+
+Each release artifact is published with a matching `.md5` checksum file. MD5 is
+provided for quick download comparison, not as a security signature.
 
 For local builds that are not run from an exact Git tag, update `VERSION` first.
 You can also override any build explicitly:

@@ -119,6 +119,8 @@ if [[ "$NOTARIZE" == "1" ]]; then
   ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
 fi
 
+typetext_write_md5_checksum "$ZIP_PATH"
+
 echo "Built $APP_DIR"
 echo "Archived $ZIP_PATH"
 echo "Open with: open \"$APP_DIR\""

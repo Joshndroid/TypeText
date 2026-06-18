@@ -76,7 +76,9 @@ jobs:
           name: TypeText-macOS
           path: |
             dist/TypeText-macOS.zip
+            dist/TypeText-macOS.zip.md5
             dist/TypeText-macOS.dmg
+            dist/TypeText-macOS.dmg.md5
           if-no-files-found: error
 
   windows:
@@ -105,7 +107,9 @@ jobs:
           name: TypeText-Windows-x64
           path: |
             dist/TypeText-Windows-x64.zip
+            dist/TypeText-Windows-x64.zip.md5
             dist/TypeText-Windows-x64-Setup.exe
+            dist/TypeText-Windows-x64-Setup.exe.md5
           if-no-files-found: error
 
   linux:
@@ -147,7 +151,9 @@ jobs:
           name: TypeText-Linux-x64
           path: |
             dist/TypeText-Linux-*.tar.gz
+            dist/TypeText-Linux-*.tar.gz.md5
             dist/typetext_*_amd64.deb
+            dist/typetext_*_amd64.deb.md5
           if-no-files-found: error
 
   release:
@@ -182,8 +188,14 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             release-assets/TypeText-macOS.zip
+            release-assets/TypeText-macOS.zip.md5
             release-assets/TypeText-macOS.dmg
+            release-assets/TypeText-macOS.dmg.md5
             release-assets/TypeText-Windows-x64.zip
+            release-assets/TypeText-Windows-x64.zip.md5
             release-assets/TypeText-Windows-x64-Setup.exe
+            release-assets/TypeText-Windows-x64-Setup.exe.md5
             release-assets/TypeText-Linux-*.tar.gz
+            release-assets/TypeText-Linux-*.tar.gz.md5
             release-assets/typetext_*_amd64.deb
+            release-assets/typetext_*_amd64.deb.md5

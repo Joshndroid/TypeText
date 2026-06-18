@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/Scripts/version.sh"
 APP_DIR="$ROOT_DIR/dist/TypeText.app"
 DMG_ROOT="$ROOT_DIR/dist/dmg-root"
 DMG_PATH="$ROOT_DIR/dist/TypeText-macOS.dmg"
@@ -68,5 +69,7 @@ if [[ "$NOTARIZE" == "1" ]]; then
   xcrun stapler staple "$DMG_PATH"
   xcrun stapler validate "$DMG_PATH"
 fi
+
+typetext_write_md5_checksum "$DMG_PATH"
 
 echo "Built $DMG_PATH"

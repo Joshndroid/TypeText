@@ -33,3 +33,21 @@ function Get-TypeTextPackageVersion {
     }
     return $Version
 }
+
+function Write-TypeTextMd5Checksum {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [string]$ChecksumPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ChecksumPath)) {
+        $ChecksumPath = "$Path.md5"
+    }
+
+    $Hash = Get-FileHash -Algorithm MD5 -Path $Path
+    $FileName = Split-Path -Leaf $Path
+    "$($Hash.Hash.ToLowerInvariant())  $FileName" | Set-Content -Path $ChecksumPath -Encoding ASCII
+    Write-Host "Wrote $ChecksumPath"
+}

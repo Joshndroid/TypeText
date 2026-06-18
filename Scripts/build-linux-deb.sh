@@ -55,5 +55,6 @@ Description: Reusable text snippets desktop app
 EOF
 
 dpkg-deb --build "$PACKAGE_ROOT" "$DEB_PATH"
+typetext_write_md5_checksum "$DEB_PATH"
 
 echo "Built $DEB_PATH"

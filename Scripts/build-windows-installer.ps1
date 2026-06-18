@@ -76,4 +76,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: no
 $InnoScript | Set-Content -Path $IssPath -Encoding UTF8
 & $Iscc $IssPath
 
-Write-Host "Built $(Join-Path $OutputDir 'TypeText-Windows-x64-Setup.exe')"
+$SetupPath = Join-Path $OutputDir "TypeText-Windows-x64-Setup.exe"
+Write-TypeTextMd5Checksum -Path $SetupPath
+
+Write-Host "Built $SetupPath"
