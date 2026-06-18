@@ -3251,7 +3251,6 @@ dependencies = [
  "tray-icon",
  "typetext-core",
  "windows",
- "zbus",
 ]
 
 [[package]]

@@ -52,7 +52,6 @@ enum View {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) enum TrayCommand {
     Open,
     Settings,
@@ -511,7 +510,7 @@ impl TypeTextApp {
         let (tray_handle, tray_error) =
             match platform::install_tray_icon(tray_tx, cc.egui_ctx.clone(), icon_rgba) {
                 Ok(handle) => (Some(handle), None),
-                Err(error) if cfg!(any(windows, target_os = "macos", target_os = "linux")) => {
+                Err(error) if cfg!(any(windows, target_os = "macos")) => {
                     (None, Some(format!("Tray unavailable: {error}")))
                 }
                 Err(_) => (None, None),
@@ -2166,8 +2165,6 @@ mod tests {
             asset_platform_rank(matching_asset).is_some(),
             cfg!(any(target_os = "macos", windows))
         );
-        assert!(asset_platform_rank("typetext_0.2.1_amd64.deb").is_none());
-        assert!(asset_platform_rank("TypeText-Linux-x86_64-unknown-linux-gnu.AppImage").is_none());
         assert!(asset_platform_rank("TypeText-source.zip").is_none());
     }
 }

@@ -48,7 +48,6 @@ apps/
 
 docs/
   macos-notes.md
-  linux-notes.md
 
 examples/
   snippets.json
