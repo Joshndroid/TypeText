@@ -1,12 +1,12 @@
 # Linux Notes
 
 TypeText uses the shared Rust/egui desktop window on Linux. The current Linux
-build targets Ubuntu and is packaged as a portable experiment so the UI and
-data model can be tested on target distributions.
+build targets Ubuntu and is packaged as an AppImage portable app plus a DEB
+package so the UI and data model can be tested on target distributions.
 
-## Portable Build
+## AppImage Build
 
-Build the Linux portable folder and archive on Linux:
+Build the Linux portable AppImage on Linux:
 
 ```bash
 Scripts/build-linux-portable.sh
@@ -15,8 +15,14 @@ Scripts/build-linux-portable.sh
 Output:
 
 ```text
-dist/TypeText-Linux/TypeText
-dist/TypeText-Linux-<target>.tar.gz
+dist/TypeText-Linux-<target>.AppImage
+```
+
+The AppImage uses the normal Linux per-user data directory because AppImage
+contents are mounted read-only at runtime:
+
+```text
+$XDG_DATA_HOME/typetext/data or ~/.local/share/typetext/data
 ```
 
 ## Known Limitations

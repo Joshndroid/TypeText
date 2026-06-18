@@ -2,7 +2,8 @@
 
 TypeText is a small native Rust desktop app for storing reusable text snippets and typing them into the active app. Keep snippets in simple JSON files, open the chooser with a global hotkey, search or filter by group, then insert one snippet or a queued chain of snippets.
 
-The app is portable by design: no installer is required, and runtime data lives beside the executable in a local `data/` folder.
+The app is portable by design: no installer is required for portable builds, and
+runtime data uses simple JSON files.
 
 ## Features
 
@@ -12,7 +13,7 @@ The app is portable by design: no installer is required, and runtime data lives 
 - Configurable queued-snippet behavior: add duplicates or remove queued entries
 - Built-in group and snippet editor
 - DropText INI import and TypeText JSON export
-- Portable JSON data files stored beside the executable
+- Simple JSON snippet/settings storage
 - Configurable typing delay and close-after-insert behavior
 - Open-on-startup setting for macOS and Windows
 - Light, dark, and system theme support
@@ -59,7 +60,7 @@ examples/
 
 ## App Data
 
-Portable builds store runtime data beside the executable:
+Windows portable builds store runtime data beside the executable:
 
 ```text
 TypeText.exe
@@ -68,8 +69,8 @@ data/
   settings.json
 ```
 
-Installable builds first try that portable `data/` folder, then fall back to the
-normal per-user app data location when the install directory is not writable:
+Installable builds and the Linux AppImage use the normal per-user app data
+location:
 
 ```text
 Windows: %LOCALAPPDATA%\TypeText\data
@@ -93,8 +94,8 @@ TypeText-Windows-x64.zip
 TypeText-Windows-x64.zip.md5
 TypeText-Windows-x64-Setup.exe
 TypeText-Windows-x64-Setup.exe.md5
-TypeText-Linux-<target>.tar.gz
-TypeText-Linux-<target>.tar.gz.md5
+TypeText-Linux-<target>.AppImage
+TypeText-Linux-<target>.AppImage.md5
 typetext_<version>_amd64.deb
 typetext_<version>_amd64.deb.md5
 ```
@@ -107,7 +108,7 @@ git push origin v0.2.1
 ```
 
 The workflow passes the tag through as `TYPETEXT_VERSION`, builds the macOS,
-Windows, and Linux portable archives and installable packages, then attaches
+Windows, and Linux portable apps and installable packages, then attaches
 them to the matching GitHub Release. That same version is compiled into the app
 UI and written into portable build metadata.
 
@@ -244,8 +245,7 @@ Scripts/build-linux-deb.sh
 Outputs:
 
 ```text
-dist/TypeText-Linux/TypeText
-dist/TypeText-Linux-<target>.tar.gz
+dist/TypeText-Linux-<target>.AppImage
 dist/typetext_<version>_amd64.deb
 ```
 

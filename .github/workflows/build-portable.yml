@@ -123,6 +123,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            curl \
             libasound2-dev \
             libgl1-mesa-dev \
             libwayland-dev \
@@ -150,8 +151,8 @@ jobs:
         with:
           name: TypeText-Linux-x64
           path: |
-            dist/TypeText-Linux-*.tar.gz
-            dist/TypeText-Linux-*.tar.gz.md5
+            dist/TypeText-Linux-*.AppImage
+            dist/TypeText-Linux-*.AppImage.md5
             dist/typetext_*_amd64.deb
             dist/typetext_*_amd64.deb.md5
           if-no-files-found: error
@@ -195,7 +196,7 @@ jobs:
             release-assets/TypeText-Windows-x64.zip.md5
             release-assets/TypeText-Windows-x64-Setup.exe
             release-assets/TypeText-Windows-x64-Setup.exe.md5
-            release-assets/TypeText-Linux-*.tar.gz
-            release-assets/TypeText-Linux-*.tar.gz.md5
+            release-assets/TypeText-Linux-*.AppImage
+            release-assets/TypeText-Linux-*.AppImage.md5
             release-assets/typetext_*_amd64.deb
             release-assets/typetext_*_amd64.deb.md5

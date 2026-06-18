@@ -1792,8 +1792,10 @@ fn asset_platform_rank(name: &str) -> Option<u8> {
     } else if cfg!(target_os = "linux") {
         if name.starts_with("typetext_") && name.ends_with("_amd64.deb") {
             Some(0)
-        } else if name.starts_with("TypeText-Linux-") && name.ends_with(".tar.gz") {
+        } else if name.starts_with("TypeText-Linux-") && name.ends_with(".AppImage") {
             Some(1)
+        } else if name.starts_with("TypeText-Linux-") && name.ends_with(".tar.gz") {
+            Some(2)
         } else {
             None
         }
