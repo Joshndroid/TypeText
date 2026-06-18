@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Sender};
 
 use crate::TrayCommand;
 
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+#[cfg(any(windows, target_os = "macos"))]
 mod tray_integration {
     use super::*;
     use std::thread;
@@ -1181,7 +1181,18 @@ mod linux_platform {
     }
 
     pub fn tray_status() -> &'static str {
-        "TypeText stays running when hidden or closed, and re-opens from its tray icon or global hotkey. Ubuntu uses the desktop portal on Wayland or X11 key grabs on Xorg."
+        "TypeText stays running when hidden or closed, and re-opens from its global hotkey. Ubuntu uses the desktop portal on Wayland or X11 key grabs on Xorg."
+    }
+
+    pub struct TrayHandle;
+
+    pub fn install_tray_icon(
+        _tx: Sender<TrayCommand>,
+        _icon_rgba: Option<(Vec<u8>, u32, u32)>,
+    ) -> Result<TrayHandle> {
+        Err(anyhow!(
+            "Tray integration is disabled on Linux to avoid the vulnerable GTK/AppIndicator dependency chain."
+        ))
     }
 
     fn register_portal_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
@@ -1740,9 +1751,9 @@ pub use fallback_platform::{
 };
 #[cfg(target_os = "linux")]
 pub use linux_platform::{
-    fetch_text, open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url,
-    register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
-    type_text_current_focus,
+    fetch_text, install_tray_icon, open_droptext_file_dialog, open_folder,
+    open_snippets_export_dialog, open_url, register_hotkey, set_startup_enabled, startup_enabled,
+    tray_status, type_text, type_text_current_focus, TrayHandle,
 };
 #[cfg(target_os = "macos")]
 pub use macos_platform::{
@@ -1757,5 +1768,5 @@ pub use windows_platform::{
     type_text_current_focus,
 };
 
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+#[cfg(any(windows, target_os = "macos"))]
 pub use tray_integration::{install_tray_icon, TrayHandle};
