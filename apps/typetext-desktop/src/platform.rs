@@ -75,24 +75,29 @@ mod windows_platform {
     }
 
     pub fn startup_enabled() -> bool {
-        startup_script_path().is_some_and(|path| path.exists())
+        startup_shortcut_path().is_some_and(|path| path.exists())
+            || legacy_startup_script_path().is_some_and(|path| path.exists())
     }
 
     pub fn set_startup_enabled(enabled: bool) -> Result<()> {
-        let script_path = startup_script_path()
+        let shortcut_path = startup_shortcut_path()
             .ok_or_else(|| anyhow!("Could not locate Windows Startup folder"))?;
+        let legacy_script_path = legacy_startup_script_path();
         if enabled {
             let exe =
                 std::env::current_exe().context("Could not determine current executable path")?;
-            let script = format!(
-                "@echo off\r\nstart \"\" \"{}\"\r\n",
-                exe.display().to_string().replace('"', "\"\"")
-            );
-            std::fs::write(&script_path, script)
-                .with_context(|| format!("Could not write {}", script_path.display()))?;
-        } else if script_path.exists() {
-            std::fs::remove_file(&script_path)
-                .with_context(|| format!("Could not remove {}", script_path.display()))?;
+            write_startup_shortcut(&shortcut_path, &exe)?;
+        } else if shortcut_path.exists() {
+            std::fs::remove_file(&shortcut_path)
+                .with_context(|| format!("Could not remove {}", shortcut_path.display()))?;
+        }
+
+        if let Some(legacy_script_path) = legacy_script_path {
+            if legacy_script_path.exists() {
+                std::fs::remove_file(&legacy_script_path).with_context(|| {
+                    format!("Could not remove {}", legacy_script_path.display())
+                })?;
+            }
         }
         Ok(())
     }
@@ -275,7 +280,44 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
     }
 
-    fn startup_script_path() -> Option<PathBuf> {
+    fn write_startup_shortcut(shortcut_path: &Path, exe_path: &Path) -> Result<()> {
+        let script = r#"
+$shortcutPath = $args[0]
+$targetPath = $args[1]
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $targetPath
+$shortcut.WorkingDirectory = Split-Path -Parent $targetPath
+$shortcut.IconLocation = "$targetPath,0"
+$shortcut.Save()
+"#;
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .arg(shortcut_path)
+            .arg(exe_path)
+            .output()
+            .context("Could not create Windows startup shortcut")?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow!(
+                "Windows startup shortcut creation failed. {}",
+                stderr.trim()
+            ))
+        }
+    }
+
+    fn startup_shortcut_path() -> Option<PathBuf> {
+        let appdata = std::env::var_os("APPDATA")?;
+        Some(
+            PathBuf::from(appdata)
+                .join("Microsoft\\Windows\\Start Menu\\Programs\\Startup\\TypeText.lnk"),
+        )
+    }
+
+    fn legacy_startup_script_path() -> Option<PathBuf> {
         let appdata = std::env::var_os("APPDATA")?;
         Some(
             PathBuf::from(appdata)

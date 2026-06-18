@@ -144,8 +144,10 @@ jobs:
           path: |
             dist/TypeText-Windows-x64.zip
             dist/TypeText-Windows-x64.zip.md5
+            dist/TypeText-Windows-x64.zip.sha256
             dist/TypeText-Windows-x64-Setup.exe
             dist/TypeText-Windows-x64-Setup.exe.md5
+            dist/TypeText-Windows-x64-Setup.exe.sha256
           if-no-files-found: error
 
   linux:

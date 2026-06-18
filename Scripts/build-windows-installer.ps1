@@ -12,6 +12,8 @@ $PackageVersion = Get-TypeTextPackageVersion -Version $Version
 $env:TYPETEXT_VERSION = $Version
 
 & $PortableScript
+$ExePath = Join-Path $DistDir "TypeText.exe"
+Invoke-TypeTextOptionalSigning -Path $ExePath
 
 if (Test-Path $InstallerDir) {
     Remove-Item $InstallerDir -Recurse -Force
@@ -51,8 +53,8 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=$OutputDirForInno
 OutputBaseFilename=TypeText-Windows-x64-Setup
-Compression=lzma2
-SolidCompression=yes
+Compression=zip
+SolidCompression=no
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -77,6 +79,8 @@ $InnoScript | Set-Content -Path $IssPath -Encoding UTF8
 & $Iscc $IssPath
 
 $SetupPath = Join-Path $OutputDir "TypeText-Windows-x64-Setup.exe"
+Invoke-TypeTextOptionalSigning -Path $SetupPath
 Write-TypeTextMd5Checksum -Path $SetupPath
+Write-TypeTextSha256Checksum -Path $SetupPath
 
 Write-Host "Built $SetupPath"

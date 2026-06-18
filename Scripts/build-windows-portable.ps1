@@ -59,6 +59,7 @@ if (Test-Path $ZipPath) {
 }
 Compress-Archive -Path $DistDir -DestinationPath $ZipPath -Force
 Write-TypeTextMd5Checksum -Path $ZipPath
+Write-TypeTextSha256Checksum -Path $ZipPath
 
 Write-Host "Built $DistDir"
 Write-Host "Archived $ZipPath"

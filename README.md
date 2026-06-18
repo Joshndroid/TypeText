@@ -220,12 +220,22 @@ Scripts\build-windows-installer.ps1
 The installer script requires Inno Setup 6. On GitHub Actions this is installed
 with Chocolatey before the script runs.
 
+For Windows release builds, sign the app and installer by setting
+`TYPETEXT_SIGNTOOL_COMMAND` before running the installer script. Include `{file}`
+where the file path should be inserted, for example:
+
+```powershell
+$env:TYPETEXT_SIGNTOOL_COMMAND = 'signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a "{file}"'
+Scripts\build-windows-installer.ps1
+```
+
 Outputs:
 
 ```text
 dist\TypeText-Windows\TypeText.exe
 dist\TypeText-Windows-x64.zip
 dist\TypeText-Windows-x64-Setup.exe
+dist\TypeText-Windows-x64-Setup.exe.sha256
 ```
 
 ### Linux
