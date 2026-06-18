@@ -212,9 +212,9 @@ dist/TypeText-Linux-<target>.tar.gz
 dist/typetext_<version>_amd64.deb
 ```
 
-Linux currently uses the shared Rust UI with XDG Desktop Portal global shortcut
-support on Wayland and X11 global hotkey support on Ubuntu/Xorg sessions.
-Synthetic typing support is not implemented on Linux yet.
+Linux currently uses the shared Rust UI with XDG Desktop Portal support for
+global shortcuts and synthetic typing on Wayland. On X11/Xorg sessions, global
+hotkeys use X11 key grabs and snippet typing uses `xdotool`.
 
 ## macOS Permissions
 

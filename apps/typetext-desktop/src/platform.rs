@@ -808,6 +808,7 @@ mod linux_platform {
     use std::os::raw::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
     use std::ptr;
     use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+    use std::sync::{Mutex, OnceLock};
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
     use zbus::blocking::{Connection, Proxy};
@@ -900,11 +901,23 @@ mod linux_platform {
     const PORTAL_DESTINATION: &str = "org.freedesktop.portal.Desktop";
     const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
     const PORTAL_GLOBAL_SHORTCUTS_INTERFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
+    const PORTAL_REMOTE_DESKTOP_INTERFACE: &str = "org.freedesktop.portal.RemoteDesktop";
     const PORTAL_REQUEST_INTERFACE: &str = "org.freedesktop.portal.Request";
     const SHORTCUT_ID_SHOW: &str = "show-typetext";
+    const REMOTE_DESKTOP_DEVICE_KEYBOARD: u32 = 1;
+    const KEY_RELEASED: u32 = 0;
+    const KEY_PRESSED: u32 = 1;
+    const XK_CARRIAGE_RETURN: i32 = 0xff0d;
+    const XK_TAB_I32: i32 = 0xff09;
 
     static TARGET_WINDOW: AtomicU64 = AtomicU64::new(0);
     static LAST_X_ERROR: AtomicI32 = AtomicI32::new(0);
+    static REMOTE_DESKTOP_SESSION: OnceLock<Mutex<Option<RemoteDesktopSession>>> = OnceLock::new();
+
+    struct RemoteDesktopSession {
+        connection: Connection,
+        session_handle: OwnedObjectPath,
+    }
 
     pub fn register_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
         if is_wayland_session() {
@@ -981,12 +994,15 @@ mod linux_platform {
             .map_err(|error| anyhow!(error))
     }
 
-    pub fn type_text(_text: &str) -> Result<()> {
-        Err(anyhow!("Typing is not implemented on Linux yet."))
+    pub fn type_text(text: &str) -> Result<()> {
+        if is_wayland_session() {
+            return type_text_wayland(text);
+        }
+        type_text_x11(text)
     }
 
-    pub fn type_text_current_focus(_text: &str) -> Result<()> {
-        Err(anyhow!("Typing is not implemented on Linux yet."))
+    pub fn type_text_current_focus(text: &str) -> Result<()> {
+        type_text(text)
     }
 
     pub fn open_folder(path: &Path) -> Result<()> {
@@ -1110,6 +1126,198 @@ mod linux_platform {
         }
 
         Ok(())
+    }
+
+    fn type_text_wayland(text: &str) -> Result<()> {
+        let session_store = REMOTE_DESKTOP_SESSION.get_or_init(|| Mutex::new(None));
+        let mut session_guard = session_store
+            .lock()
+            .map_err(|_| anyhow!("Wayland remote desktop session lock was poisoned"))?;
+
+        if session_guard.is_none() {
+            *session_guard = Some(start_remote_desktop_keyboard_session()?);
+        }
+
+        let session = session_guard
+            .as_ref()
+            .ok_or_else(|| anyhow!("Wayland remote desktop keyboard session was unavailable"))?;
+        if let Err(error) = send_text_via_remote_desktop(session, text) {
+            *session_guard = None;
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    fn start_remote_desktop_keyboard_session() -> Result<RemoteDesktopSession> {
+        let connection = Connection::session()
+            .context("Could not connect to the D-Bus session bus for Wayland typing")?;
+        let proxy = Proxy::new(
+            &connection,
+            PORTAL_DESTINATION,
+            PORTAL_PATH,
+            PORTAL_REMOTE_DESKTOP_INTERFACE,
+        )
+        .context("Could not connect to the desktop remote-control portal")?;
+
+        let version = proxy.get_property::<u32>("version").unwrap_or(0);
+        if version == 0 {
+            return Err(anyhow!(
+                "This Wayland desktop does not expose the RemoteDesktop portal needed for typing."
+            ));
+        }
+
+        let available_devices = proxy
+            .get_property::<u32>("AvailableDeviceTypes")
+            .unwrap_or(0);
+        if available_devices & REMOTE_DESKTOP_DEVICE_KEYBOARD == 0 {
+            return Err(anyhow!(
+                "This Wayland desktop does not allow portal keyboard input."
+            ));
+        }
+
+        let session_handle = create_remote_desktop_session(&proxy)?;
+        select_remote_desktop_keyboard(&proxy, &session_handle)?;
+        start_remote_desktop_session(&proxy, &session_handle)?;
+
+        Ok(RemoteDesktopSession {
+            connection,
+            session_handle,
+        })
+    }
+
+    fn create_remote_desktop_session(proxy: &Proxy<'_>) -> Result<OwnedObjectPath> {
+        let mut options = HashMap::new();
+        options.insert("handle_token", Value::from(portal_token("remote_create")));
+        options.insert(
+            "session_handle_token",
+            Value::from(portal_token("remote_session")),
+        );
+
+        let request_handle: OwnedObjectPath = proxy
+            .call("CreateSession", &(options,))
+            .context("Could not create Wayland typing portal session")?;
+        let results = wait_for_portal_response(proxy.connection(), &request_handle)?;
+        let session_handle = results
+            .get("session_handle")
+            .ok_or_else(|| anyhow!("Wayland typing portal did not return a session"))?;
+        let session_handle = String::try_from(session_handle.clone())
+            .context("Wayland typing portal returned an invalid session handle")?;
+        OwnedObjectPath::try_from(session_handle)
+            .context("Wayland typing portal returned a malformed session handle")
+    }
+
+    fn select_remote_desktop_keyboard(
+        proxy: &Proxy<'_>,
+        session_handle: &OwnedObjectPath,
+    ) -> Result<()> {
+        let session_path = ObjectPath::try_from(session_handle.as_str())
+            .context("Wayland typing portal session handle was malformed")?;
+        let mut options = HashMap::new();
+        options.insert("handle_token", Value::from(portal_token("remote_select")));
+        options.insert("types", Value::from(REMOTE_DESKTOP_DEVICE_KEYBOARD));
+        options.insert("persist_mode", Value::from(1u32));
+
+        let request_handle: OwnedObjectPath = proxy
+            .call("SelectDevices", &(session_path, options))
+            .context("Could not request Wayland keyboard input permission")?;
+        wait_for_portal_response(proxy.connection(), &request_handle).map(|_| ())
+    }
+
+    fn start_remote_desktop_session(
+        proxy: &Proxy<'_>,
+        session_handle: &OwnedObjectPath,
+    ) -> Result<()> {
+        let session_path = ObjectPath::try_from(session_handle.as_str())
+            .context("Wayland typing portal session handle was malformed")?;
+        let mut options = HashMap::new();
+        options.insert("handle_token", Value::from(portal_token("remote_start")));
+
+        let request_handle: OwnedObjectPath = proxy
+            .call("Start", &(session_path, "", options))
+            .context("Could not start Wayland keyboard input session")?;
+        let results = wait_for_portal_response(proxy.connection(), &request_handle)?;
+        let devices = results
+            .get("devices")
+            .and_then(|value| u32::try_from(value.clone()).ok())
+            .unwrap_or(0);
+        if devices & REMOTE_DESKTOP_DEVICE_KEYBOARD == 0 {
+            return Err(anyhow!(
+                "Wayland keyboard input permission was not granted."
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn send_text_via_remote_desktop(session: &RemoteDesktopSession, text: &str) -> Result<()> {
+        let proxy = Proxy::new(
+            &session.connection,
+            PORTAL_DESTINATION,
+            PORTAL_PATH,
+            PORTAL_REMOTE_DESKTOP_INTERFACE,
+        )
+        .context("Could not connect to the active Wayland typing portal session")?;
+        let session_path = ObjectPath::try_from(session.session_handle.as_str())
+            .context("Wayland typing portal session handle was malformed")?;
+
+        for keysym in text.chars().map(char_to_keysym) {
+            notify_keyboard_keysym(&proxy, &session_path, keysym, KEY_PRESSED)?;
+            notify_keyboard_keysym(&proxy, &session_path, keysym, KEY_RELEASED)?;
+        }
+
+        Ok(())
+    }
+
+    fn notify_keyboard_keysym(
+        proxy: &Proxy<'_>,
+        session_path: &ObjectPath<'_>,
+        keysym: i32,
+        state: u32,
+    ) -> Result<()> {
+        let options = HashMap::<&str, Value<'_>>::new();
+        proxy
+            .call::<_, _, ()>(
+                "NotifyKeyboardKeysym",
+                &(session_path, options, keysym, state),
+            )
+            .context("Wayland keyboard input failed")
+    }
+
+    fn char_to_keysym(character: char) -> i32 {
+        match character {
+            '\n' => XK_CARRIAGE_RETURN,
+            '\r' => XK_CARRIAGE_RETURN,
+            '\t' => XK_TAB_I32,
+            character => {
+                let codepoint = character as u32;
+                if (0x20..=0x7e).contains(&codepoint) || (0xa0..=0xff).contains(&codepoint) {
+                    codepoint as i32
+                } else {
+                    (0x01000000 | codepoint) as i32
+                }
+            }
+        }
+    }
+
+    fn type_text_x11(text: &str) -> Result<()> {
+        let target_window = TARGET_WINDOW.load(Ordering::Relaxed);
+        let mut command = Command::new("xdotool");
+        if target_window != 0 {
+            command.args(["windowactivate", "--sync", &target_window.to_string()]);
+        }
+        command.args(["type", "--clearmodifiers", "--delay", "0", "--"]);
+        command.arg(text);
+
+        let output = command
+            .output()
+            .context("Could not run xdotool. Install xdotool to type snippets on X11/Xorg.")?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow!("X11 typing failed. {}", stderr.trim()))
+        }
     }
 
     fn create_portal_session(proxy: &Proxy<'_>) -> Result<OwnedObjectPath> {
