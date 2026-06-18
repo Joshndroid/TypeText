@@ -1258,6 +1258,8 @@ mod linux_platform {
         "TypeText stays running when hidden or closed, and re-opens from its global hotkey. Ubuntu uses the desktop portal on Wayland or X11 key grabs on Xorg."
     }
 
+    pub fn install_reopen_handler(_tx: Sender<TrayCommand>, _repaint_ctx: eframe::egui::Context) {}
+
     pub struct TrayHandle;
 
     pub fn install_tray_icon(
