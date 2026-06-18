@@ -465,7 +465,7 @@ mod macos_platform {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(anyhow!(
-                "macOS typing failed. Grant Accessibility permission to your terminal or TypeText. {}",
+                "macOS typing failed because TypeText needs Accessibility permission to send keyboard input. Open System Settings > Privacy & Security > Accessibility, then enable the terminal app that launched TypeText during development, or enable TypeText when running the packaged app. {}",
                 stderr.trim()
             ))
         }

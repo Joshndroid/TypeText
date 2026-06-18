@@ -112,9 +112,7 @@ jobs:
           name: TypeText-macOS
           path: |
             dist/TypeText-macOS.zip
-            dist/TypeText-macOS.zip.sha256
             dist/TypeText-macOS.dmg
-            dist/TypeText-macOS.dmg.sha256
           if-no-files-found: error
 
   windows:
@@ -143,9 +141,7 @@ jobs:
           name: TypeText-Windows-x64
           path: |
             dist/TypeText-Windows-x64.zip
-            dist/TypeText-Windows-x64.zip.sha256
             dist/TypeText-Windows-x64-Setup.exe
-            dist/TypeText-Windows-x64-Setup.exe.sha256
           if-no-files-found: error
 
   linux:
@@ -189,9 +185,7 @@ jobs:
           name: TypeText-Linux-x64
           path: |
             dist/TypeText-Linux-*.AppImage
-            dist/TypeText-Linux-*.AppImage.sha256
             dist/typetext_*_amd64.deb
-            dist/typetext_*_amd64.deb.sha256
           if-no-files-found: error
 
   release:
@@ -236,14 +230,8 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             release-assets/TypeText-macOS.zip
-            release-assets/TypeText-macOS.zip.sha256
             release-assets/TypeText-macOS.dmg
-            release-assets/TypeText-macOS.dmg.sha256
             release-assets/TypeText-Windows-x64.zip
-            release-assets/TypeText-Windows-x64.zip.sha256
             release-assets/TypeText-Windows-x64-Setup.exe
-            release-assets/TypeText-Windows-x64-Setup.exe.sha256
             release-assets/TypeText-Linux-*.AppImage
-            release-assets/TypeText-Linux-*.AppImage.sha256
             release-assets/typetext_*_amd64.deb
-            release-assets/typetext_*_amd64.deb.sha256

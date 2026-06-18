@@ -87,17 +87,11 @@ Release artifacts:
 
 ```text
 TypeText-macOS.zip
-TypeText-macOS.zip.sha256
 TypeText-macOS.dmg
-TypeText-macOS.dmg.sha256
 TypeText-Windows-x64.zip
-TypeText-Windows-x64.zip.sha256
 TypeText-Windows-x64-Setup.exe
-TypeText-Windows-x64-Setup.exe.sha256
 TypeText-Linux-<target>.AppImage
-TypeText-Linux-<target>.AppImage.sha256
 typetext_<version>_amd64.deb
-typetext_<version>_amd64.deb.sha256
 ```
 
 To publish a GitHub Release, push a version tag in `vX.X.X` format:
@@ -112,9 +106,8 @@ Windows, and Linux portable apps and installable packages, then attaches
 them to the matching GitHub Release. `Scripts/generate-release-notes.sh`
 generates the release page changelog from commits since the previous `vX.X.X`
 tag, plus a full diff link. That same version is compiled into the app UI and
-written into portable build metadata.
-
-Each release artifact is published with a matching `.sha256` checksum file.
+written into portable build metadata. GitHub displays a SHA-256 digest for each
+release asset, so separate `.sha256` files are not attached.
 
 For local builds that are not run from an exact Git tag, update `VERSION` first.
 You can also override any build explicitly:

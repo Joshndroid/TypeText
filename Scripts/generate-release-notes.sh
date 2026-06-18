@@ -51,7 +51,7 @@ previous_tag="$(git -C "$ROOT_DIR" describe \
   echo
   echo "## Downloads"
   echo
-  echo "Each release artifact includes a matching \`.sha256\` checksum file."
+  echo "GitHub displays a SHA-256 digest for each release asset."
 } >"$OUTPUT_PATH"
 
 echo "Wrote $OUTPUT_PATH"
