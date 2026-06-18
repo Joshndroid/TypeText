@@ -80,7 +80,6 @@ $InnoScript | Set-Content -Path $IssPath -Encoding UTF8
 
 $SetupPath = Join-Path $OutputDir "TypeText-Windows-x64-Setup.exe"
 Invoke-TypeTextOptionalSigning -Path $SetupPath
-Write-TypeTextMd5Checksum -Path $SetupPath
 Write-TypeTextSha256Checksum -Path $SetupPath
 
 Write-Host "Built $SetupPath"

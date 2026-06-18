@@ -75,7 +75,7 @@ export OUTPUT="$APPIMAGE_PATH"
   --desktop-file "$APPDIR/usr/share/applications/typetext.desktop" \
   --icon-file "$APPDIR/usr/share/icons/hicolor/256x256/apps/typetext.png" \
   --output appimage
-typetext_write_md5_checksum "$APPIMAGE_PATH"
+typetext_write_sha256_checksum "$APPIMAGE_PATH"
 
 echo "Built $APPIMAGE_PATH"
 echo "Run with: $APPIMAGE_PATH"

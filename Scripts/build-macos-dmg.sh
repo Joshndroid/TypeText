@@ -94,6 +94,6 @@ if [[ "$NOTARIZE" == "1" ]]; then
   xcrun stapler validate "$DMG_PATH"
 fi
 
-typetext_write_md5_checksum "$DMG_PATH"
+typetext_write_sha256_checksum "$DMG_PATH"
 
 echo "Built $DMG_PATH"
