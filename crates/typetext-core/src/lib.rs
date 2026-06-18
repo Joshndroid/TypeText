@@ -111,7 +111,9 @@ impl PortablePaths {
             .parent()
             .ok_or_else(|| anyhow!("Could not determine executable directory"))?;
         let portable_paths = Self::from_app_dir(app_dir);
-        if portable_paths.data_dir.exists() || fs::create_dir_all(&portable_paths.data_dir).is_ok()
+        if !is_macos_app_bundle_executable_dir(app_dir)
+            && (portable_paths.data_dir.exists()
+                || fs::create_dir_all(&portable_paths.data_dir).is_ok())
         {
             return Ok(portable_paths);
         }
@@ -135,6 +137,23 @@ impl PortablePaths {
             data_dir,
         }
     }
+}
+
+fn is_macos_app_bundle_executable_dir(app_dir: &Path) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+
+    let contents_dir = match app_dir.parent() {
+        Some(path) if app_dir.file_name().is_some_and(|name| name == "MacOS") => path,
+        _ => return false,
+    };
+    let bundle_dir = match contents_dir.parent() {
+        Some(path) if contents_dir.file_name().is_some_and(|name| name == "Contents") => path,
+        _ => return false,
+    };
+
+    bundle_dir.extension().is_some_and(|extension| extension == "app")
 }
 
 pub fn load_or_create_snippets(paths: &PortablePaths) -> Result<SnippetFile> {
@@ -477,5 +496,18 @@ Two="Second"
         let error = parse_droptext_ini(r#"Title="Body""#).unwrap_err();
 
         assert!(error.to_string().contains("before any section"));
+    }
+
+    #[test]
+    fn detects_macos_app_bundle_executable_dir() {
+        let app_dir = Path::new("/Applications/TypeText.app/Contents/MacOS");
+
+        assert_eq!(
+            is_macos_app_bundle_executable_dir(app_dir),
+            cfg!(target_os = "macos")
+        );
+        assert!(!is_macos_app_bundle_executable_dir(Path::new(
+            "/tmp/TypeText/MacOS"
+        )));
     }
 }

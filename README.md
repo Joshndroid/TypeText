@@ -145,6 +145,34 @@ Build the installable DMG:
 Scripts/build-macos-dmg.sh
 ```
 
+Release builds must be signed and notarized to pass Gatekeeper:
+
+```bash
+CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+NOTARIZE=1 \
+APPLE_ID="you@example.com" \
+APPLE_TEAM_ID="TEAMID" \
+APPLE_APP_PASSWORD="app-specific-password" \
+Scripts/build-macos-dmg.sh
+```
+
+Use a `Developer ID Application` certificate for direct downloads such as the
+GitHub ZIP and DMG. An `Apple Distribution` certificate is for App Store-style
+distribution and will not satisfy this release flow.
+
+The GitHub Actions release workflow expects these secrets in the protected
+`release-signing` environment:
+
+```text
+MACOS_CERTIFICATE_P12_BASE64
+MACOS_CERTIFICATE_PASSWORD
+MACOS_KEYCHAIN_PASSWORD
+MACOS_CODESIGN_IDENTITY
+APPLE_ID
+APPLE_TEAM_ID
+APPLE_APP_PASSWORD
+```
+
 Outputs:
 
 ```text
