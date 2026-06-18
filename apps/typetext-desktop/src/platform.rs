@@ -801,7 +801,520 @@ end try
     }
 }
 
-#[cfg(all(not(windows), not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
+mod linux_platform {
+    use super::*;
+    use std::collections::HashMap;
+    use std::os::raw::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
+    use std::ptr;
+    use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use zbus::blocking::{Connection, Proxy};
+    use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
+
+    type Display = c_void;
+    type Window = c_ulong;
+    type KeySym = c_ulong;
+
+    #[repr(C)]
+    struct XKeyEvent {
+        type_: c_int,
+        serial: c_ulong,
+        send_event: c_int,
+        display: *mut Display,
+        window: Window,
+        root: Window,
+        subwindow: Window,
+        time: c_ulong,
+        x: c_int,
+        y: c_int,
+        x_root: c_int,
+        y_root: c_int,
+        state: c_uint,
+        keycode: c_uint,
+        same_screen: c_int,
+    }
+
+    #[repr(C)]
+    struct XErrorEvent {
+        type_: c_int,
+        display: *mut Display,
+        resourceid: c_ulong,
+        serial: c_ulong,
+        error_code: u8,
+        request_code: u8,
+        minor_code: u8,
+    }
+
+    #[repr(C)]
+    union XEvent {
+        type_: c_int,
+        xkey: std::mem::ManuallyDrop<XKeyEvent>,
+        pad: [c_long; 24],
+    }
+
+    #[link(name = "X11")]
+    extern "C" {
+        fn XOpenDisplay(display_name: *const c_char) -> *mut Display;
+        fn XCloseDisplay(display: *mut Display) -> c_int;
+        fn XDefaultRootWindow(display: *mut Display) -> Window;
+        fn XKeysymToKeycode(display: *mut Display, keysym: KeySym) -> c_uint;
+        fn XGrabKey(
+            display: *mut Display,
+            keycode: c_int,
+            modifiers: c_uint,
+            grab_window: Window,
+            owner_events: c_int,
+            pointer_mode: c_int,
+            keyboard_mode: c_int,
+        ) -> c_int;
+        fn XNextEvent(display: *mut Display, event_return: *mut XEvent) -> c_int;
+        fn XGetInputFocus(
+            display: *mut Display,
+            focus_return: *mut Window,
+            revert_to_return: *mut c_int,
+        ) -> c_int;
+        fn XSetErrorHandler(
+            handler: Option<unsafe extern "C" fn(*mut Display, *mut XErrorEvent) -> c_int>,
+        ) -> Option<unsafe extern "C" fn(*mut Display, *mut XErrorEvent) -> c_int>;
+        fn XSync(display: *mut Display, discard: c_int) -> c_int;
+    }
+
+    const KEY_PRESS: c_int = 2;
+    const GRAB_MODE_ASYNC: c_int = 1;
+
+    const SHIFT_MASK: c_uint = 1 << 0;
+    const LOCK_MASK: c_uint = 1 << 1;
+    const CONTROL_MASK: c_uint = 1 << 2;
+    const MOD1_MASK: c_uint = 1 << 3;
+    const MOD2_MASK: c_uint = 1 << 4;
+    const MOD4_MASK: c_uint = 1 << 6;
+
+    const XK_BACK_SPACE: KeySym = 0xff08;
+    const XK_TAB: KeySym = 0xff09;
+    const XK_RETURN: KeySym = 0xff0d;
+    const XK_ESCAPE: KeySym = 0xff1b;
+    const XK_DELETE: KeySym = 0xffff;
+    const XK_F1: KeySym = 0xffbe;
+    const PORTAL_DESTINATION: &str = "org.freedesktop.portal.Desktop";
+    const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+    const PORTAL_GLOBAL_SHORTCUTS_INTERFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
+    const PORTAL_REQUEST_INTERFACE: &str = "org.freedesktop.portal.Request";
+    const SHORTCUT_ID_SHOW: &str = "show-typetext";
+
+    static TARGET_WINDOW: AtomicU64 = AtomicU64::new(0);
+    static LAST_X_ERROR: AtomicI32 = AtomicI32::new(0);
+
+    pub fn register_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
+        if is_wayland_session() {
+            return register_portal_hotkey(hotkey, tx);
+        }
+
+        let (modifiers, keysym) =
+            parse_hotkey(&hotkey).ok_or_else(|| anyhow!("Invalid hotkey: {hotkey}"))?;
+
+        let (ready_tx, ready_rx) = mpsc::channel();
+        thread::spawn(move || unsafe {
+            let display = XOpenDisplay(ptr::null());
+            if display.is_null() {
+                let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+                let detail = if session.eq_ignore_ascii_case("wayland") {
+                    " Ubuntu Wayland sessions do not expose X11 global key grabs; choose an Ubuntu on Xorg session to use TypeText's global hotkey."
+                } else {
+                    " Ensure DISPLAY is set and an X11 session is running."
+                };
+                let _ = ready_tx.send(Err(format!("Could not open X11 display.{detail}")));
+                return;
+            }
+
+            let root = XDefaultRootWindow(display);
+            let keycode = XKeysymToKeycode(display, keysym);
+            if keycode == 0 {
+                let _ = XCloseDisplay(display);
+                let _ = ready_tx.send(Err(format!("Unsupported hotkey key: {hotkey}")));
+                return;
+            }
+
+            let previous_handler = XSetErrorHandler(Some(x_error_handler));
+            LAST_X_ERROR.store(0, Ordering::SeqCst);
+            for variant in modifier_variants(modifiers) {
+                XGrabKey(
+                    display,
+                    keycode as c_int,
+                    variant,
+                    root,
+                    0,
+                    GRAB_MODE_ASYNC,
+                    GRAB_MODE_ASYNC,
+                );
+            }
+            XSync(display, 0);
+            XSetErrorHandler(previous_handler);
+
+            let error_code = LAST_X_ERROR.load(Ordering::SeqCst);
+            if error_code != 0 {
+                let _ = XCloseDisplay(display);
+                let _ = ready_tx.send(Err(format!(
+                    "X11 could not register {hotkey}; another app or the desktop environment may already own it. X error code {error_code}."
+                )));
+                return;
+            }
+
+            let _ = ready_tx.send(Ok(()));
+
+            loop {
+                let mut event = XEvent { pad: [0; 24] };
+                if XNextEvent(display, &mut event) != 0 {
+                    continue;
+                }
+                if event.type_ == KEY_PRESS {
+                    remember_target_window(display);
+                    let _ = tx.send(());
+                }
+            }
+        });
+
+        ready_rx
+            .recv()
+            .unwrap_or_else(|_| Err("Hotkey registration thread stopped".to_string()))
+            .map_err(|error| anyhow!(error))
+    }
+
+    pub fn type_text(_text: &str) -> Result<()> {
+        Err(anyhow!("Typing is not implemented on Linux yet."))
+    }
+
+    pub fn type_text_current_focus(_text: &str) -> Result<()> {
+        Err(anyhow!("Typing is not implemented on Linux yet."))
+    }
+
+    pub fn open_folder(path: &Path) -> Result<()> {
+        Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub fn open_url(url: &str) -> Result<()> {
+        Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub fn fetch_text(url: &str) -> Result<String> {
+        let output = Command::new("curl")
+            .args(["-fsSL", "-H", "User-Agent: TypeText", url])
+            .output()
+            .context("Could not run curl update check")?;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow!("Update request failed. {}", stderr.trim()))
+        }
+    }
+
+    pub fn open_droptext_file_dialog() -> Result<Option<std::path::PathBuf>> {
+        Err(anyhow!(
+            "Native DropText file picker is only implemented on macOS and Windows."
+        ))
+    }
+
+    pub fn open_snippets_export_dialog() -> Result<Option<std::path::PathBuf>> {
+        Err(anyhow!(
+            "Native snippets export picker is only implemented on macOS and Windows."
+        ))
+    }
+
+    pub fn startup_enabled() -> bool {
+        false
+    }
+
+    pub fn set_startup_enabled(enabled: bool) -> Result<()> {
+        if enabled {
+            Err(anyhow!(
+                "Open on Startup only applies to the macOS and Windows builds."
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn tray_status() -> &'static str {
+        "On Ubuntu, TypeText can re-open from its global hotkey through the desktop portal on Wayland or X11 key grabs on Xorg."
+    }
+
+    fn register_portal_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
+        let preferred_trigger = portal_trigger_for_hotkey(&hotkey)
+            .ok_or_else(|| anyhow!("Invalid Wayland portal hotkey: {hotkey}"))?;
+
+        let (ready_tx, ready_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let result = run_portal_hotkey_loop(&hotkey, &preferred_trigger, tx, ready_tx.clone());
+            if let Err(error) = result {
+                let _ = ready_tx.send(Err(error.to_string()));
+            }
+        });
+
+        ready_rx
+            .recv()
+            .unwrap_or_else(|_| Err("Wayland portal hotkey registration stopped".to_string()))
+            .map_err(|error| anyhow!(error))
+    }
+
+    fn run_portal_hotkey_loop(
+        hotkey: &str,
+        preferred_trigger: &str,
+        tx: Sender<()>,
+        ready_tx: Sender<std::result::Result<(), String>>,
+    ) -> Result<()> {
+        let connection = Connection::session()
+            .context("Could not connect to the D-Bus session bus for Wayland hotkeys")?;
+        let proxy = Proxy::new(
+            &connection,
+            PORTAL_DESTINATION,
+            PORTAL_PATH,
+            PORTAL_GLOBAL_SHORTCUTS_INTERFACE,
+        )
+        .context("Could not connect to the desktop global-shortcuts portal")?;
+
+        let version = proxy.get_property::<u32>("version").unwrap_or(0);
+        if version == 0 {
+            return Err(anyhow!(
+                "This Wayland desktop does not expose the GlobalShortcuts portal."
+            ));
+        }
+
+        let session_handle = create_portal_session(&proxy)?;
+        bind_portal_shortcut(&proxy, &session_handle, hotkey, preferred_trigger)?;
+        let _ = ready_tx.send(Ok(()));
+
+        let mut signals = proxy
+            .receive_signal("Activated")
+            .context("Could not subscribe to Wayland global shortcut activation")?;
+        for signal in &mut signals {
+            let Ok((activated_session, shortcut_id, _timestamp, _options)) = signal
+                .body()
+                .deserialize::<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>)>()
+            else {
+                continue;
+            };
+            if activated_session == session_handle && shortcut_id == SHORTCUT_ID_SHOW {
+                let _ = tx.send(());
+            }
+        }
+
+        Ok(())
+    }
+
+    fn create_portal_session(proxy: &Proxy<'_>) -> Result<OwnedObjectPath> {
+        let mut options = HashMap::new();
+        options.insert("handle_token", Value::from(portal_token("create")));
+        options.insert("session_handle_token", Value::from(portal_token("session")));
+
+        let request_handle: OwnedObjectPath = proxy
+            .call("CreateSession", &(options,))
+            .context("Could not create Wayland global-shortcuts portal session")?;
+        let results = wait_for_portal_response(proxy.connection(), &request_handle)?;
+        let session_handle = results
+            .get("session_handle")
+            .ok_or_else(|| anyhow!("Wayland global-shortcuts portal did not return a session"))?;
+        let session_handle = String::try_from(session_handle.clone())
+            .context("Wayland global-shortcuts portal returned an invalid session handle")?;
+        OwnedObjectPath::try_from(session_handle)
+            .context("Wayland global-shortcuts portal returned a malformed session handle")
+    }
+
+    fn bind_portal_shortcut(
+        proxy: &Proxy<'_>,
+        session_handle: &OwnedObjectPath,
+        hotkey: &str,
+        preferred_trigger: &str,
+    ) -> Result<()> {
+        let session_path = ObjectPath::try_from(session_handle.as_str())
+            .context("Wayland global-shortcuts portal session handle was malformed")?;
+        let mut shortcut_options = HashMap::new();
+        shortcut_options.insert("description", Value::from("Show TypeText"));
+        shortcut_options.insert(
+            "preferred_trigger",
+            Value::from(preferred_trigger.to_string()),
+        );
+        let shortcuts = vec![(SHORTCUT_ID_SHOW, shortcut_options)];
+
+        let mut options = HashMap::new();
+        options.insert("handle_token", Value::from(portal_token("bind")));
+
+        let request_handle: OwnedObjectPath = proxy
+            .call("BindShortcuts", &(session_path, shortcuts, "", options))
+            .with_context(|| format!("Could not ask Wayland to bind {hotkey}"))?;
+        let results = wait_for_portal_response(proxy.connection(), &request_handle)?;
+        let shortcuts = results
+            .get("shortcuts")
+            .ok_or_else(|| anyhow!("Wayland global-shortcuts portal did not bind {hotkey}"))?;
+        let shortcuts =
+            Vec::<(String, HashMap<String, OwnedValue>)>::try_from(shortcuts.clone())
+                .context("Wayland global-shortcuts portal returned an invalid shortcut list")?;
+        if shortcuts
+            .iter()
+            .any(|(shortcut_id, _)| shortcut_id == SHORTCUT_ID_SHOW)
+        {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Wayland did not bind {hotkey}. The shortcut may have been denied or already reserved."
+            ))
+        }
+    }
+
+    fn wait_for_portal_response(
+        connection: &Connection,
+        request_handle: &OwnedObjectPath,
+    ) -> Result<HashMap<String, OwnedValue>> {
+        let request_proxy = Proxy::new(
+            connection,
+            PORTAL_DESTINATION,
+            request_handle.as_str(),
+            PORTAL_REQUEST_INTERFACE,
+        )
+        .context("Could not listen for Wayland portal response")?;
+        let mut responses = request_proxy
+            .receive_signal("Response")
+            .context("Could not subscribe to Wayland portal response")?;
+        let Some(response) = responses.next() else {
+            return Err(anyhow!("Wayland portal response stream closed"));
+        };
+        let (response_code, results): (u32, HashMap<String, OwnedValue>) = response
+            .body()
+            .deserialize()
+            .context("Could not parse Wayland portal response")?;
+        match response_code {
+            0 => Ok(results),
+            1 => Err(anyhow!("Wayland global shortcut setup was cancelled")),
+            2 => Err(anyhow!("Wayland global shortcut setup was denied")),
+            code => Err(anyhow!(
+                "Wayland global shortcut setup failed with portal response {code}"
+            )),
+        }
+    }
+
+    fn portal_trigger_for_hotkey(value: &str) -> Option<String> {
+        let mut modifiers = Vec::new();
+        let mut key = None;
+
+        for part in value.split('+').map(|part| part.trim()) {
+            match part.to_ascii_lowercase().as_str() {
+                "ctrl" | "control" => modifiers.push("CTRL".to_string()),
+                "alt" | "option" => modifiers.push("ALT".to_string()),
+                "shift" => modifiers.push("SHIFT".to_string()),
+                "win" | "windows" | "cmd" | "command" | "super" | "meta" => {
+                    modifiers.push("LOGO".to_string())
+                }
+                "space" => key = Some("space".to_string()),
+                "enter" | "return" => key = Some("Return".to_string()),
+                "escape" | "esc" => key = Some("Escape".to_string()),
+                "tab" => key = Some("Tab".to_string()),
+                "backspace" => key = Some("BackSpace".to_string()),
+                "delete" | "del" => key = Some("Delete".to_string()),
+                part if part.len() == 1 => key = Some(part.to_ascii_lowercase()),
+                part if part.starts_with('f') => {
+                    let number = part[1..].parse::<u32>().ok()?;
+                    if (1..=35).contains(&number) {
+                        key = Some(format!("F{number}"));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let key = key?;
+        modifiers.push(key);
+        Some(modifiers.join("+"))
+    }
+
+    fn portal_token(prefix: &str) -> String {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or_default();
+        format!("typetext_{prefix}_{millis}")
+    }
+
+    fn is_wayland_session() -> bool {
+        std::env::var("XDG_SESSION_TYPE")
+            .map(|session| session.eq_ignore_ascii_case("wayland"))
+            .unwrap_or(false)
+    }
+
+    fn parse_hotkey(value: &str) -> Option<(c_uint, KeySym)> {
+        let mut modifiers = 0;
+        let mut keysym = None;
+
+        for part in value
+            .split('+')
+            .map(|part| part.trim().to_ascii_lowercase())
+        {
+            match part.as_str() {
+                "ctrl" | "control" => modifiers |= CONTROL_MASK,
+                "alt" | "option" => modifiers |= MOD1_MASK,
+                "shift" => modifiers |= SHIFT_MASK,
+                "win" | "windows" | "cmd" | "command" | "super" | "meta" => modifiers |= MOD4_MASK,
+                "space" => keysym = Some(' ' as KeySym),
+                "enter" | "return" => keysym = Some(XK_RETURN),
+                "escape" | "esc" => keysym = Some(XK_ESCAPE),
+                "tab" => keysym = Some(XK_TAB),
+                "backspace" => keysym = Some(XK_BACK_SPACE),
+                "delete" | "del" => keysym = Some(XK_DELETE),
+                part if part.len() == 1 => {
+                    let byte = part.as_bytes()[0];
+                    keysym = Some(byte.to_ascii_uppercase() as KeySym);
+                }
+                part if part.starts_with('f') => {
+                    let number = part[1..].parse::<u32>().ok()?;
+                    if (1..=35).contains(&number) {
+                        keysym = Some(XK_F1 + KeySym::from(number - 1));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        keysym.map(|keysym| (modifiers, keysym))
+    }
+
+    fn modifier_variants(modifiers: c_uint) -> [c_uint; 4] {
+        [
+            modifiers,
+            modifiers | LOCK_MASK,
+            modifiers | MOD2_MASK,
+            modifiers | LOCK_MASK | MOD2_MASK,
+        ]
+    }
+
+    fn remember_target_window(display: *mut Display) {
+        let mut focus = 0;
+        let mut revert_to = 0;
+        unsafe {
+            XGetInputFocus(display, &mut focus, &mut revert_to);
+        }
+        if focus != 0 {
+            TARGET_WINDOW.store(focus as u64, Ordering::Relaxed);
+        }
+    }
+
+    unsafe extern "C" fn x_error_handler(_display: *mut Display, error: *mut XErrorEvent) -> c_int {
+        if !error.is_null() {
+            LAST_X_ERROR.store((*error).error_code as i32, Ordering::SeqCst);
+        }
+        0
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
 mod fallback_platform {
     use super::*;
 
@@ -880,8 +1393,14 @@ mod fallback_platform {
     }
 }
 
-#[cfg(all(not(windows), not(target_os = "macos")))]
+#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
 pub use fallback_platform::{
+    fetch_text, open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url,
+    register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
+    type_text_current_focus,
+};
+#[cfg(target_os = "linux")]
+pub use linux_platform::{
     fetch_text, open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url,
     register_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
     type_text_current_focus,

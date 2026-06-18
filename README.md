@@ -36,6 +36,9 @@ The app is portable by design: no installer is required, and runtime data lives 
   - target-application restore
   - text insertion through `osascript` / System Events
   - LaunchAgent startup integration
+- Linux/Ubuntu support for:
+  - XDG Desktop Portal global shortcut registration on Wayland
+  - X11 global hotkey registration on Xorg sessions
 - JSON snippet/settings storage
 
 ## Layout
@@ -202,8 +205,9 @@ dist/TypeText-Linux-<target>.tar.gz
 dist/typetext_<version>_amd64.deb
 ```
 
-Linux currently uses the shared Rust UI with fallback platform hooks. Global
-hotkey and synthetic typing support are not implemented on Linux yet.
+Linux currently uses the shared Rust UI with XDG Desktop Portal global shortcut
+support on Wayland and X11 global hotkey support on Ubuntu/Xorg sessions.
+Synthetic typing support is not implemented on Linux yet.
 
 ## macOS Permissions
 

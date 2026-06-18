@@ -3139,6 +3139,7 @@ dependencies = [
  "serde_json",
  "typetext-core",
  "windows",
+ "zbus",
 ]
 
 [[package]]
