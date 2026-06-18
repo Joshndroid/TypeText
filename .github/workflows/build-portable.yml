@@ -43,11 +43,44 @@ jobs:
           security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERTIFICATE_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -t cert -f pkcs12 -k "$KEYCHAIN_PATH" -A -T /usr/bin/codesign
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security default-keychain -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Verify Developer ID signing
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          if [[ "$CODESIGN_IDENTITY" != Developer\ ID\ Application:* ]]; then
+            echo "MACOS_CODESIGN_IDENTITY must be a Developer ID Application identity." >&2
+            exit 1
+          fi
+
+          curl \
+            --silent \
+            --show-error \
+            --max-time 30 \
+            --output /dev/null \
+            --write-out "Apple timestamp probe: HTTP %{http_code} in %{time_total}s\n" \
+            http://timestamp.apple.com/ts01 || true
+
+          cat >"$RUNNER_TEMP/signing-probe.c" <<'EOF'
+          int main(void) { return 0; }
+          EOF
+          clang "$RUNNER_TEMP/signing-probe.c" -o "$RUNNER_TEMP/signing-probe"
+
+          perl -e 'alarm shift @ARGV; exec @ARGV or die "exec failed: $!\n"' \
+            180 \
+            codesign \
+            --force \
+            --options runtime \
+            --timestamp \
+            --verbose=4 \
+            --sign "$CODESIGN_IDENTITY" \
+            "$RUNNER_TEMP/signing-probe"
+          codesign --verify --strict --verbose=4 "$RUNNER_TEMP/signing-probe"
 
       - name: Build portable and installable apps
         timeout-minutes: 120
