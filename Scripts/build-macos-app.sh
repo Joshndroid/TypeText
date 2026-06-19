@@ -136,6 +136,10 @@ else
 fi
 codesign --verify --strict --verbose=2 "$MACOS_DIR/TypeText"
 codesign --verify --strict --verbose=2 "$APP_DIR"
+if [[ -e "$CONTENTS_DIR/CodeResources" ]]; then
+  echo "Unexpected legacy signature file at $CONTENTS_DIR/CodeResources." >&2
+  exit 1
+fi
 
 rm -f "$ZIP_PATH"
 ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
@@ -148,6 +152,11 @@ if [[ "$NOTARIZE" == "1" ]]; then
   echo "Stapling notarization ticket to $APP_DIR."
   xcrun stapler staple "$APP_DIR"
   xcrun stapler validate "$APP_DIR"
+  codesign --verify --strict --verbose=2 "$APP_DIR"
+  if [[ -e "$CONTENTS_DIR/CodeResources" ]]; then
+    echo "Unexpected legacy signature file at $CONTENTS_DIR/CodeResources after stapling." >&2
+    exit 1
+  fi
 
   rm -f "$ZIP_PATH"
   ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"

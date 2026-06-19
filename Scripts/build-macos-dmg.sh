@@ -69,6 +69,10 @@ ditto --rsrc --extattr --acl "$APP_DIR" "$DMG_ROOT/TypeText.app"
 ln -s /Applications "$DMG_ROOT/Applications"
 
 codesign --verify --strict --verbose=2 "$DMG_ROOT/TypeText.app"
+if [[ -e "$DMG_ROOT/TypeText.app/Contents/CodeResources" ]]; then
+  echo "Unexpected legacy signature file at $DMG_ROOT/TypeText.app/Contents/CodeResources." >&2
+  exit 1
+fi
 
 rm -f "$DMG_PATH"
 if ! diskutil image create from \
