@@ -126,6 +126,7 @@ struct TypeTextApp {
     error_message: Option<String>,
     confirm_clear_all: bool,
     capturing_hotkey: bool,
+    settings_dirty: bool,
     snippet_chain: Vec<SearchResult>,
     insert_when_focus_lost: bool,
     registered_hotkey: Option<String>,
@@ -562,6 +563,7 @@ impl TypeTextApp {
             error_message,
             confirm_clear_all: false,
             capturing_hotkey: false,
+            settings_dirty: false,
             snippet_chain: Vec::new(),
             insert_when_focus_lost: false,
             registered_hotkey,
@@ -958,10 +960,16 @@ impl TypeTextApp {
             &mut self.registered_hotkey,
         ) {
             Ok(()) => {
-                self.status = "Settings saved. Hotkey updated.".to_string();
+                self.settings_dirty = false;
+                self.status = "Settings saved".to_string();
             }
             Err(error) => self.show_error(error.to_string()),
         }
+    }
+
+    fn mark_settings_dirty(&mut self) {
+        self.settings_dirty = true;
+        self.status = "Settings changed. Save settings to apply them.".to_string();
     }
 
     fn handle_hotkey_capture(&mut self, ctx: &egui::Context) {
@@ -985,7 +993,7 @@ impl TypeTextApp {
         if let Some(hotkey) = captured {
             self.settings.hotkey = hotkey;
             self.capturing_hotkey = false;
-            self.status = "Hotkey captured. Save settings to apply it.".to_string();
+            self.mark_settings_dirty();
         }
     }
 
@@ -1797,6 +1805,14 @@ impl TypeTextApp {
                     .small()
                     .color(ui.visuals().weak_text_color()),
             );
+            if self.settings_dirty {
+                ui.label(
+                    egui::RichText::new("Unsaved changes - click Save Settings")
+                        .small()
+                        .strong()
+                        .color(ui.visuals().hyperlink_color),
+                );
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Save Settings").clicked() {
                     self.save_settings();
@@ -1811,10 +1827,15 @@ impl TypeTextApp {
             .show(ui, |ui| {
                 framed_section(ui, "Hotkey", "global summon shortcut", |ui| {
                     ui.horizontal(|ui| {
-                        ui.add_sized(
-                            [220.0, 24.0],
-                            egui::TextEdit::singleline(&mut self.settings.hotkey),
-                        );
+                        if ui
+                            .add_sized(
+                                [220.0, 24.0],
+                                egui::TextEdit::singleline(&mut self.settings.hotkey),
+                            )
+                            .changed()
+                        {
+                            self.mark_settings_dirty();
+                        }
                         let label = if self.capturing_hotkey {
                             "Press keys..."
                         } else {
@@ -1828,38 +1849,67 @@ impl TypeTextApp {
 
                 section_gap(ui);
                 framed_section(ui, "Startup", "launch behavior", |ui| {
-                    ui.checkbox(&mut self.settings.open_on_startup, "Open on Startup");
+                    if ui
+                        .checkbox(&mut self.settings.open_on_startup, "Open on Startup")
+                        .changed()
+                    {
+                        self.mark_settings_dirty();
+                    }
                 });
 
                 section_gap(ui);
                 framed_section(ui, "Typing", "insertion behavior", |ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("Delay").small());
-                        ui.add(
-                            egui::DragValue::new(&mut self.settings.typing_delay_ms)
-                                .range(0..=2_000),
-                        );
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut self.settings.typing_delay_ms)
+                                    .range(0..=2_000),
+                            )
+                            .changed()
+                        {
+                            self.mark_settings_dirty();
+                        }
                         ui.label(egui::RichText::new("milliseconds").small().weak());
                     });
-                    ui.checkbox(
-                        &mut self.settings.close_after_insert,
-                        "Hide after inserting text",
-                    );
-                    ui.checkbox(
-                        &mut self.settings.start_snippets_on_new_line,
-                        "Start each queued snippet on a new line",
-                    );
+                    if ui
+                        .checkbox(
+                            &mut self.settings.close_after_insert,
+                            "Hide after inserting text",
+                        )
+                        .changed()
+                    {
+                        self.mark_settings_dirty();
+                    }
+                    if ui
+                        .checkbox(
+                            &mut self.settings.start_snippets_on_new_line,
+                            "Start each queued snippet on a new line",
+                        )
+                        .changed()
+                    {
+                        self.mark_settings_dirty();
+                    }
+                    let mut empty_lines_changed = false;
                     ui.add_enabled_ui(self.settings.start_snippets_on_new_line, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("Empty lines between snippets").small());
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.settings.empty_lines_between_snippets,
+                            if ui
+                                .add(
+                                    egui::DragValue::new(
+                                        &mut self.settings.empty_lines_between_snippets,
+                                    )
+                                    .range(0..=12),
                                 )
-                                .range(0..=12),
-                            );
+                                .changed()
+                            {
+                                empty_lines_changed = true;
+                            }
                         });
                     });
+                    if empty_lines_changed {
+                        self.mark_settings_dirty();
+                    }
                 });
 
                 section_gap(ui);
@@ -1877,6 +1927,7 @@ impl TypeTextApp {
                                 .clicked()
                             {
                                 self.settings.queued_snippet_click_action = value;
+                                self.mark_settings_dirty();
                             }
                         }
                     });
@@ -1897,7 +1948,7 @@ impl TypeTextApp {
                             {
                                 self.settings.theme = value.to_string();
                                 apply_theme(ctx, &self.settings.theme);
-                                self.status = format!("Theme set to {label}");
+                                self.mark_settings_dirty();
                             }
                         }
                     });
@@ -1905,10 +1956,15 @@ impl TypeTextApp {
 
                 section_gap(ui);
                 framed_section(ui, "Updates", "GitHub releases", |ui| {
-                    ui.checkbox(
-                        &mut self.settings.check_for_updates,
-                        "Check for updates once per day",
-                    );
+                    if ui
+                        .checkbox(
+                            &mut self.settings.check_for_updates,
+                            "Check for updates once per day",
+                        )
+                        .changed()
+                    {
+                        self.mark_settings_dirty();
+                    }
                     ui.horizontal(|ui| {
                         let check_label = if self.update_check_in_progress {
                             "Checking..."
