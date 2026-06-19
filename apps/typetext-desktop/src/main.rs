@@ -1598,19 +1598,19 @@ impl TypeTextApp {
 
         ui.scope_builder(
             egui::UiBuilder::new()
-                .max_rect(list_rect)
+                .max_rect(list_rect.shrink2(egui::vec2(5.0, 3.0)))
                 .layout(egui::Layout::top_down(egui::Align::Min)),
             |ui| {
-                ui.set_clip_rect(list_rect);
-                ui.set_width_range((list_rect.width() - 10.0)..=(list_rect.width() - 10.0));
-                ui.set_min_height(list_rect.height());
+                let content_rect = list_rect.shrink2(egui::vec2(5.0, 3.0));
+                ui.set_clip_rect(content_rect);
+                ui.set_width_range(content_rect.width()..=content_rect.width());
+                ui.set_min_height(content_rect.height());
                 egui::ScrollArea::vertical()
                     .id_salt("edit_groups")
-                    .max_height(list_rect.height())
-                    .min_scrolled_height(list_rect.height())
+                    .max_height(content_rect.height())
+                    .min_scrolled_height(content_rect.height())
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.add_space(3.0);
                         for (index, name) in group_names.iter().enumerate() {
                             let selected = self.edit_group_active && self.selected_group == index;
                             if sidebar_group_row(ui, name, selected).clicked() {
