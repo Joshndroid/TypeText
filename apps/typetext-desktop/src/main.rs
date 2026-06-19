@@ -1785,7 +1785,24 @@ impl TypeTextApp {
     }
 
     fn ui_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        section_header(ui, "Settings", "preferences and app data");
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Settings")
+                    .strong()
+                    .size(13.5)
+                    .color(ui.visuals().text_color()),
+            );
+            ui.label(
+                egui::RichText::new("preferences and app data")
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Save Settings").clicked() {
+                    self.save_settings();
+                }
+            });
+        });
         section_gap(ui);
 
         egui::ScrollArea::vertical()
@@ -1967,19 +1984,6 @@ impl TypeTextApp {
                             self.show_error(error.to_string());
                         }
                     }
-                });
-
-                section_gap(ui);
-                framed_section(ui, "App", "save preferences or exit", |ui| {
-                    ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() {
-                            self.save_settings();
-                        }
-                        if ui.button("Quit").clicked() {
-                            self.allow_quit = true;
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                    });
                 });
             });
     }
