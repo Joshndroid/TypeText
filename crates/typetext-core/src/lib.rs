@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub const DEFAULT_TYPING_DELAY_MS: u64 = 80;
 pub const DEFAULT_WINDOWS_CHARACTER_DELAY_MS: u64 = 22;
 pub const DEFAULT_WINDOWS_SEPARATOR_DELAY_MS: u64 = 35;
+pub const DEFAULT_EMPTY_LINES_BETWEEN_SNIPPETS: u32 = 0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -493,7 +495,7 @@ fn default_hotkey() -> String {
 }
 
 fn default_typing_delay_ms() -> u64 {
-    80
+    DEFAULT_TYPING_DELAY_MS
 }
 
 fn default_windows_character_delay_ms() -> u64 {
@@ -513,7 +515,7 @@ fn default_start_snippets_on_new_line() -> bool {
 }
 
 fn default_empty_lines_between_snippets() -> u32 {
-    0
+    DEFAULT_EMPTY_LINES_BETWEEN_SNIPPETS
 }
 
 fn default_theme() -> String {

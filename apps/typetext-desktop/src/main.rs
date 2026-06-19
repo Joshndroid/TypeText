@@ -1946,6 +1946,12 @@ impl TypeTextApp {
                             self.mark_settings_dirty();
                         }
                         ui.label(egui::RichText::new("milliseconds").small().weak());
+                        if self.settings.typing_delay_ms != typetext_core::DEFAULT_TYPING_DELAY_MS
+                            && ui.button("Reset to Default").clicked()
+                        {
+                            self.settings.typing_delay_ms = typetext_core::DEFAULT_TYPING_DELAY_MS;
+                            self.mark_settings_dirty();
+                        }
                     });
                     #[cfg(windows)]
                     {
@@ -1963,6 +1969,14 @@ impl TypeTextApp {
                                 self.mark_settings_dirty();
                             }
                             ui.label(egui::RichText::new("milliseconds").small().weak());
+                            if self.settings.windows_character_delay_ms
+                                != typetext_core::DEFAULT_WINDOWS_CHARACTER_DELAY_MS
+                                && ui.button("Reset to Default").clicked()
+                            {
+                                self.settings.windows_character_delay_ms =
+                                    typetext_core::DEFAULT_WINDOWS_CHARACTER_DELAY_MS;
+                                self.mark_settings_dirty();
+                            }
                         });
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("Windows separator delay").small());
@@ -1978,9 +1992,10 @@ impl TypeTextApp {
                                 self.mark_settings_dirty();
                             }
                             ui.label(egui::RichText::new("milliseconds").small().weak());
-                            if ui.button("Reset to Defaults").clicked() {
-                                self.settings.windows_character_delay_ms =
-                                    typetext_core::DEFAULT_WINDOWS_CHARACTER_DELAY_MS;
+                            if self.settings.windows_separator_delay_ms
+                                != typetext_core::DEFAULT_WINDOWS_SEPARATOR_DELAY_MS
+                                && ui.button("Reset to Default").clicked()
+                            {
                                 self.settings.windows_separator_delay_ms =
                                     typetext_core::DEFAULT_WINDOWS_SEPARATOR_DELAY_MS;
                                 self.mark_settings_dirty();
@@ -2012,26 +2027,29 @@ impl TypeTextApp {
                     {
                         self.mark_settings_dirty();
                     }
-                    let mut empty_lines_changed = false;
-                    ui.add_enabled_ui(self.settings.start_snippets_on_new_line, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Empty lines between snippets").small());
-                            if ui
-                                .add(
-                                    egui::DragValue::new(
-                                        &mut self.settings.empty_lines_between_snippets,
-                                    )
-                                    .range(0..=12),
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Empty lines between snippets").small());
+                        if ui
+                            .add_enabled(
+                                self.settings.start_snippets_on_new_line,
+                                egui::DragValue::new(
+                                    &mut self.settings.empty_lines_between_snippets,
                                 )
-                                .changed()
-                            {
-                                empty_lines_changed = true;
-                            }
-                        });
+                                .range(0..=12),
+                            )
+                            .changed()
+                        {
+                            self.mark_settings_dirty();
+                        }
+                        if self.settings.empty_lines_between_snippets
+                            != typetext_core::DEFAULT_EMPTY_LINES_BETWEEN_SNIPPETS
+                            && ui.button("Reset to Default").clicked()
+                        {
+                            self.settings.empty_lines_between_snippets =
+                                typetext_core::DEFAULT_EMPTY_LINES_BETWEEN_SNIPPETS;
+                            self.mark_settings_dirty();
+                        }
                     });
-                    if empty_lines_changed {
-                        self.mark_settings_dirty();
-                    }
                 });
 
                 section_gap(ui);
