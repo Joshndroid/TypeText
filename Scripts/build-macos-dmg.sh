@@ -50,6 +50,18 @@ codesign_timestamp_arg() {
   fi
 }
 
+verify_dmg_app() {
+  local mount_dir
+  local status
+  mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/typetext-dmg.XXXXXX")"
+  hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$DMG_PATH"
+  status=0
+  codesign --verify --strict --verbose=2 "$mount_dir/TypeText.app" || status=$?
+  hdiutil detach "$mount_dir"
+  rmdir "$mount_dir"
+  return "$status"
+}
+
 if [[ "$NOTARIZE" == "1" ]]; then
   if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
     echo "NOTARIZE=1 requires CODESIGN_IDENTITY='Developer ID Application: ...'." >&2
@@ -85,6 +97,7 @@ if ! diskutil image create from \
 fi
 
 rm -rf "$DMG_ROOT"
+verify_dmg_app
 
 if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
   TIMESTAMP_ARG="$(codesign_timestamp_arg)"
