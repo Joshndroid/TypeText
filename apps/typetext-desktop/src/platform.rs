@@ -428,7 +428,7 @@ $dialog = New-Object System.Windows.Forms.SaveFileDialog
 $dialog.Title = 'Export TypeText snippets'
 $dialog.Filter = 'TypeText snippets (*.json)|*.json|All files (*.*)|*.*'
 $dialog.FileName = 'snippets.json'
-$dialog.InitialDirectory = $args[0]
+$dialog.InitialDirectory = [Environment]::GetEnvironmentVariable('TYPETEXT_EXPORT_DIR')
 $dialog.DefaultExt = 'json'
 $dialog.AddExtension = $true
 $dialog.OverwritePrompt = $true
@@ -438,8 +438,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 }
 "#;
         let output = hidden_command("powershell")
+            .env("TYPETEXT_EXPORT_DIR", initial_dir)
             .args(["-NoProfile", "-STA", "-Command", script])
-            .arg(initial_dir)
             .output()
             .context("Could not open Windows save dialog")?;
 
