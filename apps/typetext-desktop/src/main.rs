@@ -119,6 +119,8 @@ struct TypeTextApp {
     selected_result: usize,
     selected_group: usize,
     selected_snippet: usize,
+    edit_group_active: bool,
+    edit_snippet_active: bool,
     edit_group_name: String,
     edit_title: String,
     edit_body: String,
@@ -142,21 +144,48 @@ struct TypeTextApp {
     background_notice_seen: bool,
 }
 
-fn apply_modern_style(ctx: &egui::Context) {
+fn parse_hex_color(value: &str) -> Option<egui::Color32> {
+    let hex = value.trim().strip_prefix('#').unwrap_or(value.trim());
+    if hex.len() != 6 || !hex.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    let red = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let green = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let blue = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(egui::Color32::from_rgb(red, green, blue))
+}
+
+fn format_hex_color(color: egui::Color32) -> String {
+    format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b())
+}
+
+fn accent_text_color(accent: egui::Color32) -> egui::Color32 {
+    let luminance =
+        (0.299 * accent.r() as f32) + (0.587 * accent.g() as f32) + (0.114 * accent.b() as f32);
+    if luminance > 150.0 {
+        egui::Color32::from_rgb(17, 24, 22)
+    } else {
+        egui::Color32::from_rgb(248, 255, 253)
+    }
+}
+
+fn accent_hover_color(accent: egui::Color32, dark: bool) -> egui::Color32 {
+    if dark {
+        accent.gamma_multiply(1.18)
+    } else {
+        accent.gamma_multiply(0.92)
+    }
+}
+
+fn apply_modern_style(ctx: &egui::Context, accent_hex: &str) {
     ctx.all_styles_mut(|style| {
         let dark = style.visuals.dark_mode;
-        let (
-            panel,
-            raised,
-            raised_hover,
-            text,
-            weak_text,
-            border,
-            accent,
-            accent_hover,
-            accent_text,
-            input_bg,
-        ) = if dark {
+        let accent =
+            parse_hex_color(accent_hex).unwrap_or_else(|| egui::Color32::from_rgb(10, 126, 118));
+        let accent_hover = accent_hover_color(accent, dark);
+        let accent_text = accent_text_color(accent);
+        let (panel, raised, raised_hover, text, weak_text, border, input_bg) = if dark {
             (
                 egui::Color32::from_rgb(18, 19, 20),
                 egui::Color32::from_rgb(31, 33, 34),
@@ -164,9 +193,6 @@ fn apply_modern_style(ctx: &egui::Context) {
                 egui::Color32::from_rgb(234, 238, 238),
                 egui::Color32::from_rgb(153, 161, 161),
                 egui::Color32::from_rgb(58, 63, 64),
-                egui::Color32::from_rgb(18, 132, 122),
-                egui::Color32::from_rgb(25, 154, 142),
-                egui::Color32::from_rgb(236, 255, 251),
                 egui::Color32::from_rgb(10, 11, 12),
             )
         } else {
@@ -177,9 +203,6 @@ fn apply_modern_style(ctx: &egui::Context) {
                 egui::Color32::from_rgb(32, 36, 34),
                 egui::Color32::from_rgb(96, 105, 101),
                 egui::Color32::from_rgb(206, 213, 209),
-                egui::Color32::from_rgb(10, 126, 118),
-                egui::Color32::from_rgb(13, 145, 136),
-                egui::Color32::from_rgb(248, 255, 253),
                 egui::Color32::from_rgb(255, 255, 255),
             )
         };
@@ -261,9 +284,9 @@ fn apply_modern_style(ctx: &egui::Context) {
     });
 }
 
-fn apply_theme(ctx: &egui::Context, theme: &str) {
-    ctx.set_theme(theme_preference(theme));
-    apply_modern_style(ctx);
+fn apply_theme(ctx: &egui::Context, settings: &AppSettings) {
+    ctx.set_theme(theme_preference(&settings.theme));
+    apply_modern_style(ctx, &settings.accent_color);
 }
 
 fn configure_fonts(ctx: &egui::Context) {
@@ -498,7 +521,7 @@ impl TypeTextApp {
         settings.open_on_startup = platform::startup_enabled();
         settings.theme = normalize_theme(&settings.theme);
         configure_fonts(&cc.egui_ctx);
-        apply_theme(&cc.egui_ctx, &settings.theme);
+        apply_theme(&cc.egui_ctx, &settings);
         let results = search_snippets(&snippets, "");
         let (tx, rx) = mpsc::channel();
         let (tray_tx, tray_rx) = mpsc::channel();
@@ -541,6 +564,8 @@ impl TypeTextApp {
             selected_result: 0,
             selected_group: 0,
             selected_snippet: 0,
+            edit_group_active: false,
+            edit_snippet_active: false,
             edit_group_name: String::new(),
             edit_title: String::new(),
             edit_body: String::new(),
@@ -734,6 +759,8 @@ impl TypeTextApp {
                 merge_snippet_file(&mut self.snippets, imported);
                 self.selected_group = 0;
                 self.selected_snippet = 0;
+                self.edit_group_active = false;
+                self.edit_snippet_active = false;
                 self.load_selected_editor_snippet();
                 match save_snippets(&self.paths, &self.snippets) {
                     Ok(()) => {
@@ -850,6 +877,8 @@ impl TypeTextApp {
         };
         self.selected_group = 0;
         self.selected_snippet = 0;
+        self.edit_group_active = false;
+        self.edit_snippet_active = false;
         self.chooser_group = None;
         self.selected_result = 0;
         self.snippet_chain.clear();
@@ -936,8 +965,13 @@ impl TypeTextApp {
         }
     }
 
-    fn save_settings(&mut self) {
+    fn save_settings(&mut self, ctx: &egui::Context) {
         self.settings.theme = normalize_theme(&self.settings.theme);
+        let Some(accent_color) = parse_hex_color(&self.settings.accent_color) else {
+            self.show_error("Accent color must be a 6-digit hex value, like #0A7E76");
+            return;
+        };
+        self.settings.accent_color = format_hex_color(accent_color);
         match save_settings_with_effects(
             &self.paths,
             &mut self.settings,
@@ -945,6 +979,7 @@ impl TypeTextApp {
             &mut self.registered_hotkey,
         ) {
             Ok(()) => {
+                apply_theme(ctx, &self.settings);
                 self.settings_dirty = false;
                 self.status = "Settings saved".to_string();
             }
@@ -1504,33 +1539,37 @@ impl TypeTextApp {
         });
 
         section_gap(ui);
-        framed_section(ui, "Group Details", "selected group", |ui| {
-            ui.label(egui::RichText::new("Name").small());
-            ui.text_edit_singleline(&mut self.edit_group_name);
-            ui.add_space(3.0);
-            ui.horizontal(|ui| {
-                if ui.button("Save").clicked() {
-                    let name = self.edit_group_name.trim().to_string();
-                    if name.is_empty() {
-                        self.show_error("Group name is required");
-                    } else if let Some(group) = self.selected_group_mut() {
-                        group.name = name;
+        if self.edit_group_active {
+            framed_section(ui, "Group Details", "selected group", |ui| {
+                ui.label(egui::RichText::new("Name").small());
+                ui.text_edit_singleline(&mut self.edit_group_name);
+                ui.add_space(3.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        let name = self.edit_group_name.trim().to_string();
+                        if name.is_empty() {
+                            self.show_error("Group name is required");
+                        } else if let Some(group) = self.selected_group_mut() {
+                            group.name = name;
+                            self.save_snippets();
+                        }
+                    }
+
+                    if ui.button("Delete").clicked()
+                        && self.selected_group < self.snippets.groups.len()
+                    {
+                        self.snippets.groups.remove(self.selected_group);
+                        self.selected_group = self.selected_group.saturating_sub(1);
+                        self.selected_snippet = 0;
+                        self.edit_group_active = false;
+                        self.edit_snippet_active = false;
+                        self.load_selected_editor_snippet();
                         self.save_snippets();
                     }
-                }
-
-                if ui.button("Delete").clicked() && self.selected_group < self.snippets.groups.len()
-                {
-                    self.snippets.groups.remove(self.selected_group);
-                    self.selected_group = self.selected_group.saturating_sub(1);
-                    self.selected_snippet = 0;
-                    self.load_selected_editor_snippet();
-                    self.save_snippets();
-                }
+                });
             });
-        });
-
-        section_gap(ui);
+            section_gap(ui);
+        }
 
         let list_top = ui.cursor().top();
         let list_height = (sidebar_rect.bottom() - list_top).max(0.0);
@@ -1573,10 +1612,15 @@ impl TypeTextApp {
                     .show(ui, |ui| {
                         ui.add_space(3.0);
                         for (index, name) in group_names.iter().enumerate() {
-                            if sidebar_group_row(ui, name, self.selected_group == index).clicked() {
+                            let selected = self.edit_group_active && self.selected_group == index;
+                            if sidebar_group_row(ui, name, selected).clicked() {
                                 self.selected_group = index;
                                 self.selected_snippet = 0;
+                                self.edit_group_active = true;
+                                self.edit_snippet_active = false;
                                 self.load_selected_editor_snippet();
+                                self.edit_title.clear();
+                                self.edit_body.clear();
                             }
                             ui.add_space(1.0);
                         }
@@ -1609,6 +1653,10 @@ impl TypeTextApp {
 
         section_gap(ui);
 
+        if !self.edit_group_active {
+            return;
+        }
+
         let snippet_list_height =
             (ui.available_height() * 0.28).clamp(min_list_height, max_snippet_list_height);
         let snippet_titles: Vec<String> = self
@@ -1631,14 +1679,16 @@ impl TypeTextApp {
                     for (index, title) in snippet_titles.iter().enumerate() {
                         let button_width =
                             (title.chars().count() as f32 * 7.0 + 22.0).clamp(80.0, 190.0);
+                        let selected = self.edit_snippet_active && self.selected_snippet == index;
                         if ui
                             .add_sized(
                                 [button_width, 24.0],
-                                egui::Button::selectable(self.selected_snippet == index, title),
+                                egui::Button::selectable(selected, title),
                             )
                             .clicked()
                         {
                             self.selected_snippet = index;
+                            self.edit_snippet_active = true;
                             self.load_selected_editor_snippet();
                         }
                     }
@@ -1646,6 +1696,17 @@ impl TypeTextApp {
             });
 
         section_gap(ui);
+
+        if !self.edit_snippet_active
+            || self
+                .snippets
+                .groups
+                .get(self.selected_group)
+                .and_then(|group| group.snippets.get(self.selected_snippet))
+                .is_none()
+        {
+            return;
+        }
 
         egui::Frame::new()
             .fill(ui.visuals().faint_bg_color)
@@ -1703,6 +1764,8 @@ impl TypeTextApp {
         });
         self.selected_group = self.snippets.groups.len() - 1;
         self.selected_snippet = 0;
+        self.edit_group_active = true;
+        self.edit_snippet_active = false;
         self.load_selected_editor_snippet();
         self.save_snippets();
     }
@@ -1715,6 +1778,7 @@ impl TypeTextApp {
             });
             self.selected_group = 0;
         }
+        self.edit_group_active = true;
 
         if let Some(group) = self.selected_group_mut() {
             group.snippets.push(Snippet {
@@ -1722,6 +1786,7 @@ impl TypeTextApp {
                 body: "Type your reusable text here.".to_string(),
             });
             self.selected_snippet = group.snippets.len() - 1;
+            self.edit_snippet_active = true;
             self.load_selected_editor_snippet();
             self.save_snippets();
         }
@@ -1771,6 +1836,7 @@ impl TypeTextApp {
             if selected_snippet < group.snippets.len() {
                 group.snippets.remove(selected_snippet);
                 self.selected_snippet = self.selected_snippet.saturating_sub(1);
+                self.edit_snippet_active = false;
                 self.load_selected_editor_snippet();
                 self.save_snippets();
             }
@@ -1800,7 +1866,7 @@ impl TypeTextApp {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Save Settings").clicked() {
-                    self.save_settings();
+                    self.save_settings(ctx);
                 }
             });
         });
@@ -1932,9 +1998,36 @@ impl TypeTextApp {
                                 .clicked()
                             {
                                 self.settings.theme = value.to_string();
-                                apply_theme(ctx, &self.settings.theme);
                                 self.mark_settings_dirty();
                             }
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Accent").small());
+                        if ui
+                            .add_sized(
+                                [86.0, 24.0],
+                                egui::TextEdit::singleline(&mut self.settings.accent_color)
+                                    .hint_text("#0A7E76"),
+                            )
+                            .changed()
+                        {
+                            self.mark_settings_dirty();
+                        }
+
+                        let mut accent_color = parse_hex_color(&self.settings.accent_color)
+                            .unwrap_or_else(|| egui::Color32::from_rgb(10, 126, 118));
+                        if ui.color_edit_button_srgba(&mut accent_color).changed() {
+                            self.settings.accent_color = format_hex_color(accent_color);
+                            self.mark_settings_dirty();
+                        }
+
+                        if parse_hex_color(&self.settings.accent_color).is_none() {
+                            ui.label(
+                                egui::RichText::new("Use #RRGGBB")
+                                    .small()
+                                    .color(ui.visuals().warn_fg_color),
+                            );
                         }
                     });
                 });

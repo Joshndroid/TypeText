@@ -41,6 +41,8 @@ pub struct AppSettings {
     pub open_on_startup: bool,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default = "default_accent_color")]
+    pub accent_color: String,
     #[serde(default = "default_queued_snippet_click_action")]
     pub queued_snippet_click_action: QueuedSnippetClickAction,
     #[serde(default = "default_check_for_updates")]
@@ -103,6 +105,7 @@ impl Default for AppSettings {
             empty_lines_between_snippets: default_empty_lines_between_snippets(),
             open_on_startup: false,
             theme: default_theme(),
+            accent_color: default_accent_color(),
             queued_snippet_click_action: default_queued_snippet_click_action(),
             check_for_updates: default_check_for_updates(),
             last_update_check_unix: None,
@@ -498,6 +501,10 @@ fn default_empty_lines_between_snippets() -> u32 {
 
 fn default_theme() -> String {
     "system".to_string()
+}
+
+fn default_accent_color() -> String {
+    "#0A7E76".to_string()
 }
 
 fn default_queued_snippet_click_action() -> QueuedSnippetClickAction {
