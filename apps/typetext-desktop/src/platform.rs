@@ -108,6 +108,7 @@ mod windows_platform {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const HOTKEY_ID: i32 = 0x5454;
+    const UNICODE_INPUT_INTERVAL: Duration = Duration::from_millis(8);
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
     static HOTKEY_MANAGER: OnceLock<Sender<HotkeyCommand>> = OnceLock::new();
 
@@ -244,6 +245,7 @@ mod windows_platform {
         thread::sleep(Duration::from_millis(20));
         for unit in text.encode_utf16() {
             send_unicode_unit(unit)?;
+            thread::sleep(UNICODE_INPUT_INTERVAL);
         }
         Ok(())
     }
