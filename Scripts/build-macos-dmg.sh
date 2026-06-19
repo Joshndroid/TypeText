@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/Scripts/version.sh"
 APP_DIR="$ROOT_DIR/dist/TypeText.app"
-DMG_ROOT="$ROOT_DIR/dist/dmg-root"
+DMG_ROOT="$ROOT_DIR/dist/TypeText"
 DMG_PATH="$ROOT_DIR/dist/TypeText-macOS.dmg"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 CODESIGN_TIMESTAMP="${CODESIGN_TIMESTAMP:-1}"
@@ -73,7 +73,6 @@ codesign --verify --strict --verbose=2 "$DMG_ROOT/TypeText.app"
 rm -f "$DMG_PATH"
 diskutil image create from \
   --format UDZO \
-  --volumeName "TypeText" \
   "$DMG_ROOT" \
   "$DMG_PATH"
 
