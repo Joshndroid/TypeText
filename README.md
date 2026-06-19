@@ -11,12 +11,15 @@ runtime data uses simple JSON files.
 - Searchable snippet chooser with group filtering
 - Snippet chaining for inserting multiple text chunks together
 - Configurable queued-snippet behavior: add duplicates or remove queued entries
+- Configurable paragraph separators between queued snippets
 - Built-in group and snippet editor
 - DropText INI import and TypeText JSON export
 - Simple JSON snippet/settings storage
-- Configurable typing delay and close-after-insert behavior
+- Configurable delay before typing and close-after-insert behavior
+- Windows-only character and separator typing delays
 - Open-on-startup setting for macOS and Windows
-- Light, dark, and system theme support
+- Light, dark, and system theme support with configurable accent color
+- Staged settings changes with a visible Save Settings reminder
 - Daily GitHub release update checks with platform-specific download links
 - Bundled JetBrains Mono UI font for consistent rendering
 - Low-footprint native Rust/egui desktop app
@@ -29,6 +32,7 @@ runtime data uses simple JSON files.
   - global hotkey registration
   - target-window restore
   - text insertion with `SendInput`
+  - configurable character and separator input delays
   - Startup folder integration
 - macOS support for:
   - Carbon global hotkey registration
@@ -52,6 +56,8 @@ docs/
 examples/
   snippets.json
   settings.json
+
+quickstart.txt          user-facing setup and usage handout
 ```
 
 ## App Data
@@ -122,6 +128,8 @@ TypeText checks that release feed at most once per day when update checks are
 enabled. When a newer platform-specific package is available, the app offers a
 download link and prefers installable packages over portable archives; it does
 not replace the running app automatically.
+
+For a user-facing setup guide to include with releases, see `quickstart.txt`.
 
 Check the shared core and desktop app:
 
@@ -201,7 +209,9 @@ dist\TypeText-Windows-x64-Setup.exe.sha256
 
 macOS requires Accessibility permission for synthetic keyboard input.
 
-When running from development, grant permission to the terminal app used to launch TypeText. When running a packaged app, grant permission to TypeText itself.
+When running from development, grant permission to the terminal app used to
+launch TypeText. When running a packaged app, grant permission to TypeText
+itself.
 
 ```text
 System Settings > Privacy & Security > Accessibility
@@ -213,14 +223,22 @@ System Settings > Privacy & Security > Accessibility
 {
   "hotkey": "Ctrl+Alt+Space",
   "typingDelayMs": 80,
+  "windowsCharacterDelayMs": 22,
+  "windowsSeparatorDelayMs": 35,
   "closeAfterInsert": true,
+  "startSnippetsOnNewLine": false,
+  "emptyLinesBetweenSnippets": 0,
   "openOnStartup": false,
   "theme": "system",
+  "accentColor": "#0A7E76",
   "queuedSnippetClickAction": "addAgain",
   "checkForUpdates": true,
   "lastUpdateCheckUnix": null
 }
 ```
+
+Settings changes are staged in the UI. When the Settings header shows unsaved
+changes, click Save Settings to persist and apply them.
 
 ## Bundled Fonts
 

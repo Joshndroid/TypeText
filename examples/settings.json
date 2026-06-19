@@ -1,9 +1,14 @@
 {
   "hotkey": "Ctrl+Alt+Space",
   "typingDelayMs": 80,
+  "windowsCharacterDelayMs": 22,
+  "windowsSeparatorDelayMs": 35,
   "closeAfterInsert": true,
+  "startSnippetsOnNewLine": false,
+  "emptyLinesBetweenSnippets": 0,
   "openOnStartup": false,
   "theme": "system",
+  "accentColor": "#0A7E76",
   "queuedSnippetClickAction": "addAgain",
   "checkForUpdates": true,
   "lastUpdateCheckUnix": null
