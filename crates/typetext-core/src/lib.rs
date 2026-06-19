@@ -33,6 +33,10 @@ pub struct AppSettings {
     pub typing_delay_ms: u64,
     #[serde(default = "default_close_after_insert")]
     pub close_after_insert: bool,
+    #[serde(default = "default_start_snippets_on_new_line")]
+    pub start_snippets_on_new_line: bool,
+    #[serde(default = "default_empty_lines_between_snippets")]
+    pub empty_lines_between_snippets: u32,
     #[serde(default, alias = "startWithWindows")]
     pub open_on_startup: bool,
     #[serde(default = "default_theme")]
@@ -95,6 +99,8 @@ impl Default for AppSettings {
             hotkey: default_hotkey(),
             typing_delay_ms: default_typing_delay_ms(),
             close_after_insert: default_close_after_insert(),
+            start_snippets_on_new_line: default_start_snippets_on_new_line(),
+            empty_lines_between_snippets: default_empty_lines_between_snippets(),
             open_on_startup: false,
             theme: default_theme(),
             queued_snippet_click_action: default_queued_snippet_click_action(),
@@ -480,6 +486,14 @@ fn default_typing_delay_ms() -> u64 {
 
 fn default_close_after_insert() -> bool {
     true
+}
+
+fn default_start_snippets_on_new_line() -> bool {
+    false
+}
+
+fn default_empty_lines_between_snippets() -> u32 {
+    0
 }
 
 fn default_theme() -> String {

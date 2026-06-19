@@ -67,6 +67,19 @@ struct ChainInsertion {
     body: String,
 }
 
+fn join_snippet_chain<'a>(
+    bodies: impl IntoIterator<Item = &'a str>,
+    settings: &AppSettings,
+) -> String {
+    let separator = if settings.start_snippets_on_new_line {
+        "\n".repeat((settings.empty_lines_between_snippets + 1) as usize)
+    } else {
+        String::new()
+    };
+
+    bodies.into_iter().collect::<Vec<_>>().join(&separator)
+}
+
 #[derive(Debug, Clone)]
 struct UpdateInfo {
     version: String,
@@ -610,12 +623,10 @@ impl TypeTextApp {
         } else {
             ChainInsertion {
                 title: format!("{} snippets", self.snippet_chain.len()),
-                body: self
-                    .snippet_chain
-                    .iter()
-                    .map(|result| result.body.as_str())
-                    .collect::<Vec<_>>()
-                    .join(""),
+                body: join_snippet_chain(
+                    self.snippet_chain.iter().map(|result| result.body.as_str()),
+                    &self.settings,
+                ),
             }
         };
 
@@ -913,12 +924,10 @@ impl TypeTextApp {
 
         let insertion = ChainInsertion {
             title: format!("{} snippets", self.snippet_chain.len()),
-            body: self
-                .snippet_chain
-                .iter()
-                .map(|result| result.body.as_str())
-                .collect::<Vec<_>>()
-                .join(""),
+            body: join_snippet_chain(
+                self.snippet_chain.iter().map(|result| result.body.as_str()),
+                &self.settings,
+            ),
         };
 
         if insertion.body.is_empty() {
@@ -1819,6 +1828,21 @@ impl TypeTextApp {
                         &mut self.settings.close_after_insert,
                         "Hide after inserting text",
                     );
+                    ui.checkbox(
+                        &mut self.settings.start_snippets_on_new_line,
+                        "Start each queued snippet on a new line",
+                    );
+                    ui.add_enabled_ui(self.settings.start_snippets_on_new_line, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Empty lines between snippets").small());
+                            ui.add(
+                                egui::DragValue::new(
+                                    &mut self.settings.empty_lines_between_snippets,
+                                )
+                                .range(0..=12),
+                            );
+                        });
+                    });
                 });
 
                 section_gap(ui);
@@ -2242,6 +2266,35 @@ mod tests {
 
     fn cleanup_paths(paths: &PortablePaths) {
         let _ = fs::remove_dir_all(&paths.data_dir);
+    }
+
+    #[test]
+    fn queued_snippets_join_without_separator_by_default() {
+        let settings = AppSettings::default();
+
+        assert_eq!(join_snippet_chain(["One", "Two"], &settings), "OneTwo");
+    }
+
+    #[test]
+    fn queued_snippets_can_start_on_new_lines() {
+        let settings = AppSettings {
+            start_snippets_on_new_line: true,
+            empty_lines_between_snippets: 0,
+            ..Default::default()
+        };
+
+        assert_eq!(join_snippet_chain(["One", "Two"], &settings), "One\nTwo");
+    }
+
+    #[test]
+    fn queued_snippets_can_have_empty_lines_between_them() {
+        let settings = AppSettings {
+            start_snippets_on_new_line: true,
+            empty_lines_between_snippets: 1,
+            ..Default::default()
+        };
+
+        assert_eq!(join_snippet_chain(["One", "Two"], &settings), "One\n\nTwo");
     }
 
     fn read_settings_hotkey(settings_path: PathBuf) -> String {
