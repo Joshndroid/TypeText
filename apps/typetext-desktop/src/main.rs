@@ -322,7 +322,7 @@ fn section_header(ui: &mut egui::Ui, title: &str, meta: impl Into<String>) {
             egui::RichText::new(title)
                 .strong()
                 .size(13.5)
-                .color(ui.visuals().strong_text_color()),
+                .color(ui.visuals().text_color()),
         );
         let meta = meta.into();
         if !meta.is_empty() {
@@ -1093,7 +1093,8 @@ impl TypeTextApp {
                             ui.label(
                                 egui::RichText::new("TypeText will keep running")
                                     .strong()
-                                    .size(17.0),
+                                    .size(17.0)
+                                    .color(ui.visuals().text_color()),
                             );
                         });
                         ui.add_space(6.0);
@@ -1167,7 +1168,8 @@ impl TypeTextApp {
                             ui.label(
                                 egui::RichText::new("Clear all snippets?")
                                     .strong()
-                                    .size(17.0),
+                                    .size(17.0)
+                                    .color(ui.visuals().text_color()),
                             );
                         });
                         ui.add_space(6.0);
@@ -1229,7 +1231,12 @@ impl TypeTextApp {
                     .show(ui, |ui| {
                         ui.set_max_width(460.0);
                         ui.vertical_centered(|ui| {
-                            ui.label(egui::RichText::new("Error").strong().size(17.0));
+                            ui.label(
+                                egui::RichText::new("Error")
+                                    .strong()
+                                    .size(17.0)
+                                    .color(ui.visuals().text_color()),
+                            );
                         });
                         ui.add_space(6.0);
                         ui.separator();
@@ -1262,7 +1269,7 @@ impl TypeTextApp {
                 egui::RichText::new("TypeText")
                     .strong()
                     .size(16.0)
-                    .color(ui.visuals().strong_text_color()),
+                    .color(ui.visuals().text_color()),
             );
             ui.label(
                 egui::RichText::new(APP_VERSION)
@@ -1650,28 +1657,34 @@ impl TypeTextApp {
                         egui::RichText::new("Edit Snippet")
                             .strong()
                             .size(13.5)
-                            .color(ui.visuals().strong_text_color()),
+                            .color(ui.visuals().text_color()),
                     );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Delete").clicked() {
-                            self.delete_selected_editor_snippet();
-                        }
-                        if ui.button("Save").clicked() {
-                            self.save_selected_editor_snippet();
-                        }
-                    });
-                });
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
                     ui.add_sized(
                         [42.0, 24.0],
                         egui::Label::new(egui::RichText::new("Title").small()),
                     );
+                    let button_width = 66.0;
+                    let reserved_width = (button_width * 2.0) + (ui.spacing().item_spacing.x * 2.0);
+                    let title_width = (ui.available_width() - reserved_width).max(120.0);
                     ui.add_sized(
-                        [ui.available_width(), 24.0],
+                        [title_width, 24.0],
                         egui::TextEdit::singleline(&mut self.edit_title),
                     );
+                    if ui
+                        .add_sized([button_width, 24.0], egui::Button::new("Save"))
+                        .clicked()
+                    {
+                        self.save_selected_editor_snippet();
+                    }
+                    if ui
+                        .add_sized([button_width, 24.0], egui::Button::new("Delete"))
+                        .clicked()
+                    {
+                        self.delete_selected_editor_snippet();
+                    }
                 });
+                ui.add_space(4.0);
                 ui.label(egui::RichText::new("Body").small());
                 let body_height = (ui.available_height() - 2.0).max(108.0);
                 ui.add_sized(
@@ -1888,7 +1901,8 @@ impl TypeTextApp {
                                 "{} is available for this platform",
                                 update.version
                             ))
-                            .strong(),
+                            .strong()
+                            .color(ui.visuals().text_color()),
                         );
                         ui.label(egui::RichText::new(&update.asset_name).small().weak());
                         ui.horizontal(|ui| {
