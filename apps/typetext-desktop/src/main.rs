@@ -762,7 +762,7 @@ impl TypeTextApp {
 
         match export_snippets(&path, &self.snippets) {
             Ok(()) => {
-                self.status = format!("Exported snippets to {}", path.display());
+                self.status = "Exported snippets".to_string();
             }
             Err(error) => self.show_error(error.to_string()),
         }
