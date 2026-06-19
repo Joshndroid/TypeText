@@ -372,12 +372,12 @@ mod windows_platform {
 
     pub fn fetch_text(url: &str) -> Result<String> {
         let output = hidden_command("powershell")
+            .env("TYPETEXT_UPDATE_URL", url)
             .args([
                 "-NoProfile",
                 "-Command",
-                "$ProgressPreference='SilentlyContinue'; (Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='TypeText'} -Uri $args[0]).Content",
+                "$ProgressPreference='SilentlyContinue'; $uri=[Environment]::GetEnvironmentVariable('TYPETEXT_UPDATE_URL'); (Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='TypeText'} -Uri $uri).Content",
             ])
-            .arg(url)
             .output()
             .context("Could not run PowerShell update check")?;
 
