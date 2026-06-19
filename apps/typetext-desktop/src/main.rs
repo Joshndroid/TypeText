@@ -343,14 +343,9 @@ fn title_from_body(body: &str) -> Option<String> {
     Some(title)
 }
 
-fn nav_button(ui: &mut egui::Ui, current: &mut View, view: View, label: &str) {
-    let selected = *current == view;
-    if ui
-        .add(egui::Button::selectable(selected, label).min_size(egui::vec2(68.0, 22.0)))
+fn nav_button(ui: &mut egui::Ui, selected: bool, label: &str) -> bool {
+    ui.add(egui::Button::selectable(selected, label).min_size(egui::vec2(68.0, 22.0)))
         .clicked()
-    {
-        *current = view;
-    }
 }
 
 fn section_header(ui: &mut egui::Ui, title: &str, meta: impl Into<String>) {
@@ -686,9 +681,24 @@ impl TypeTextApp {
     }
 
     fn show_window(&mut self, ctx: &egui::Context, view: View) {
-        self.view = view;
+        self.switch_view(view);
         self.bring_window_to_front(ctx);
         self.status = "Ready".to_string();
+    }
+
+    fn switch_view(&mut self, view: View) {
+        if self.view == View::Edit && view != View::Edit {
+            self.clear_edit_selection();
+        }
+        self.view = view;
+    }
+
+    fn clear_edit_selection(&mut self) {
+        self.edit_group_active = false;
+        self.edit_snippet_active = false;
+        self.edit_group_name.clear();
+        self.edit_title.clear();
+        self.edit_body.clear();
     }
 
     fn bring_window_to_front(&self, ctx: &egui::Context) {
@@ -1322,9 +1332,15 @@ impl TypeTextApp {
                 if ui.button("Hide").clicked() {
                     self.request_hide_to_background(ctx);
                 }
-                nav_button(ui, &mut self.view, View::Settings, "Settings");
-                nav_button(ui, &mut self.view, View::Edit, "Edit");
-                nav_button(ui, &mut self.view, View::Choose, "Choose");
+                if nav_button(ui, self.view == View::Settings, "Settings") {
+                    self.switch_view(View::Settings);
+                }
+                if nav_button(ui, self.view == View::Edit, "Edit") {
+                    self.switch_view(View::Edit);
+                }
+                if nav_button(ui, self.view == View::Choose, "Choose") {
+                    self.switch_view(View::Choose);
+                }
                 if self.update_info.is_some() && ui.button("Download Update").clicked() {
                     self.open_update_download();
                 }
@@ -1911,7 +1927,7 @@ impl TypeTextApp {
                 section_gap(ui);
                 framed_section(ui, "Typing", "insertion behavior", |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Delay").small());
+                        ui.label(egui::RichText::new("Delay before typing").small());
                         if ui
                             .add(
                                 egui::DragValue::new(&mut self.settings.typing_delay_ms)
