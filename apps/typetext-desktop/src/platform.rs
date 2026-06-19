@@ -108,7 +108,8 @@ mod windows_platform {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const HOTKEY_ID: i32 = 0x5454;
-    const UNICODE_INPUT_INTERVAL: Duration = Duration::from_millis(8);
+    const UNICODE_INPUT_INTERVAL: Duration = Duration::from_millis(22);
+    const UNICODE_WORD_BREAK_INTERVAL: Duration = Duration::from_millis(35);
     const STARTUP_RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
     const STARTUP_RUN_VALUE: &str = "TypeText";
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
@@ -254,7 +255,7 @@ mod windows_platform {
         thread::sleep(Duration::from_millis(20));
         for unit in text.encode_utf16() {
             send_unicode_unit(unit)?;
-            thread::sleep(UNICODE_INPUT_INTERVAL);
+            thread::sleep(unicode_input_interval(unit));
         }
         Ok(())
     }
@@ -322,6 +323,15 @@ mod windows_platform {
             Err(anyhow!("SendInput failed"))
         } else {
             Ok(())
+        }
+    }
+
+    fn unicode_input_interval(unit: u16) -> Duration {
+        match char::from_u32(unit as u32) {
+            Some(' ' | '\t' | '\n' | '\r' | '.' | ',' | ';' | ':' | '!' | '?') => {
+                UNICODE_WORD_BREAK_INTERVAL
+            }
+            _ => UNICODE_INPUT_INTERVAL,
         }
     }
 
