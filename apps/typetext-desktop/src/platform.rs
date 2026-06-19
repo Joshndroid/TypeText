@@ -109,6 +109,8 @@ mod windows_platform {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const HOTKEY_ID: i32 = 0x5454;
     const UNICODE_INPUT_INTERVAL: Duration = Duration::from_millis(8);
+    const STARTUP_RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+    const STARTUP_RUN_VALUE: &str = "TypeText";
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
     static HOTKEY_MANAGER: OnceLock<Sender<HotkeyCommand>> = OnceLock::new();
 
@@ -263,30 +265,21 @@ mod windows_platform {
     }
 
     pub fn startup_enabled() -> bool {
-        startup_shortcut_path().is_some_and(|path| path.exists())
+        startup_registry_enabled()
+            || startup_shortcut_path().is_some_and(|path| path.exists())
             || legacy_startup_script_path().is_some_and(|path| path.exists())
     }
 
     pub fn set_startup_enabled(enabled: bool) -> Result<()> {
-        let shortcut_path = startup_shortcut_path()
-            .ok_or_else(|| anyhow!("Could not locate Windows Startup folder"))?;
-        let legacy_script_path = legacy_startup_script_path();
         if enabled {
             let exe =
                 std::env::current_exe().context("Could not determine current executable path")?;
-            write_startup_shortcut(&shortcut_path, &exe)?;
-        } else if shortcut_path.exists() {
-            std::fs::remove_file(&shortcut_path)
-                .with_context(|| format!("Could not remove {}", shortcut_path.display()))?;
+            write_startup_registry_entry(&exe)?;
+        } else {
+            remove_startup_registry_entry()?;
         }
 
-        if let Some(legacy_script_path) = legacy_script_path {
-            if legacy_script_path.exists() {
-                std::fs::remove_file(&legacy_script_path).with_context(|| {
-                    format!("Could not remove {}", legacy_script_path.display())
-                })?;
-            }
-        }
+        remove_legacy_startup_files()?;
         Ok(())
     }
 
@@ -500,33 +493,69 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
     }
 
-    fn write_startup_shortcut(shortcut_path: &Path, exe_path: &Path) -> Result<()> {
-        let script = r#"
-$shortcutPath = $args[0]
-$targetPath = $args[1]
-$shell = New-Object -ComObject WScript.Shell
-$shortcut = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = $targetPath
-$shortcut.WorkingDirectory = Split-Path -Parent $targetPath
-$shortcut.IconLocation = "$targetPath,0"
-$shortcut.Save()
-"#;
-        let output = hidden_command("powershell")
-            .args(["-NoProfile", "-Command", script])
-            .arg(shortcut_path)
-            .arg(exe_path)
+    fn startup_registry_enabled() -> bool {
+        hidden_command("reg")
+            .args(["query", STARTUP_RUN_KEY, "/v", STARTUP_RUN_VALUE])
             .output()
-            .context("Could not create Windows startup shortcut")?;
+            .is_ok_and(|output| output.status.success())
+    }
 
-        if output.status.success() {
-            Ok(())
-        } else {
+    fn write_startup_registry_entry(exe_path: &Path) -> Result<()> {
+        let value = format!("\"{}\"", exe_path.display());
+        let output = hidden_command("reg")
+            .args([
+                "add",
+                STARTUP_RUN_KEY,
+                "/v",
+                STARTUP_RUN_VALUE,
+                "/t",
+                "REG_SZ",
+                "/d",
+                &value,
+                "/f",
+            ])
+            .output()
+            .context("Could not create Windows startup entry")?;
+
+        if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(anyhow!(
-                "Windows startup shortcut creation failed. {}",
+            return Err(anyhow!(
+                "Windows startup entry creation failed. {}",
                 stderr.trim()
-            ))
+            ));
         }
+
+        Ok(())
+    }
+
+    fn remove_startup_registry_entry() -> Result<()> {
+        let output = hidden_command("reg")
+            .args(["delete", STARTUP_RUN_KEY, "/v", STARTUP_RUN_VALUE, "/f"])
+            .output()
+            .context("Could not remove Windows startup entry")?;
+
+        if !output.status.success() && startup_registry_enabled() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!(
+                "Windows startup entry removal failed. {}",
+                stderr.trim()
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn remove_legacy_startup_files() -> Result<()> {
+        for path in [startup_shortcut_path(), legacy_startup_script_path()]
+            .into_iter()
+            .flatten()
+        {
+            if path.exists() {
+                std::fs::remove_file(&path)
+                    .with_context(|| format!("Could not remove {}", path.display()))?;
+            }
+        }
+        Ok(())
     }
 
     fn startup_shortcut_path() -> Option<PathBuf> {
