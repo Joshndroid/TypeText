@@ -379,32 +379,27 @@ fn compact_snippet_row(
     queued: bool,
 ) -> egui::Response {
     let visuals = ui.visuals();
-    let fill = if selected {
-        visuals.selection.bg_fill
-    } else if queued {
+    let fill = if queued {
         visuals.widgets.active.bg_fill
     } else {
         visuals.widgets.inactive.weak_bg_fill
     };
-    let stroke = if queued {
+    let stroke = if queued || selected {
         visuals.selection.stroke
     } else {
         visuals.widgets.noninteractive.bg_stroke
     };
 
-    let active = selected || queued;
-    let text_color = if active {
+    let text_color = if queued {
         visuals.selection.stroke.color
     } else {
         visuals.text_color()
     };
-    let weak_color = if active {
+    let weak_color = if queued {
         visuals.selection.stroke.color
     } else {
         visuals.weak_text_color()
     };
-    let marker_color = visuals.selection.stroke.color;
-
     let frame_response = egui::Frame::new()
         .fill(fill)
         .stroke(stroke)
@@ -412,37 +407,29 @@ fn compact_snippet_row(
         .inner_margin(egui::Margin::symmetric(8, 5))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                if queued {
-                    let (marker_rect, _) =
-                        ui.allocate_exact_size(egui::vec2(3.0, 26.0), egui::Sense::hover());
-                    ui.painter().rect_filled(marker_rect, 2.0, marker_color);
-                }
-
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(&result.title)
+                            .text_style(egui::TextStyle::Button)
+                            .color(text_color),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
-                            egui::RichText::new(&result.title)
-                                .text_style(egui::TextStyle::Button)
-                                .color(text_color),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(&result.group_name)
-                                    .text_style(egui::TextStyle::Small)
-                                    .color(weak_color),
-                            );
-                        });
-                    });
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(snippet_preview(&result.body))
+                            egui::RichText::new(&result.group_name)
                                 .text_style(egui::TextStyle::Small)
                                 .color(weak_color),
-                        )
-                        .wrap(),
-                    );
+                        );
+                    });
                 });
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(snippet_preview(&result.body))
+                            .text_style(egui::TextStyle::Small)
+                            .color(weak_color),
+                    )
+                    .wrap(),
+                );
             });
         });
 
@@ -474,12 +461,10 @@ fn sidebar_group_row(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Res
     let visuals = ui.visuals();
     let fill = if selected {
         visuals.selection.bg_fill
-    } else if response.hovered() {
-        visuals.widgets.hovered.weak_bg_fill
     } else {
         visuals.widgets.inactive.weak_bg_fill
     };
-    let stroke = if selected {
+    let stroke = if selected || response.hovered() {
         visuals.selection.stroke
     } else {
         visuals.widgets.noninteractive.bg_stroke
