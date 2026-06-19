@@ -659,6 +659,7 @@ mod macos_platform {
     use eframe::egui;
     use std::ffi::c_char;
     use std::ffi::c_void;
+    use std::ffi::CStr;
     use std::path::PathBuf;
     use std::ptr;
     use std::sync::{Mutex, OnceLock};
@@ -716,6 +717,8 @@ mod macos_platform {
     extern "C" {
         fn objc_getClass(name: *const c_char) -> ObjcClass;
         fn sel_registerName(name: *const c_char) -> ObjcSel;
+        #[link_name = "objc_msgSend"]
+        fn objc_msg_send(receiver: ObjcId, selector: ObjcSel, ...) -> ObjcId;
         fn class_addMethod(
             class: ObjcClass,
             name: ObjcSel,
@@ -723,6 +726,9 @@ mod macos_platform {
             types: *const c_char,
         ) -> bool;
     }
+
+    #[link(name = "ServiceManagement", kind = "framework")]
+    extern "C" {}
 
     const HOTKEY_SIGNATURE: UInt32 = u32::from_be_bytes(*b"TyTx");
     const HOTKEY_ID: UInt32 = 1;
@@ -735,6 +741,9 @@ mod macos_platform {
     const CONTROL_KEY: UInt32 = 1 << 12;
 
     const NO_ERR: OSStatus = 0;
+    const SM_APP_SERVICE_STATUS_NOT_REGISTERED: isize = 0;
+    const SM_APP_SERVICE_STATUS_ENABLED: isize = 1;
+    const SM_APP_SERVICE_STATUS_REQUIRES_APPROVAL: isize = 2;
     static TARGET_APPLICATION: OnceLock<Mutex<Option<String>>> = OnceLock::new();
     static REOPEN_TX: OnceLock<Sender<TrayCommand>> = OnceLock::new();
     static REOPEN_REPAINT_CTX: OnceLock<egui::Context> = OnceLock::new();
@@ -1025,25 +1034,21 @@ end try
     }
 
     pub fn startup_enabled() -> bool {
-        launch_agent_path().is_some_and(|path| path.exists())
+        match main_app_service_status() {
+            Some(SM_APP_SERVICE_STATUS_ENABLED) => true,
+            Some(
+                SM_APP_SERVICE_STATUS_NOT_REGISTERED | SM_APP_SERVICE_STATUS_REQUIRES_APPROVAL,
+            )
+            | None => false,
+            Some(_) => false,
+        }
     }
 
     pub fn set_startup_enabled(enabled: bool) -> Result<()> {
-        let launch_agent_path =
-            launch_agent_path().ok_or_else(|| anyhow!("Could not locate LaunchAgents folder"))?;
-
         if enabled {
-            let plist = launch_agent_plist()?;
-            let launch_agents_dir = launch_agent_path
-                .parent()
-                .ok_or_else(|| anyhow!("Could not locate LaunchAgents folder"))?;
-            std::fs::create_dir_all(launch_agents_dir)
-                .with_context(|| format!("Could not create {}", launch_agents_dir.display()))?;
-            std::fs::write(&launch_agent_path, plist)
-                .with_context(|| format!("Could not write {}", launch_agent_path.display()))?;
-        } else if launch_agent_path.exists() {
-            std::fs::remove_file(&launch_agent_path)
-                .with_context(|| format!("Could not remove {}", launch_agent_path.display()))?;
+            register_main_app_service()?;
+        } else {
+            unregister_main_app_service()?;
         }
 
         Ok(())
@@ -1257,76 +1262,138 @@ end try
         value.replace('\\', "\\\\").replace('"', "\\\"")
     }
 
-    fn launch_agent_path() -> Option<PathBuf> {
-        let home = std::env::var_os("HOME")?;
-        Some(
-            PathBuf::from(home)
-                .join("Library")
-                .join("LaunchAgents")
-                .join("com.typetext.desktop.plist"),
-        )
-    }
-
-    fn launch_agent_plist() -> Result<String> {
-        let program_arguments = startup_program_arguments()?
-            .into_iter()
-            .map(|argument| format!("    <string>{}</string>", escape_xml(&argument)))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        Ok(format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.typetext.desktop</string>
-  <key>ProgramArguments</key>
-  <array>
-{program_arguments}
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-</dict>
-</plist>
-"#
-        ))
-    }
-
-    fn startup_program_arguments() -> Result<Vec<String>> {
-        let exe = std::env::current_exe().context("Could not determine current executable path")?;
-        if let Some(app_bundle) = current_app_bundle(&exe) {
-            Ok(vec![
-                "/usr/bin/open".to_string(),
-                app_bundle.display().to_string(),
-            ])
-        } else {
-            Ok(vec![exe.display().to_string()])
+    fn main_app_service_status() -> Option<isize> {
+        unsafe {
+            let service = main_app_service()?;
+            let selector = sel_registerName(c"status".as_ptr());
+            if selector.is_null() {
+                return None;
+            }
+            Some(objc_msg_send(service, selector) as isize)
         }
     }
 
-    fn current_app_bundle(exe: &Path) -> Option<PathBuf> {
-        let contents_dir = exe.parent()?.parent()?;
-        if contents_dir.file_name()? != "Contents" {
+    fn register_main_app_service() -> Result<()> {
+        unsafe {
+            let service = main_app_service().ok_or_else(|| {
+                anyhow!(
+                    "Could not locate macOS login item service. {}",
+                    macos_startup_manual_instructions()
+                )
+            })?;
+            let selector = sel_registerName(c"registerAndReturnError:".as_ptr());
+            if selector.is_null() {
+                return Err(anyhow!(
+                    "Could not locate macOS login item register selector. {}",
+                    macos_startup_manual_instructions()
+                ));
+            }
+
+            let mut error = ptr::null_mut();
+            if objc_msg_send(service, selector, &mut error).is_null() {
+                return Err(anyhow!(
+                    "Could not register TypeText to open at login. {}",
+                    macos_startup_error_details(ns_error_description(error))
+                ));
+            }
+
+            match main_app_service_status() {
+                Some(SM_APP_SERVICE_STATUS_ENABLED) => Ok(()),
+                Some(SM_APP_SERVICE_STATUS_REQUIRES_APPROVAL) => Err(anyhow!(
+                    "TypeText is registered as a macOS login item, but macOS still requires approval. {}",
+                    macos_startup_manual_instructions()
+                )),
+                Some(SM_APP_SERVICE_STATUS_NOT_REGISTERED) | None => Err(anyhow!(
+                    "macOS did not keep TypeText registered as a login item. {}",
+                    macos_startup_manual_instructions()
+                )),
+                Some(status) => Err(anyhow!(
+                    "macOS reported an unexpected login item status ({status}). {}",
+                    macos_startup_manual_instructions()
+                )),
+            }
+        }
+    }
+
+    fn unregister_main_app_service() -> Result<()> {
+        unsafe {
+            let Some(service) = main_app_service() else {
+                return Ok(());
+            };
+            match main_app_service_status() {
+                Some(SM_APP_SERVICE_STATUS_NOT_REGISTERED) | None => return Ok(()),
+                Some(_) => {}
+            }
+
+            let selector = sel_registerName(c"unregisterAndReturnError:".as_ptr());
+            if selector.is_null() {
+                return Err(anyhow!(
+                    "Could not locate macOS login item unregister selector. {}",
+                    macos_startup_manual_instructions()
+                ));
+            }
+
+            let mut error = ptr::null_mut();
+            if !objc_msg_send(service, selector, &mut error).is_null() {
+                Ok(())
+            } else {
+                Err(anyhow!(
+                    "Could not unregister TypeText from opening at login. {}",
+                    macos_startup_error_details(ns_error_description(error))
+                ))
+            }
+        }
+    }
+
+    unsafe fn main_app_service() -> Option<ObjcId> {
+        let service_class = objc_getClass(c"SMAppService".as_ptr());
+        if service_class.is_null() {
             return None;
         }
 
-        let app_bundle = contents_dir.parent()?;
-        if app_bundle.extension()? == "app" {
-            Some(app_bundle.to_path_buf())
-        } else {
+        let selector = sel_registerName(c"mainAppService".as_ptr());
+        if selector.is_null() {
+            return None;
+        }
+
+        let service = objc_msg_send(service_class.cast::<c_void>(), selector);
+        if service.is_null() {
             None
+        } else {
+            Some(service)
         }
     }
 
-    fn escape_xml(value: &str) -> String {
-        value
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-            .replace('\'', "&apos;")
+    unsafe fn ns_error_description(error: ObjcId) -> String {
+        if error.is_null() {
+            return "No error details were provided by macOS.".to_string();
+        }
+
+        let description_selector = sel_registerName(c"localizedDescription".as_ptr());
+        let utf8_selector = sel_registerName(c"UTF8String".as_ptr());
+        if description_selector.is_null() || utf8_selector.is_null() {
+            return "No error details were provided by macOS.".to_string();
+        }
+
+        let description = objc_msg_send(error, description_selector);
+        if description.is_null() {
+            return "No error details were provided by macOS.".to_string();
+        }
+
+        let bytes = objc_msg_send(description, utf8_selector).cast::<c_char>();
+        if bytes.is_null() {
+            "No error details were provided by macOS.".to_string()
+        } else {
+            CStr::from_ptr(bytes).to_string_lossy().into_owned()
+        }
+    }
+
+    fn macos_startup_error_details(error: String) -> String {
+        format!("{error} {}", macos_startup_manual_instructions())
+    }
+
+    fn macos_startup_manual_instructions() -> &'static str {
+        "Enable it manually in System Settings > General > Login Items & Extensions > Open at Login, then turn on TypeText."
     }
 }
 
