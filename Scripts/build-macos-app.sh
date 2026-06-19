@@ -99,6 +99,7 @@ chmod +x "$MACOS_DIR/TypeText"
 sed "s/__TYPETEXT_PACKAGE_VERSION__/$PACKAGE_VERSION/g" \
   "$ROOT_DIR/apps/typetext-desktop/macos/Info.plist" \
   >"$CONTENTS_DIR/Info.plist"
+printf 'APPL????' >"$CONTENTS_DIR/PkgInfo"
 
 if [[ -f "$ROOT_DIR/icon/TypeText.icns" ]]; then
   cp "$ROOT_DIR/icon/TypeText.icns" "$RESOURCES_DIR/TypeText.icns"

@@ -65,15 +65,16 @@ fi
 
 rm -rf "$DMG_ROOT"
 mkdir -p "$DMG_ROOT"
-cp -R "$APP_DIR" "$DMG_ROOT/TypeText.app"
+ditto --rsrc --extattr --acl "$APP_DIR" "$DMG_ROOT/TypeText.app"
 ln -s /Applications "$DMG_ROOT/Applications"
 
+codesign --verify --strict --verbose=2 "$DMG_ROOT/TypeText.app"
+
 rm -f "$DMG_PATH"
-hdiutil create \
-  -volname "TypeText" \
-  -srcfolder "$DMG_ROOT" \
-  -ov \
-  -format UDZO \
+diskutil image create from \
+  --format UDZO \
+  --volumeName "TypeText" \
+  "$DMG_ROOT" \
   "$DMG_PATH"
 
 rm -rf "$DMG_ROOT"

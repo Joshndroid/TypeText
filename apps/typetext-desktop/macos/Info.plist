@@ -33,6 +33,8 @@
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>TypeText uses Apple Events to type selected snippets into the active app.</string>
 </dict>
