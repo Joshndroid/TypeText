@@ -190,23 +190,23 @@ fn apply_modern_style(ctx: &egui::Context) {
         style.spacing.indent = 10.0;
         style.text_styles.insert(
             egui::TextStyle::Heading,
-            egui::FontId::new(17.0, egui::FontFamily::Proportional),
+            egui::FontId::new(15.5, egui::FontFamily::Proportional),
         );
         style.text_styles.insert(
             egui::TextStyle::Body,
-            egui::FontId::new(12.5, egui::FontFamily::Proportional),
+            egui::FontId::new(11.5, egui::FontFamily::Proportional),
         );
         style.text_styles.insert(
             egui::TextStyle::Button,
-            egui::FontId::new(12.5, egui::FontFamily::Proportional),
+            egui::FontId::new(11.5, egui::FontFamily::Proportional),
         );
         style.text_styles.insert(
             egui::TextStyle::Small,
-            egui::FontId::new(10.5, egui::FontFamily::Proportional),
+            egui::FontId::new(9.5, egui::FontFamily::Proportional),
         );
         style.text_styles.insert(
             egui::TextStyle::Monospace,
-            egui::FontId::new(12.5, egui::FontFamily::Monospace),
+            egui::FontId::new(11.5, egui::FontFamily::Monospace),
         );
 
         let visuals = &mut style.visuals;
@@ -322,7 +322,7 @@ fn title_from_body(body: &str) -> Option<String> {
 fn nav_button(ui: &mut egui::Ui, current: &mut View, view: View, label: &str) {
     let selected = *current == view;
     if ui
-        .add(egui::Button::selectable(selected, label).min_size(egui::vec2(74.0, 24.0)))
+        .add(egui::Button::selectable(selected, label).min_size(egui::vec2(68.0, 22.0)))
         .clicked()
     {
         *current = view;
@@ -334,7 +334,7 @@ fn section_header(ui: &mut egui::Ui, title: &str, meta: impl Into<String>) {
         ui.label(
             egui::RichText::new(title)
                 .strong()
-                .size(13.5)
+                .size(12.5)
                 .color(ui.visuals().text_color()),
         );
         let meta = meta.into();
@@ -414,7 +414,7 @@ fn compact_snippet_row(
             ui.horizontal(|ui| {
                 if queued {
                     let (marker_rect, _) =
-                        ui.allocate_exact_size(egui::vec2(3.0, 28.0), egui::Sense::hover());
+                        ui.allocate_exact_size(egui::vec2(3.0, 26.0), egui::Sense::hover());
                     ui.painter().rect_filled(marker_rect, 2.0, marker_color);
                 }
 
@@ -449,8 +449,8 @@ fn compact_snippet_row(
 }
 
 fn sidebar_group_row(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Response {
-    const SINGLE_ROW_HEIGHT: f32 = 30.0;
-    const DOUBLE_ROW_HEIGHT: f32 = 46.0;
+    const SINGLE_ROW_HEIGHT: f32 = 28.0;
+    const DOUBLE_ROW_HEIGHT: f32 = 42.0;
     const TEXT_HORIZONTAL_INSET: f32 = 8.0;
     const TEXT_VERTICAL_INSET: f32 = 3.0;
 
@@ -1102,7 +1102,7 @@ impl TypeTextApp {
                             ui.label(
                                 egui::RichText::new("TypeText will keep running")
                                     .strong()
-                                    .size(17.0)
+                                    .size(15.5)
                                     .color(ui.visuals().text_color()),
                             );
                         });
@@ -1114,7 +1114,7 @@ impl TypeTextApp {
                                 egui::RichText::new(
                                     "Closing or hiding the window leaves TypeText running in the background. Use the tray icon to Open, go to Settings, or Exit.",
                                 )
-                                .size(12.5),
+                                .size(11.5),
                             )
                             .wrap(),
                         );
@@ -1122,13 +1122,13 @@ impl TypeTextApp {
                         ui.horizontal(|ui| {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui
-                                    .add_sized([82.0, 26.0], egui::Button::new("Exit"))
+                                    .add_sized([78.0, 24.0], egui::Button::new("Exit"))
                                     .clicked()
                                 {
                                     exit = true;
                                 }
                                 if ui
-                                    .add_sized([128.0, 26.0], egui::Button::new("Keep Running"))
+                                    .add_sized([120.0, 24.0], egui::Button::new("Keep Running"))
                                     .clicked()
                                 {
                                     keep_running = true;
@@ -1177,7 +1177,7 @@ impl TypeTextApp {
                             ui.label(
                                 egui::RichText::new("Clear all snippets?")
                                     .strong()
-                                    .size(17.0)
+                                    .size(15.5)
                                     .color(ui.visuals().text_color()),
                             );
                         });
@@ -1189,7 +1189,7 @@ impl TypeTextApp {
                                 egui::RichText::new(format!(
                                     "This will permanently remove {snippet_count} snippets from {group_count} groups."
                                 ))
-                                .size(12.5),
+                                .size(11.5),
                             )
                             .wrap(),
                         );
@@ -1197,13 +1197,13 @@ impl TypeTextApp {
                         ui.horizontal(|ui| {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui
-                                    .add_sized([92.0, 26.0], egui::Button::new("Clear All"))
+                                    .add_sized([88.0, 24.0], egui::Button::new("Clear All"))
                                     .clicked()
                                 {
                                     confirm = true;
                                 }
                                 if ui
-                                    .add_sized([82.0, 26.0], egui::Button::new("Cancel"))
+                                    .add_sized([78.0, 24.0], egui::Button::new("Cancel"))
                                     .clicked()
                                 {
                                     cancel = true;
@@ -1243,18 +1243,18 @@ impl TypeTextApp {
                             ui.label(
                                 egui::RichText::new("Error")
                                     .strong()
-                                    .size(17.0)
+                                    .size(15.5)
                                     .color(ui.visuals().text_color()),
                             );
                         });
                         ui.add_space(6.0);
                         ui.separator();
                         ui.add_space(8.0);
-                        ui.add(egui::Label::new(egui::RichText::new(message).size(12.5)).wrap());
+                        ui.add(egui::Label::new(egui::RichText::new(message).size(11.5)).wrap());
                         ui.add_space(10.0);
                         ui.vertical_centered(|ui| {
                             if ui
-                                .add_sized([82.0, 26.0], egui::Button::new("OK"))
+                                .add_sized([78.0, 24.0], egui::Button::new("OK"))
                                 .clicked()
                             {
                                 dismiss = true;
@@ -1277,7 +1277,7 @@ impl TypeTextApp {
             ui.label(
                 egui::RichText::new("TypeText")
                     .strong()
-                    .size(16.0)
+                    .size(15.0)
                     .color(ui.visuals().text_color()),
             );
             ui.label(
@@ -1315,7 +1315,7 @@ impl TypeTextApp {
         framed_section(ui, "Search", "filter snippets", |ui| {
             ui.horizontal(|ui| {
                 let response = ui.add_sized(
-                    [ui.available_width() - 88.0, 26.0],
+                    [ui.available_width() - 84.0, 24.0],
                     egui::TextEdit::singleline(&mut self.search).hint_text("Search snippets"),
                 );
                 if response.changed() {
@@ -1637,10 +1637,10 @@ impl TypeTextApp {
                 ui.horizontal_wrapped(|ui| {
                     for (index, title) in snippet_titles.iter().enumerate() {
                         let button_width =
-                            (title.chars().count() as f32 * 7.5 + 24.0).clamp(86.0, 200.0);
+                            (title.chars().count() as f32 * 7.0 + 22.0).clamp(80.0, 190.0);
                         if ui
                             .add_sized(
-                                [button_width, 26.0],
+                                [button_width, 24.0],
                                 egui::Button::selectable(self.selected_snippet == index, title),
                             )
                             .clicked()
@@ -1665,7 +1665,7 @@ impl TypeTextApp {
                     ui.label(
                         egui::RichText::new("Edit Snippet")
                             .strong()
-                            .size(13.5)
+                            .size(12.5)
                             .color(ui.visuals().text_color()),
                     );
                     ui.add_space(8.0);
@@ -1789,7 +1789,7 @@ impl TypeTextApp {
             ui.label(
                 egui::RichText::new("Settings")
                     .strong()
-                    .size(13.5)
+                    .size(12.5)
                     .color(ui.visuals().text_color()),
             );
             ui.label(
@@ -1812,7 +1812,7 @@ impl TypeTextApp {
                 framed_section(ui, "Hotkey", "global summon shortcut", |ui| {
                     ui.horizontal(|ui| {
                         ui.add_sized(
-                            [230.0, 26.0],
+                            [220.0, 24.0],
                             egui::TextEdit::singleline(&mut self.settings.hotkey),
                         );
                         let label = if self.capturing_hotkey {
