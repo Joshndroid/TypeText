@@ -71,10 +71,18 @@ ln -s /Applications "$DMG_ROOT/Applications"
 codesign --verify --strict --verbose=2 "$DMG_ROOT/TypeText.app"
 
 rm -f "$DMG_PATH"
-diskutil image create from \
+if ! diskutil image create from \
   --format UDZO \
   "$DMG_ROOT" \
-  "$DMG_PATH"
+  "$DMG_PATH"; then
+  rm -f "$DMG_PATH"
+  hdiutil create \
+    -volname "TypeText" \
+    -srcfolder "$DMG_ROOT" \
+    -ov \
+    -format UDZO \
+    "$DMG_PATH"
+fi
 
 rm -rf "$DMG_ROOT"
 
