@@ -93,8 +93,13 @@ mod windows_platform {
     use std::sync::OnceLock;
     use std::thread;
     use std::time::Duration;
-    use windows::core::w;
-    use windows::Win32::Foundation::{HWND, WPARAM};
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HWND, WPARAM};
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
+        RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE,
+        REG_SAM_FLAGS, REG_SZ,
+    };
     use windows::Win32::System::Threading::CreateMutexW;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         RegisterHotKey, SendInput, UnregisterHotKey, HOT_KEY_MODIFIERS, INPUT, INPUT_0,
@@ -110,7 +115,7 @@ mod windows_platform {
     const HOTKEY_ID: i32 = 0x5454;
     const UNICODE_INPUT_INTERVAL: Duration = Duration::from_millis(22);
     const UNICODE_WORD_BREAK_INTERVAL: Duration = Duration::from_millis(35);
-    const STARTUP_RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+    const STARTUP_RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     const STARTUP_RUN_VALUE: &str = "TypeText";
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
     static HOTKEY_MANAGER: OnceLock<Sender<HotkeyCommand>> = OnceLock::new();
@@ -266,21 +271,28 @@ mod windows_platform {
     }
 
     pub fn startup_enabled() -> bool {
-        startup_registry_enabled()
-            || startup_shortcut_path().is_some_and(|path| path.exists())
-            || legacy_startup_script_path().is_some_and(|path| path.exists())
+        startup_registry_value().is_some()
     }
 
     pub fn set_startup_enabled(enabled: bool) -> Result<()> {
         if enabled {
             let exe =
                 std::env::current_exe().context("Could not determine current executable path")?;
-            write_startup_registry_entry(&exe)?;
+            let expected = startup_command(&exe);
+            write_startup_registry_entry(&expected)?;
+            let actual = startup_registry_value()
+                .ok_or_else(|| anyhow!("Windows startup entry was not created"))?;
+            if actual != expected {
+                return Err(anyhow!(
+                    "Windows startup entry verification failed. Expected {expected}, found {actual}"
+                ));
+            }
         } else {
             remove_startup_registry_entry()?;
+            if startup_registry_value().is_some() {
+                return Err(anyhow!("Windows startup entry was not removed"));
+            }
         }
-
-        remove_legacy_startup_files()?;
         Ok(())
     }
 
@@ -503,85 +515,135 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
     }
 
-    fn startup_registry_enabled() -> bool {
-        hidden_command("reg")
-            .args(["query", STARTUP_RUN_KEY, "/v", STARTUP_RUN_VALUE])
-            .output()
-            .is_ok_and(|output| output.status.success())
+    fn startup_command(exe_path: &Path) -> String {
+        format!("\"{}\" --startup", exe_path.display())
     }
 
-    fn write_startup_registry_entry(exe_path: &Path) -> Result<()> {
-        let value = format!("\"{}\"", exe_path.display());
-        let output = hidden_command("reg")
-            .args([
-                "add",
-                STARTUP_RUN_KEY,
-                "/v",
-                STARTUP_RUN_VALUE,
-                "/t",
-                "REG_SZ",
-                "/d",
-                &value,
-                "/f",
-            ])
-            .output()
-            .context("Could not create Windows startup entry")?;
+    fn startup_registry_value() -> Option<String> {
+        unsafe {
+            let key = open_startup_registry_key(KEY_READ).ok()?;
+            let value_name = wide_null(STARTUP_RUN_VALUE);
+            let mut value_type = REG_SZ;
+            let mut byte_len = 0u32;
+            let query_size = RegQueryValueExW(
+                key,
+                PCWSTR(value_name.as_ptr()),
+                None,
+                Some(&mut value_type),
+                None,
+                Some(&mut byte_len),
+            );
+            if query_size != ERROR_SUCCESS || value_type != REG_SZ || byte_len == 0 {
+                let _ = RegCloseKey(key);
+                return None;
+            }
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!(
-                "Windows startup entry creation failed. {}",
-                stderr.trim()
-            ));
+            let mut buffer = vec![0u16; (byte_len as usize + 1) / 2];
+            let query_value = RegQueryValueExW(
+                key,
+                PCWSTR(value_name.as_ptr()),
+                None,
+                Some(&mut value_type),
+                Some(buffer.as_mut_ptr().cast::<u8>()),
+                Some(&mut byte_len),
+            );
+            let _ = RegCloseKey(key);
+            if query_value != ERROR_SUCCESS || value_type != REG_SZ {
+                return None;
+            }
+
+            let end = buffer
+                .iter()
+                .position(|unit| *unit == 0)
+                .unwrap_or(buffer.len());
+            Some(String::from_utf16_lossy(&buffer[..end]))
         }
-
-        Ok(())
     }
 
-    fn remove_startup_registry_entry() -> Result<()> {
-        let output = hidden_command("reg")
-            .args(["delete", STARTUP_RUN_KEY, "/v", STARTUP_RUN_VALUE, "/f"])
-            .output()
-            .context("Could not remove Windows startup entry")?;
-
-        if !output.status.success() && startup_registry_enabled() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!(
-                "Windows startup entry removal failed. {}",
-                stderr.trim()
-            ));
-        }
-
-        Ok(())
-    }
-
-    fn remove_legacy_startup_files() -> Result<()> {
-        for path in [startup_shortcut_path(), legacy_startup_script_path()]
-            .into_iter()
-            .flatten()
-        {
-            if path.exists() {
-                std::fs::remove_file(&path)
-                    .with_context(|| format!("Could not remove {}", path.display()))?;
+    fn write_startup_registry_entry(value: &str) -> Result<()> {
+        unsafe {
+            let key = create_startup_registry_key()?;
+            let value_name = wide_null(STARTUP_RUN_VALUE);
+            let value_data = wide_null(value);
+            let byte_len = (value_data.len() * size_of::<u16>()) as u32;
+            let status = RegSetValueExW(
+                key,
+                PCWSTR(value_name.as_ptr()),
+                None,
+                REG_SZ,
+                Some(std::slice::from_raw_parts(
+                    value_data.as_ptr().cast::<u8>(),
+                    byte_len as usize,
+                )),
+            );
+            let _ = RegCloseKey(key);
+            if status != ERROR_SUCCESS {
+                return Err(anyhow!("Windows startup entry creation failed: {status:?}"));
             }
         }
         Ok(())
     }
 
-    fn startup_shortcut_path() -> Option<PathBuf> {
-        let appdata = std::env::var_os("APPDATA")?;
-        Some(
-            PathBuf::from(appdata)
-                .join("Microsoft\\Windows\\Start Menu\\Programs\\Startup\\TypeText.lnk"),
-        )
+    fn remove_startup_registry_entry() -> Result<()> {
+        unsafe {
+            let key = match open_startup_registry_key(KEY_SET_VALUE) {
+                Ok(key) => key,
+                Err(_) => return Ok(()),
+            };
+            let value_name = wide_null(STARTUP_RUN_VALUE);
+            let status = RegDeleteValueW(key, PCWSTR(value_name.as_ptr()));
+            let _ = RegCloseKey(key);
+            if status != ERROR_SUCCESS && status != ERROR_FILE_NOT_FOUND {
+                return Err(anyhow!("Windows startup entry removal failed: {status:?}"));
+            }
+        }
+        Ok(())
     }
 
-    fn legacy_startup_script_path() -> Option<PathBuf> {
-        let appdata = std::env::var_os("APPDATA")?;
-        Some(
-            PathBuf::from(appdata)
-                .join("Microsoft\\Windows\\Start Menu\\Programs\\Startup\\TypeText.cmd"),
-        )
+    unsafe fn create_startup_registry_key() -> Result<HKEY> {
+        let subkey = wide_null(STARTUP_RUN_SUBKEY);
+        let mut key = HKEY::default();
+        let status = RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            None,
+            None,
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE,
+            None,
+            &mut key,
+            None,
+        );
+        if status == ERROR_SUCCESS {
+            Ok(key)
+        } else {
+            Err(anyhow!(
+                "Could not open Windows startup registry key: {status:?}"
+            ))
+        }
+    }
+
+    unsafe fn open_startup_registry_key(access: REG_SAM_FLAGS) -> Result<HKEY> {
+        let subkey = wide_null(STARTUP_RUN_SUBKEY);
+        let mut key = HKEY::default();
+        let status = RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            None,
+            access,
+            &mut key,
+        );
+        if status == ERROR_SUCCESS {
+            Ok(key)
+        } else {
+            Err(anyhow!(
+                "Could not open Windows startup registry key: {status:?}"
+            ))
+        }
+    }
+
+    fn wide_null(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
     fn hidden_command(program: &str) -> Command {
