@@ -1,0 +1,176 @@
+TypeText Quick Start
+====================
+
+TypeText stores reusable snippets of text and types them into other apps.
+Keep it running in the background, open it with a hotkey, choose or queue
+snippets, then click the target text field.
+
+
+1. First Run
+------------
+
+Windows:
+- Run TypeText.exe or install TypeText with the Windows installer.
+- TypeText can stay running in the tray.
+- Use Settings > Open on Startup if you want it to launch with Windows.
+
+macOS:
+- Open TypeText.app.
+- macOS will require Accessibility permission before TypeText can type into
+  other apps.
+- Go to:
+  System Settings > Privacy & Security > Accessibility
+- Enable TypeText. If you are running a development build from Terminal, enable
+  the terminal app that launched TypeText.
+- Use Settings > Open on Startup if you want it to launch when you sign in.
+
+
+2. Opening TypeText
+-------------------
+
+Default hotkey:
+Ctrl+Alt+Space
+
+You can change this in Settings > Hotkey. After capturing or editing a hotkey,
+click Save Settings.
+
+TypeText can also be opened from the tray/menu bar icon.
+
+
+3. Adding Snippets
+------------------
+
+Open the Edit tab.
+
+Groups:
+- Click Add in the Groups area to create a group.
+- Click an existing group to edit its name.
+- Group details only appear after you click or add a group.
+
+Snippets:
+- Select a group, then click Add in the Snippets area to create a snippet.
+- Click an existing snippet to edit it.
+- The snippet editor only appears after you click or add a snippet.
+- Click Save after changing a snippet.
+
+
+4. Typing Snippets
+------------------
+
+Open the Choose tab.
+
+- Search for a snippet or filter by group.
+- Click a snippet to add it to the queue.
+- Click a queued snippet again to add it again, or change that behavior in
+  Settings > Selection.
+- Once your snippets are queued, click the text field in the target app.
+- TypeText will hide, restore focus to the target app, and type the queued text.
+
+Queue controls:
+- Undo Last removes the most recently queued snippet.
+- Clear empties the queue.
+
+
+5. Paragraph Separators
+-----------------------
+
+Settings > Typing includes options for queued snippets:
+
+- Start each queued snippet on a new line
+- Empty lines between snippets
+
+Example:
+- 0 empty lines means the next snippet starts on the next line.
+- 1 empty line means there is a blank line between snippets.
+
+
+6. Timing Settings
+------------------
+
+Delay before typing:
+- This waits after TypeText hides and before typing starts.
+- Increase it if TypeText starts typing before the target app is focused.
+
+Windows-only delays:
+- Windows character delay controls the pause between normal typed characters.
+- Windows separator delay controls the pause after spaces, punctuation, tabs,
+  and newlines.
+- Defaults are 22ms and 35ms.
+- On faster machines you may be able to reduce these, for example to 12-18ms.
+- If typing becomes unreliable, use Reset to Default.
+
+macOS:
+- macOS does not currently expose per-character typing delay. It uses the
+  general Delay before typing setting.
+
+
+7. Settings
+-----------
+
+Most Settings changes are staged. If you see:
+Unsaved changes - click Save Settings
+
+click Save Settings before leaving the app.
+
+Settings include:
+- Hotkey
+- Open on Startup
+- Delay before typing
+- Queue paragraph separator behavior
+- Theme
+- Accent color
+- Update checks
+
+
+8. Import, Export, And Data
+---------------------------
+
+Settings > Snippet Data:
+- Import can bring in DropText INI snippets.
+- Export saves TypeText snippets as JSON.
+- Clear All removes all snippets.
+
+Settings > Storage:
+- Shows the folder where TypeText stores snippets.json and settings.json.
+- Open Data opens that folder.
+
+Installed builds use normal per-user data folders.
+Portable Windows builds store data beside TypeText.exe in a data folder.
+
+
+9. Troubleshooting
+------------------
+
+TypeText opens but does not type:
+- macOS: confirm Accessibility permission is enabled.
+- Windows/macOS: increase Delay before typing.
+- Make sure you click the target text field after queuing snippets.
+- Some secure password fields may block synthetic typing.
+
+Hotkey does not work:
+- Try a different hotkey in Settings.
+- Click Save Settings after changing it.
+- Make sure TypeText is still running in the tray/menu bar.
+
+Typing is too slow on Windows:
+- Reduce Windows character delay slightly.
+- Reduce Windows separator delay slightly.
+- Test in the apps you actually use.
+
+Typing misses characters on Windows:
+- Increase Windows character delay.
+- Increase Windows separator delay.
+- Use Reset to Default if needed.
+
+
+10. Recommended First Setup
+---------------------------
+
+1. Open TypeText.
+2. Set your preferred hotkey.
+3. Enable Open on Startup if wanted.
+4. Add your snippet groups and snippets in Edit.
+5. Choose a theme and accent color.
+6. Click Save Settings.
+7. Open another app, queue a snippet in Choose, click the target field, and
+   confirm typing works.
