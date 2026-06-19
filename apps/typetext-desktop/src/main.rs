@@ -1638,27 +1638,47 @@ impl TypeTextApp {
 
         section_gap(ui);
 
-        framed_section(ui, "Edit Snippet", "", |ui| {
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Delete").clicked() {
-                        self.delete_selected_editor_snippet();
-                    }
-                    if ui.button("Save").clicked() {
-                        self.save_selected_editor_snippet();
-                    }
+        egui::Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Edit Snippet")
+                            .strong()
+                            .size(13.5)
+                            .color(ui.visuals().strong_text_color()),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Delete").clicked() {
+                            self.delete_selected_editor_snippet();
+                        }
+                        if ui.button("Save").clicked() {
+                            self.save_selected_editor_snippet();
+                        }
+                    });
                 });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        [42.0, 24.0],
+                        egui::Label::new(egui::RichText::new("Title").small()),
+                    );
+                    ui.add_sized(
+                        [ui.available_width(), 24.0],
+                        egui::TextEdit::singleline(&mut self.edit_title),
+                    );
+                });
+                ui.label(egui::RichText::new("Body").small());
+                let body_height = (ui.available_height() - 2.0).max(108.0);
+                ui.add_sized(
+                    [ui.available_width(), body_height],
+                    egui::TextEdit::multiline(&mut self.edit_body),
+                );
             });
-            ui.add_space(3.0);
-            ui.label(egui::RichText::new("Title").small());
-            ui.text_edit_singleline(&mut self.edit_title);
-            ui.label(egui::RichText::new("Body").small());
-            let body_height = (ui.available_height() - 2.0).max(108.0);
-            ui.add_sized(
-                [ui.available_width(), body_height],
-                egui::TextEdit::multiline(&mut self.edit_body),
-            );
-        });
     }
 
     fn add_editor_group(&mut self) {
