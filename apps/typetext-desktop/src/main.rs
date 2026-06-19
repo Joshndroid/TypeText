@@ -1421,34 +1421,40 @@ impl TypeTextApp {
 
         if !self.snippet_chain.is_empty() {
             section_gap(ui);
-            framed_section(
-                ui,
-                "Queue",
-                format!("{} snippets", self.snippet_chain.len()),
-                |ui| {
+            egui::Frame::new()
+                .fill(ui.visuals().faint_bg_color)
+                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                .corner_radius(6.0)
+                .inner_margin(egui::Margin::symmetric(10, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
-                        if ui.button("Type Chain").clicked() {
-                            self.insert_selected(ctx);
-                        }
-                        if ui.button("Undo Last").clicked() {
-                            self.snippet_chain.pop();
-                            self.insert_when_focus_lost = !self.snippet_chain.is_empty();
-                            self.status = if self.snippet_chain.is_empty() {
-                                "Chain cleared".to_string()
-                            } else {
-                                format!(
-                                    "Queued {} snippets - click the target text field",
-                                    self.snippet_chain.len()
-                                )
-                            };
-                        }
-                        if ui.button("Clear").clicked() {
-                            self.snippet_chain.clear();
-                            self.insert_when_focus_lost = false;
-                            self.status = "Chain cleared".to_string();
-                        }
+                        section_header(
+                            ui,
+                            "Queue",
+                            format!("{} snippets", self.snippet_chain.len()),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Clear").clicked() {
+                                self.snippet_chain.clear();
+                                self.insert_when_focus_lost = false;
+                                self.status = "Chain cleared".to_string();
+                            }
+                            if ui.button("Undo Last").clicked() {
+                                self.snippet_chain.pop();
+                                self.insert_when_focus_lost = !self.snippet_chain.is_empty();
+                                self.status = if self.snippet_chain.is_empty() {
+                                    "Chain cleared".to_string()
+                                } else {
+                                    format!(
+                                        "Queued {} snippets - click the target text field",
+                                        self.snippet_chain.len()
+                                    )
+                                };
+                            }
+                        });
                     });
-                    ui.add_space(3.0);
+                    ui.add_space(2.0);
                     ui.horizontal_wrapped(|ui| {
                         for (index, result) in self.snippet_chain.iter().enumerate() {
                             ui.label(
@@ -1458,8 +1464,7 @@ impl TypeTextApp {
                             );
                         }
                     });
-                },
-            );
+                });
         }
 
         section_gap(ui);
