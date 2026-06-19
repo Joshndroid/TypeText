@@ -644,7 +644,11 @@ impl TypeTextApp {
         self.hide_to_background(ctx);
         std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
 
-        match platform::type_text(&insertion.body) {
+        match platform::type_text(
+            &insertion.body,
+            self.settings.windows_character_delay_ms,
+            self.settings.windows_separator_delay_ms,
+        ) {
             Ok(()) => {
                 self.status = format!("Typed {}", insertion.title);
                 if used_chain {
@@ -963,7 +967,11 @@ impl TypeTextApp {
         self.hide_to_background(ctx);
         std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
 
-        match platform::type_text_current_focus(&insertion.body) {
+        match platform::type_text_current_focus(
+            &insertion.body,
+            self.settings.windows_character_delay_ms,
+            self.settings.windows_separator_delay_ms,
+        ) {
             Ok(()) => {
                 self.status = format!("Typed {}", insertion.title);
                 self.snippet_chain.clear();
@@ -1939,6 +1947,53 @@ impl TypeTextApp {
                         }
                         ui.label(egui::RichText::new("milliseconds").small().weak());
                     });
+                    #[cfg(windows)]
+                    {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Windows character delay").small());
+                            if ui
+                                .add(
+                                    egui::DragValue::new(
+                                        &mut self.settings.windows_character_delay_ms,
+                                    )
+                                    .range(0..=250),
+                                )
+                                .changed()
+                            {
+                                self.mark_settings_dirty();
+                            }
+                            ui.label(egui::RichText::new("milliseconds").small().weak());
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Windows separator delay").small());
+                            if ui
+                                .add(
+                                    egui::DragValue::new(
+                                        &mut self.settings.windows_separator_delay_ms,
+                                    )
+                                    .range(0..=250),
+                                )
+                                .changed()
+                            {
+                                self.mark_settings_dirty();
+                            }
+                            ui.label(egui::RichText::new("milliseconds").small().weak());
+                            if ui.button("Reset to Defaults").clicked() {
+                                self.settings.windows_character_delay_ms =
+                                    typetext_core::DEFAULT_WINDOWS_CHARACTER_DELAY_MS;
+                                self.settings.windows_separator_delay_ms =
+                                    typetext_core::DEFAULT_WINDOWS_SEPARATOR_DELAY_MS;
+                                self.mark_settings_dirty();
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(
+                                "Defaults are 22ms and 35ms. Try small reductions, such as 12-18ms, on faster machines.",
+                            )
+                            .small()
+                            .weak(),
+                        );
+                    }
                     if ui
                         .checkbox(
                             &mut self.settings.close_after_insert,

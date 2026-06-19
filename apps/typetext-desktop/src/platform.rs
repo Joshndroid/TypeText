@@ -114,8 +114,6 @@ mod windows_platform {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const HOTKEY_ID: i32 = 0x5454;
-    const UNICODE_INPUT_INTERVAL: Duration = Duration::from_millis(22);
-    const UNICODE_WORD_BREAK_INTERVAL: Duration = Duration::from_millis(35);
     const STARTUP_RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     const STARTUP_RUN_VALUE: &str = "TypeText";
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
@@ -247,18 +245,24 @@ mod windows_platform {
         Ok(())
     }
 
-    pub fn type_text(text: &str) -> Result<()> {
+    pub fn type_text(text: &str, character_delay_ms: u64, separator_delay_ms: u64) -> Result<()> {
         restore_target_window();
-        send_text(text)
+        send_text(text, character_delay_ms, separator_delay_ms)
     }
 
-    pub fn type_text_current_focus(text: &str) -> Result<()> {
-        send_text(text)
+    pub fn type_text_current_focus(
+        text: &str,
+        character_delay_ms: u64,
+        separator_delay_ms: u64,
+    ) -> Result<()> {
+        send_text(text, character_delay_ms, separator_delay_ms)
     }
 
-    fn send_text(text: &str) -> Result<()> {
+    fn send_text(text: &str, character_delay_ms: u64, separator_delay_ms: u64) -> Result<()> {
         release_modifier_keys()?;
         thread::sleep(Duration::from_millis(20));
+        let character_interval = Duration::from_millis(character_delay_ms);
+        let separator_interval = Duration::from_millis(separator_delay_ms);
         for character in text.chars() {
             if character == '\r' {
                 continue;
@@ -266,13 +270,17 @@ mod windows_platform {
 
             if character == '\n' {
                 send_virtual_key(VK_RETURN)?;
-                thread::sleep(UNICODE_WORD_BREAK_INTERVAL);
+                thread::sleep(separator_interval);
                 continue;
             }
 
             for unit in character.encode_utf16(&mut [0; 2]) {
                 send_unicode_unit(*unit)?;
-                thread::sleep(unicode_input_interval(*unit));
+                thread::sleep(unicode_input_interval(
+                    *unit,
+                    character_interval,
+                    separator_interval,
+                ));
             }
         }
         Ok(())
@@ -351,12 +359,16 @@ mod windows_platform {
         }
     }
 
-    fn unicode_input_interval(unit: u16) -> Duration {
+    fn unicode_input_interval(
+        unit: u16,
+        character_interval: Duration,
+        separator_interval: Duration,
+    ) -> Duration {
         match char::from_u32(unit as u32) {
             Some(' ' | '\t' | '\n' | '\r' | '.' | ',' | ';' | ':' | '!' | '?') => {
-                UNICODE_WORD_BREAK_INTERVAL
+                separator_interval
             }
-            _ => UNICODE_INPUT_INTERVAL,
+            _ => character_interval,
         }
     }
 
@@ -942,12 +954,16 @@ mod macos_platform {
         }
     }
 
-    pub fn type_text(text: &str) -> Result<()> {
+    pub fn type_text(text: &str, _character_delay_ms: u64, _separator_delay_ms: u64) -> Result<()> {
         restore_target_application()?;
-        type_text_current_focus(text)
+        type_text_current_focus(text, _character_delay_ms, _separator_delay_ms)
     }
 
-    pub fn type_text_current_focus(text: &str) -> Result<()> {
+    pub fn type_text_current_focus(
+        text: &str,
+        _character_delay_ms: u64,
+        _separator_delay_ms: u64,
+    ) -> Result<()> {
         let mut args = Vec::new();
         for line in apple_script_for_text(text) {
             args.push("-e".to_string());
@@ -1441,11 +1457,19 @@ mod fallback_platform {
         Ok(())
     }
 
-    pub fn type_text(_text: &str) -> Result<()> {
+    pub fn type_text(
+        _text: &str,
+        _character_delay_ms: u64,
+        _separator_delay_ms: u64,
+    ) -> Result<()> {
         Err(anyhow!("Typing is not implemented on this platform yet."))
     }
 
-    pub fn type_text_current_focus(_text: &str) -> Result<()> {
+    pub fn type_text_current_focus(
+        _text: &str,
+        _character_delay_ms: u64,
+        _separator_delay_ms: u64,
+    ) -> Result<()> {
         Err(anyhow!("Typing is not implemented on this platform yet."))
     }
 

@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub const DEFAULT_WINDOWS_CHARACTER_DELAY_MS: u64 = 22;
+pub const DEFAULT_WINDOWS_SEPARATOR_DELAY_MS: u64 = 35;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnippetFile {
@@ -31,6 +34,10 @@ pub struct AppSettings {
     pub hotkey: String,
     #[serde(default = "default_typing_delay_ms")]
     pub typing_delay_ms: u64,
+    #[serde(default = "default_windows_character_delay_ms")]
+    pub windows_character_delay_ms: u64,
+    #[serde(default = "default_windows_separator_delay_ms")]
+    pub windows_separator_delay_ms: u64,
     #[serde(default = "default_close_after_insert")]
     pub close_after_insert: bool,
     #[serde(default = "default_start_snippets_on_new_line")]
@@ -100,6 +107,8 @@ impl Default for AppSettings {
         Self {
             hotkey: default_hotkey(),
             typing_delay_ms: default_typing_delay_ms(),
+            windows_character_delay_ms: default_windows_character_delay_ms(),
+            windows_separator_delay_ms: default_windows_separator_delay_ms(),
             close_after_insert: default_close_after_insert(),
             start_snippets_on_new_line: default_start_snippets_on_new_line(),
             empty_lines_between_snippets: default_empty_lines_between_snippets(),
@@ -485,6 +494,14 @@ fn default_hotkey() -> String {
 
 fn default_typing_delay_ms() -> u64 {
     80
+}
+
+fn default_windows_character_delay_ms() -> u64 {
+    DEFAULT_WINDOWS_CHARACTER_DELAY_MS
+}
+
+fn default_windows_separator_delay_ms() -> u64 {
+    DEFAULT_WINDOWS_SEPARATOR_DELAY_MS
 }
 
 fn default_close_after_insert() -> bool {
