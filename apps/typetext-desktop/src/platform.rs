@@ -132,9 +132,14 @@ mod windows_platform {
         modifiers: HOT_KEY_MODIFIERS,
         key: u32,
         tx: Sender<()>,
+        repaint_ctx: eframe::egui::Context,
     }
 
-    pub fn register_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
+    pub fn register_hotkey(
+        hotkey: String,
+        tx: Sender<()>,
+        repaint_ctx: eframe::egui::Context,
+    ) -> Result<()> {
         let (modifiers, key) =
             parse_hotkey(&hotkey).ok_or_else(|| anyhow!("Invalid hotkey: {hotkey}"))?;
         let (ready_tx, ready_rx) = mpsc::channel();
@@ -145,6 +150,7 @@ mod windows_platform {
                 modifiers,
                 key,
                 tx,
+                repaint_ctx,
             };
             run_hotkey_manager(active, command_rx, ready_tx);
         });
@@ -199,6 +205,7 @@ mod windows_platform {
                     if msg.message == WM_HOTKEY && msg.wParam == WPARAM(HOTKEY_ID as usize) {
                         remember_target_window();
                         let _ = active.tx.send(());
+                        active.repaint_ctx.request_repaint();
                     }
                     let _ = TranslateMessage(&msg);
                     DispatchMessageW(&msg);
@@ -640,7 +647,11 @@ mod macos_platform {
         hotkey_ref: usize,
     }
 
-    pub fn register_hotkey(hotkey: String, tx: Sender<()>) -> Result<()> {
+    pub fn register_hotkey(
+        hotkey: String,
+        tx: Sender<()>,
+        repaint_ctx: eframe::egui::Context,
+    ) -> Result<()> {
         let (modifiers, key_code) =
             parse_hotkey(&hotkey).ok_or_else(|| anyhow!("Invalid hotkey: {hotkey}"))?;
 
@@ -651,7 +662,7 @@ mod macos_platform {
                 event_class: K_EVENT_CLASS_KEYBOARD,
                 event_kind: K_EVENT_HOT_KEY_PRESSED,
             };
-            let tx = Box::into_raw(Box::new(tx));
+            let tx = Box::into_raw(Box::new((tx, repaint_ctx)));
             let handler_status = InstallEventHandler(
                 target,
                 hotkey_handler,
@@ -947,8 +958,10 @@ end try
         user_data: *mut c_void,
     ) -> OSStatus {
         remember_target_application();
-        let tx = unsafe { &*(user_data.cast::<Sender<()>>()) };
+        let (tx, repaint_ctx) =
+            unsafe { &*(user_data.cast::<(Sender<()>, eframe::egui::Context)>()) };
         let _ = tx.send(());
+        repaint_ctx.request_repaint();
         NO_ERR
     }
 
@@ -1220,7 +1233,11 @@ end try
 mod fallback_platform {
     use super::*;
 
-    pub fn register_hotkey(_hotkey: String, _tx: Sender<()>) -> Result<()> {
+    pub fn register_hotkey(
+        _hotkey: String,
+        _tx: Sender<()>,
+        _repaint_ctx: eframe::egui::Context,
+    ) -> Result<()> {
         Err(anyhow!(
             "Global hotkey is not implemented on this platform yet."
         ))

@@ -505,19 +505,22 @@ impl TypeTextApp {
         let (tray_tx, tray_rx) = mpsc::channel();
         platform::install_reopen_handler(tray_tx.clone(), cc.egui_ctx.clone());
         let (_update_tx, update_rx) = mpsc::channel();
-        let (status, error_message, registered_hotkey) =
-            match platform::register_hotkey(settings.hotkey.clone(), tx.clone()) {
-                Ok(()) => (
-                    format!("Ready - {}", settings.hotkey),
-                    None,
-                    Some(settings.hotkey.clone()),
-                ),
-                Err(error) => (
-                    "Ready".to_string(),
-                    Some(format!("Hotkey unavailable: {error}")),
-                    None,
-                ),
-            };
+        let (status, error_message, registered_hotkey) = match platform::register_hotkey(
+            settings.hotkey.clone(),
+            tx.clone(),
+            cc.egui_ctx.clone(),
+        ) {
+            Ok(()) => (
+                format!("Ready - {}", settings.hotkey),
+                None,
+                Some(settings.hotkey.clone()),
+            ),
+            Err(error) => (
+                "Ready".to_string(),
+                Some(format!("Hotkey unavailable: {error}")),
+                None,
+            ),
+        };
         let icon_rgba = app_icon_data().map(|icon| (icon.rgba, icon.width, icon.height));
         let (tray_handle, tray_error) =
             match platform::install_tray_icon(tray_tx, cc.egui_ctx.clone(), icon_rgba) {
