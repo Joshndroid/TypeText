@@ -104,7 +104,8 @@ mod windows_platform {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         RegisterHotKey, SendInput, UnregisterHotKey, HOT_KEY_MODIFIERS, INPUT, INPUT_0,
         INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOD_ALT, MOD_CONTROL,
-        MOD_SHIFT, MOD_WIN, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+        MOD_SHIFT, MOD_WIN, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RETURN, VK_RWIN,
+        VK_SHIFT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, GetForegroundWindow, PeekMessageW, SetForegroundWindow, TranslateMessage,
@@ -258,9 +259,21 @@ mod windows_platform {
     fn send_text(text: &str) -> Result<()> {
         release_modifier_keys()?;
         thread::sleep(Duration::from_millis(20));
-        for unit in text.encode_utf16() {
-            send_unicode_unit(unit)?;
-            thread::sleep(unicode_input_interval(unit));
+        for character in text.chars() {
+            if character == '\r' {
+                continue;
+            }
+
+            if character == '\n' {
+                send_virtual_key(VK_RETURN)?;
+                thread::sleep(UNICODE_WORD_BREAK_INTERVAL);
+                continue;
+            }
+
+            for unit in character.encode_utf16(&mut [0; 2]) {
+                send_unicode_unit(*unit)?;
+                thread::sleep(unicode_input_interval(*unit));
+            }
         }
         Ok(())
     }
@@ -486,13 +499,26 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     }
 
     fn send_key_up(key: VIRTUAL_KEY) -> Result<()> {
+        send_virtual_key_with_flags(key, KEYEVENTF_KEYUP)
+    }
+
+    fn send_virtual_key(key: VIRTUAL_KEY) -> Result<()> {
+        send_virtual_key_with_flags(key, Default::default())?;
+        thread::sleep(Duration::from_millis(8));
+        send_virtual_key_with_flags(key, KEYEVENTF_KEYUP)
+    }
+
+    fn send_virtual_key_with_flags(
+        key: VIRTUAL_KEY,
+        flags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS,
+    ) -> Result<()> {
         let mut inputs = [INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
                 ki: KEYBDINPUT {
                     wVk: key,
                     wScan: 0,
-                    dwFlags: KEYEVENTF_KEYUP,
+                    dwFlags: flags,
                     time: 0,
                     dwExtraInfo: 0,
                 },
