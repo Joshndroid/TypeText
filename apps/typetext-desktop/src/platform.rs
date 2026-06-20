@@ -467,8 +467,8 @@ mod windows_platform {
         let script = r#"
 Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Title = 'Import DropText.ini'
-$dialog.Filter = 'DropText INI (*.ini)|*.ini|All files (*.*)|*.*'
+$dialog.Title = 'Import DropText snippets'
+$dialog.Filter = 'DropText files (*.ini;*.csv)|*.ini;*.csv|DropText INI (*.ini)|*.ini|DropText CSV (*.csv)|*.csv|All files (*.*)|*.*'
 $dialog.CheckFileExists = $true
 $dialog.CheckPathExists = $true
 if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
@@ -1051,7 +1051,7 @@ mod macos_platform {
     pub fn open_droptext_file_dialog() -> Result<Option<PathBuf>> {
         let script = r#"
 try
-    set chosenFile to choose file with prompt "Import DropText.ini" of type {"ini", "txt"}
+    set chosenFile to choose file with prompt "Import DropText snippets" of type {"ini", "csv", "txt"}
     return POSIX path of chosenFile
 on error number -128
     return ""

@@ -255,14 +255,52 @@ pub fn save_settings(paths: &PortablePaths, settings: &AppSettings) -> Result<()
     save_json(paths.settings_path.as_path(), settings)
 }
 
-pub fn import_droptext_ini(path: impl AsRef<Path>) -> Result<SnippetFile> {
+pub fn import_droptext(path: impl AsRef<Path>) -> Result<SnippetFile> {
     let path = path.as_ref();
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
-    parse_droptext_ini(&raw).with_context(|| format!("Could not parse {}", path.display()))
+    let bytes = fs::read(path).with_context(|| format!("Could not read {}", path.display()))?;
+    let raw = decode_droptext_text(&bytes);
+    let is_csv = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"));
+
+    if is_csv {
+        parse_droptext_csv(&raw)
+    } else {
+        parse_droptext_ini(&raw)
+    }
+    .with_context(|| format!("Could not parse {}", path.display()))
 }
 
 pub fn parse_droptext_ini(raw: &str) -> Result<SnippetFile> {
+    parse_droptext_data(raw, false)
+}
+
+pub fn parse_droptext_csv(raw: &str) -> Result<SnippetFile> {
+    let records = parse_csv_records(raw.trim_start_matches('\u{feff}'))?;
+    if records.is_empty() {
+        return Err(anyhow!("The DropText CSV file is empty."));
+    }
+
+    let mut droptext_data = String::new();
+    for (record_index, record) in records.into_iter().enumerate() {
+        if record.len() != 7 {
+            return Err(anyhow!(
+                "CSV record {} has {} fields; expected 7",
+                record_index + 1,
+                record.len()
+            ));
+        }
+        if !droptext_data.is_empty() && !droptext_data.ends_with(['\r', '\n']) {
+            droptext_data.push('\n');
+        }
+        droptext_data.push_str(&record[2]);
+    }
+
+    parse_droptext_data(&droptext_data, true)
+}
+
+fn parse_droptext_data(raw: &str, decode_unquoted_escapes: bool) -> Result<SnippetFile> {
     let mut groups: Vec<SnippetGroup> = Vec::new();
     let mut current_group: Option<usize> = None;
 
@@ -314,7 +352,11 @@ pub fn parse_droptext_ini(raw: &str) -> Result<SnippetFile> {
             return Err(anyhow!("Line {line_number}: snippet title is empty"));
         }
 
-        let body = parse_droptext_value(line[separator + 1..].trim(), line_number)?;
+        let body = parse_droptext_value(
+            line[separator + 1..].trim(),
+            line_number,
+            decode_unquoted_escapes,
+        )?;
         groups[group_index].snippets.push(Snippet {
             title: title.to_string(),
             body,
@@ -439,9 +481,18 @@ fn platform_data_dir() -> Option<PathBuf> {
     }
 }
 
-fn parse_droptext_value(raw: &str, line_number: usize) -> Result<String> {
+fn parse_droptext_value(
+    raw: &str,
+    line_number: usize,
+    decode_unquoted_escapes: bool,
+) -> Result<String> {
     let Some(unquoted) = raw.strip_prefix('"') else {
-        return Ok(raw.trim().to_string());
+        let value = raw.trim();
+        return if decode_unquoted_escapes {
+            Ok(decode_droptext_escapes(value))
+        } else {
+            Ok(value.to_string())
+        };
     };
 
     let mut value = String::new();
@@ -487,7 +538,151 @@ fn parse_droptext_value(raw: &str, line_number: usize) -> Result<String> {
         ));
     }
 
-    Ok(value.replace("\r\n", "\n").replace('\r', "\n"))
+    Ok(normalize_newlines(value))
+}
+
+fn decode_droptext_escapes(raw: &str) -> String {
+    let mut value = String::new();
+    let mut chars = raw.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            value.push(ch);
+            continue;
+        }
+
+        let Some(escaped) = chars.next() else {
+            value.push('\\');
+            break;
+        };
+        match escaped {
+            'r' => value.push('\r'),
+            'n' => value.push('\n'),
+            't' => value.push('\t'),
+            '"' => value.push('"'),
+            '\\' => value.push('\\'),
+            other => {
+                value.push('\\');
+                value.push(other);
+            }
+        }
+    }
+    normalize_newlines(value)
+}
+
+fn normalize_newlines(value: String) -> String {
+    value.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn decode_droptext_text(bytes: &[u8]) -> String {
+    if let Ok(utf8) = std::str::from_utf8(bytes) {
+        return utf8.to_string();
+    }
+
+    bytes
+        .iter()
+        .map(|&byte| match byte {
+            0x80 => '\u{20ac}',
+            0x82 => '\u{201a}',
+            0x83 => '\u{0192}',
+            0x84 => '\u{201e}',
+            0x85 => '\u{2026}',
+            0x86 => '\u{2020}',
+            0x87 => '\u{2021}',
+            0x88 => '\u{02c6}',
+            0x89 => '\u{2030}',
+            0x8a => '\u{0160}',
+            0x8b => '\u{2039}',
+            0x8c => '\u{0152}',
+            0x8e => '\u{017d}',
+            0x91 => '\u{2018}',
+            0x92 => '\u{2019}',
+            0x93 => '\u{201c}',
+            0x94 => '\u{201d}',
+            0x95 => '\u{2022}',
+            0x96 => '\u{2013}',
+            0x97 => '\u{2014}',
+            0x98 => '\u{02dc}',
+            0x99 => '\u{2122}',
+            0x9a => '\u{0161}',
+            0x9b => '\u{203a}',
+            0x9c => '\u{0153}',
+            0x9e => '\u{017e}',
+            0x9f => '\u{0178}',
+            _ => char::from(byte),
+        })
+        .collect()
+}
+
+fn parse_csv_records(raw: &str) -> Result<Vec<Vec<String>>> {
+    let mut records = Vec::new();
+    let mut record = Vec::new();
+    let mut field = String::new();
+    let mut chars = raw.chars().peekable();
+    let mut in_quotes = false;
+    let mut field_started = false;
+    let mut quote_closed = false;
+
+    while let Some(ch) = chars.next() {
+        if in_quotes {
+            if ch == '"' {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    field.push('"');
+                } else {
+                    in_quotes = false;
+                    quote_closed = true;
+                }
+            } else {
+                field.push(ch);
+            }
+            continue;
+        }
+
+        if quote_closed && !matches!(ch, ',' | '\r' | '\n') {
+            return Err(anyhow!("Unexpected text after a closing CSV quote"));
+        }
+
+        match ch {
+            '"' if !field_started => {
+                in_quotes = true;
+                field_started = true;
+            }
+            ',' => {
+                record.push(std::mem::take(&mut field));
+                field_started = false;
+                quote_closed = false;
+            }
+            '\r' | '\n' => {
+                if ch == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                record.push(std::mem::take(&mut field));
+                if record.iter().any(|value| !value.is_empty()) {
+                    records.push(std::mem::take(&mut record));
+                } else {
+                    record.clear();
+                }
+                field_started = false;
+                quote_closed = false;
+            }
+            other => {
+                field.push(other);
+                field_started = true;
+            }
+        }
+    }
+
+    if in_quotes {
+        return Err(anyhow!("CSV field is missing its closing quote"));
+    }
+    if field_started || quote_closed || !record.is_empty() {
+        record.push(field);
+        if record.iter().any(|value| !value.is_empty()) {
+            records.push(record);
+        }
+    }
+
+    Ok(records)
 }
 
 fn default_hotkey() -> String {
@@ -590,6 +785,45 @@ Two="Second"
         let error = parse_droptext_ini(r#"Title="Body""#).unwrap_err();
 
         assert!(error.to_string().contains("before any section"));
+    }
+
+    #[test]
+    fn parse_droptext_csv_extracts_groups_and_decodes_body_content() {
+        let raw = concat!(
+            "<new>,852,\"[Common]\n",
+            "Greeting=Hello \\r\\n\\r\\nWorld\n",
+            "Quote=Use \"\"Show Markup\"\" here\n\n",
+            "[Other]\n",
+            "Path=Keep C:\\unknown intact\",680,997,1438,468\r\n",
+        );
+
+        let snippets = parse_droptext_csv(raw).unwrap();
+
+        assert_eq!(snippets.groups.len(), 2);
+        assert_eq!(snippets.groups[0].name, "Common");
+        assert_eq!(snippets.groups[0].snippets.len(), 2);
+        assert_eq!(snippets.groups[0].snippets[0].title, "Greeting");
+        assert_eq!(snippets.groups[0].snippets[0].body, "Hello \n\nWorld");
+        assert_eq!(
+            snippets.groups[0].snippets[1].body,
+            "Use \"Show Markup\" here"
+        );
+        assert_eq!(
+            snippets.groups[1].snippets[0].body,
+            r"Keep C:\unknown intact"
+        );
+    }
+
+    #[test]
+    fn parse_droptext_csv_reports_wrong_field_count() {
+        let error = parse_droptext_csv("<new>,852,\"[Common]\nOne=First\",680\r\n").unwrap_err();
+
+        assert!(error.to_string().contains("expected 7"));
+    }
+
+    #[test]
+    fn droptext_text_decoder_falls_back_to_windows_1252() {
+        assert_eq!(decode_droptext_text(b"It\x92s ready"), "It’s ready");
     }
 
     #[test]

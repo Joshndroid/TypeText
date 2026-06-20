@@ -126,7 +126,7 @@ Settings include:
 ---------------------------
 
 Settings > Snippet Data:
-- Import can bring in DropText INI snippets.
+- Import can bring in DropText INI or CSV snippets.
 - Export saves TypeText snippets as JSON.
 - Clear All removes all snippets.
 

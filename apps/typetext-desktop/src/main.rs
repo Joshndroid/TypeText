@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use typetext_core::{
-    export_snippets, import_droptext_ini, load_or_create_settings, load_or_create_snippets,
+    export_snippets, import_droptext, load_or_create_settings, load_or_create_snippets,
     save_settings, save_snippets, search_snippets, AppSettings, PortablePaths,
     QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
 };
@@ -769,7 +769,7 @@ impl TypeTextApp {
             }
         };
 
-        match import_droptext_ini(&path) {
+        match import_droptext(&path) {
             Ok(imported) => {
                 let group_count = imported.groups.len();
                 let snippet_count = imported

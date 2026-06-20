@@ -13,7 +13,7 @@ runtime data uses simple JSON files.
 - Configurable queued-snippet behavior: add duplicates or remove queued entries
 - Configurable paragraph separators between queued snippets
 - Built-in group and snippet editor
-- DropText INI import and TypeText JSON export
+- DropText INI/CSV import and TypeText JSON export
 - Simple JSON snippet/settings storage
 - Configurable delay before typing and close-after-insert behavior
 - Windows-only character and separator typing delays
