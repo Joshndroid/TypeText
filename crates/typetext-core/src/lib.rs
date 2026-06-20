@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use chrono::{DateTime, FixedOffset, Local};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -298,6 +299,61 @@ pub fn parse_droptext_csv(raw: &str) -> Result<SnippetFile> {
     }
 
     parse_droptext_data(&droptext_data, true)
+}
+
+pub fn expand_snippet_tokens(body: &str) -> String {
+    expand_snippet_tokens_at(body, Local::now().fixed_offset())
+}
+
+fn expand_snippet_tokens_at(body: &str, now: DateTime<FixedOffset>) -> String {
+    let today = now.date_naive();
+    let tomorrow = today.succ_opt().unwrap_or(today);
+    let yesterday = today.pred_opt().unwrap_or(today);
+    let replacements = [
+        ("time.today", now.format("%H:%M").to_string()),
+        ("time.now", now.format("%H:%M").to_string()),
+        ("date.today", today.format("%d/%m/%Y").to_string()),
+        ("date.tomorrow", tomorrow.format("%d/%m/%Y").to_string()),
+        ("date.yesterday", yesterday.format("%d/%m/%Y").to_string()),
+        ("datetime.now", now.format("%d/%m/%Y %H:%M").to_string()),
+        ("weekday.today", today.format("%A").to_string()),
+    ];
+
+    let mut expanded = String::with_capacity(body.len());
+    let mut offset = 0;
+    while offset < body.len() {
+        let remaining = &body[offset..];
+
+        if let Some(after_opening) = remaining.strip_prefix("{{") {
+            if let Some(end) = after_opening.find("}}") {
+                expanded.push('{');
+                expanded.push_str(&after_opening[..end]);
+                expanded.push('}');
+                offset += 2 + end + 2;
+                continue;
+            }
+        }
+
+        if let Some(after_opening) = remaining.strip_prefix('{') {
+            if let Some(end) = after_opening.find('}') {
+                let token = &after_opening[..end];
+                if let Some((_, value)) = replacements.iter().find(|(name, _)| *name == token) {
+                    expanded.push_str(value);
+                    offset += 1 + end + 1;
+                    continue;
+                }
+            }
+        }
+
+        let character = remaining
+            .chars()
+            .next()
+            .expect("remaining text is not empty");
+        expanded.push(character);
+        offset += character.len_utf8();
+    }
+
+    expanded
 }
 
 fn parse_droptext_data(raw: &str, decode_unquoted_escapes: bool) -> Result<SnippetFile> {
@@ -824,6 +880,33 @@ Two="Second"
     #[test]
     fn droptext_text_decoder_falls_back_to_windows_1252() {
         assert_eq!(decode_droptext_text(b"It\x92s ready"), "It’s ready");
+    }
+
+    #[test]
+    fn expands_dynamic_snippet_tokens_using_one_timestamp() {
+        let now = DateTime::parse_from_rfc3339("2026-06-20T17:42:31+10:00").unwrap();
+        let body = concat!(
+            "{time.today}|{time.now}|{date.today}|{date.tomorrow}|",
+            "{date.yesterday}|{datetime.now}|{weekday.today}",
+        );
+
+        assert_eq!(
+            expand_snippet_tokens_at(body, now),
+            "17:42|17:42|20/06/2026|21/06/2026|19/06/2026|20/06/2026 17:42|Saturday"
+        );
+    }
+
+    #[test]
+    fn preserves_unknown_tokens_and_unescapes_literal_braces() {
+        let now = DateTime::parse_from_rfc3339("2026-06-20T17:42:31+10:00").unwrap();
+
+        assert_eq!(
+            expand_snippet_tokens_at(
+                "Known: {date.today}; unknown: {person.name}; literal: {{date.today}}; café",
+                now,
+            ),
+            "Known: 20/06/2026; unknown: {person.name}; literal: {date.today}; café"
+        );
     }
 
     #[test]

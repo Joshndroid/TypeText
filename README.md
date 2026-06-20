@@ -10,6 +10,7 @@ runtime data uses simple JSON files.
 - Global hotkey to show TypeText while it runs in the background
 - Searchable snippet chooser with group filtering
 - Snippet chaining for inserting multiple text chunks together
+- Dynamic local date and time tokens in snippet text
 - Configurable queued-snippet behavior: add duplicates or remove queued entries
 - Configurable paragraph separators between queued snippets
 - Built-in group and snippet editor
@@ -77,6 +78,25 @@ Installable builds use the normal per-user app data location:
 Windows: %LOCALAPPDATA%\TypeText\data
 macOS:   ~/Library/Application Support/TypeText/data
 ```
+
+## Dynamic Tokens
+
+TypeText expands supported tokens immediately before typing. Dates and times use
+the computer's local time zone, and a queued snippet chain shares one timestamp.
+Stored snippet text is not modified.
+
+| Token | Output format | Example |
+|---|---|---|
+| `{time.today}` | Current time; legacy DropText alias | `17:42` |
+| `{time.now}` | Current time | `17:42` |
+| `{date.today}` | Today's date | `20/06/2026` |
+| `{date.tomorrow}` | Tomorrow's date | `21/06/2026` |
+| `{date.yesterday}` | Yesterday's date | `19/06/2026` |
+| `{datetime.now}` | Current date and time | `20/06/2026 17:42` |
+| `{weekday.today}` | Current weekday | `Saturday` |
+
+Unknown tokens are typed unchanged. To type a supported token literally, double
+the braces: `{{date.today}}` types `{date.today}`.
 
 ## Build And Run
 

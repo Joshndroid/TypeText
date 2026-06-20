@@ -71,7 +71,29 @@ Queue controls:
 - Clear empties the queue.
 
 
-5. Paragraph Separators
+5. Dynamic Date And Time Tokens
+-------------------------------
+
+TypeText expands these tokens immediately before typing, using the computer's
+local time zone:
+
+- {time.today}      Current time (legacy DropText alias), for example 17:42
+- {time.now}        Current time, for example 17:42
+- {date.today}      Today's date, for example 20/06/2026
+- {date.tomorrow}   Tomorrow's date, for example 21/06/2026
+- {date.yesterday}  Yesterday's date, for example 19/06/2026
+- {datetime.now}    Current date and time, for example 20/06/2026 17:42
+- {weekday.today}   Current weekday, for example Saturday
+
+Tokens work in imported and manually created snippets. Queued snippets share
+one timestamp, and the saved snippet text is not changed. Unknown tokens are
+typed unchanged.
+
+To type a supported token literally, double the braces. For example:
+{{date.today}} types {date.today}
+
+
+6. Paragraph Separators
 -----------------------
 
 Settings > Typing includes options for queued snippets:
@@ -84,7 +106,7 @@ Example:
 - 1 empty line means there is a blank line between snippets.
 
 
-6. Timing Settings
+7. Timing Settings
 ------------------
 
 Delay before typing:
@@ -104,7 +126,7 @@ macOS:
   general Delay before typing setting.
 
 
-7. Settings
+8. Settings
 -----------
 
 Most Settings changes are staged. If you see:
@@ -122,7 +144,7 @@ Settings include:
 - Update checks
 
 
-8. Import, Export, And Data
+9. Import, Export, And Data
 ---------------------------
 
 Settings > Snippet Data:
@@ -138,7 +160,7 @@ Installed builds use normal per-user data folders.
 Portable Windows builds store data beside TypeText.exe in a data folder.
 
 
-9. Troubleshooting
+10. Troubleshooting
 ------------------
 
 TypeText opens but does not type:

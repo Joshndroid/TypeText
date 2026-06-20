@@ -7,9 +7,9 @@ use serde::Deserialize;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use typetext_core::{
-    export_snippets, import_droptext, load_or_create_settings, load_or_create_snippets,
-    save_settings, save_snippets, search_snippets, AppSettings, PortablePaths,
-    QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
+    expand_snippet_tokens, export_snippets, import_droptext, load_or_create_settings,
+    load_or_create_snippets, save_settings, save_snippets, search_snippets, AppSettings,
+    PortablePaths, QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -650,9 +650,10 @@ impl TypeTextApp {
 
         self.hide_to_background(ctx);
         std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
+        let expanded_body = expand_snippet_tokens(&insertion.body);
 
         match platform::type_text(
-            &insertion.body,
+            &expanded_body,
             self.settings.windows_character_delay_ms,
             self.settings.windows_separator_delay_ms,
         ) {
@@ -976,9 +977,10 @@ impl TypeTextApp {
 
         self.hide_to_background(ctx);
         std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
+        let expanded_body = expand_snippet_tokens(&insertion.body);
 
         match platform::type_text_current_focus(
-            &insertion.body,
+            &expanded_body,
             self.settings.windows_character_delay_ms,
             self.settings.windows_separator_delay_ms,
         ) {
