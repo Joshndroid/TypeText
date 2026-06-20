@@ -25,8 +25,42 @@ fn main() {
     let res_path = out_dir.join("typetext.res");
     let rc_path = out_dir.join("typetext.rc");
     let icon_path = icon_path.display().to_string().replace('\\', "/");
-    fs::write(&rc_path, format!("1 ICON \"{icon_path}\"\n"))
-        .expect("Could not write generated Windows resource file");
+    let display_version = version.strip_prefix('v').unwrap_or(&version);
+    let (major, minor, patch, build) = windows_version_parts(display_version);
+    let resource = format!(
+        r#"1 ICON "{icon_path}"
+
+1 VERSIONINFO
+ FILEVERSION {major},{minor},{patch},{build}
+ PRODUCTVERSION {major},{minor},{patch},{build}
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Joshndroid"
+            VALUE "FileDescription", "TypeText desktop application"
+            VALUE "FileVersion", "{display_version}"
+            VALUE "InternalName", "TypeText"
+            VALUE "LegalCopyright", "Copyright (c) 2026 Joshndroid"
+            VALUE "OriginalFilename", "TypeText.exe"
+            VALUE "ProductName", "TypeText"
+            VALUE "ProductVersion", "{display_version}"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
+"#
+    );
+    fs::write(&rc_path, resource).expect("Could not write generated Windows resource file");
 
     let compiled = if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         compile_msvc_resource(&res_path, &rc_path)
@@ -195,4 +229,24 @@ fn resolved_version(manifest_dir: &std::path::Path) -> String {
     }
 
     env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string())
+}
+
+fn windows_version_parts(version: &str) -> (u16, u16, u16, u16) {
+    let mut parts = version
+        .split('.')
+        .map(|part| {
+            part.chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u16>()
+                .unwrap_or(0)
+        })
+        .chain(std::iter::repeat(0));
+
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
 }
