@@ -1546,8 +1546,8 @@ impl TypeTextApp {
     }
 
     fn ui_edit(&mut self, ui: &mut egui::Ui) {
-        const MIN_LIST_HEIGHT: f32 = 82.0;
-        const MAX_SNIPPET_LIST_HEIGHT: f32 = 150.0;
+        const MIN_LIST_HEIGHT: f32 = 64.0;
+        const MAX_SNIPPET_LIST_HEIGHT: f32 = 120.0;
 
         let edit_size = ui.available_size();
         let sidebar_width = edit_size
@@ -1717,6 +1717,27 @@ impl TypeTextApp {
                 .unwrap_or_default();
             section_header(ui, "Snippets", format!("{snippet_count} in group"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let can_edit_snippet = self.edit_snippet_active
+                    && self
+                        .snippets
+                        .groups
+                        .get(self.selected_group)
+                        .and_then(|group| group.snippets.get(self.selected_snippet))
+                        .is_some();
+                if ui
+                    .add_enabled(can_edit_snippet, egui::Button::new("Delete"))
+                    .on_hover_text("Delete selected snippet")
+                    .clicked()
+                {
+                    self.delete_selected_editor_snippet();
+                }
+                if ui
+                    .add_enabled(can_edit_snippet, egui::Button::new("Save"))
+                    .on_hover_text("Save selected snippet")
+                    .clicked()
+                {
+                    self.save_selected_editor_snippet();
+                }
                 if ui.button("Add").on_hover_text("Add snippet").clicked() {
                     self.add_editor_snippet();
                 }
@@ -1730,7 +1751,7 @@ impl TypeTextApp {
         }
 
         let snippet_list_height =
-            (ui.available_height() * 0.28).clamp(min_list_height, max_snippet_list_height);
+            (ui.available_height() * 0.22).clamp(min_list_height, max_snippet_list_height);
         let snippet_titles: Vec<String> = self
             .snippets
             .groups
@@ -1795,10 +1816,8 @@ impl TypeTextApp {
                             .color(ui.visuals().text_color()),
                     );
                     ui.label(egui::RichText::new("Title").small());
-                    let button_width = 58.0;
                     let token_width = 72.0;
-                    let reserved_width =
-                        (button_width * 2.0) + token_width + (ui.spacing().item_spacing.x * 3.0);
+                    let reserved_width = token_width + ui.spacing().item_spacing.x;
                     let title_width = (ui.available_width() - reserved_width).max(120.0);
                     ui.add_sized(
                         [title_width, 24.0],
@@ -1827,18 +1846,6 @@ impl TypeTextApp {
                                 }
                             }
                         });
-                    if ui
-                        .add_sized([button_width, 24.0], egui::Button::new("Save"))
-                        .clicked()
-                    {
-                        self.save_selected_editor_snippet();
-                    }
-                    if ui
-                        .add_sized([button_width, 24.0], egui::Button::new("Delete"))
-                        .clicked()
-                    {
-                        self.delete_selected_editor_snippet();
-                    }
                 });
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new("Body").small());
