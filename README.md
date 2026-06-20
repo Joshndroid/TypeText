@@ -83,7 +83,8 @@ macOS:   ~/Library/Application Support/TypeText/data
 
 TypeText expands supported tokens immediately before typing. Dates and times use
 the computer's local time zone, and a queued snippet chain shares one timestamp.
-Stored snippet text is not modified.
+Stored snippet text is not modified. In the snippet editor, use the **Tokens**
+menu beside Save and Delete to insert a token at the body cursor.
 
 | Token | Output format | Example |
 |---|---|---|

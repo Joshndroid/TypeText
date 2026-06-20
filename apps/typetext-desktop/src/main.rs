@@ -10,6 +10,7 @@ use typetext_core::{
     expand_snippet_tokens, export_snippets, import_droptext, load_or_create_settings,
     load_or_create_snippets, save_settings, save_snippets, search_snippets, AppSettings,
     PortablePaths, QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
+    SUPPORTED_SNIPPET_TOKENS,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -125,6 +126,8 @@ struct TypeTextApp {
     edit_group_name: String,
     edit_title: String,
     edit_body: String,
+    edit_body_selection: (usize, usize),
+    edit_body_pending_cursor: Option<usize>,
     status: String,
     error_message: Option<String>,
     confirm_clear_all: bool,
@@ -571,6 +574,8 @@ impl TypeTextApp {
             edit_group_name: String::new(),
             edit_title: String::new(),
             edit_body: String::new(),
+            edit_body_selection: (0, 0),
+            edit_body_pending_cursor: None,
             status,
             error_message,
             confirm_clear_all: false,
@@ -711,6 +716,8 @@ impl TypeTextApp {
         self.edit_group_name.clear();
         self.edit_title.clear();
         self.edit_body.clear();
+        self.edit_body_selection = (0, 0);
+        self.edit_body_pending_cursor = None;
     }
 
     fn bring_window_to_front(&self, ctx: &egui::Context) {
@@ -1083,7 +1090,28 @@ impl TypeTextApp {
             self.edit_title.clear();
             self.edit_body.clear();
         }
+        let end = self.edit_body.chars().count();
+        self.edit_body_selection = (end, end);
+        self.edit_body_pending_cursor = None;
     }
+}
+
+fn insert_at_char_range(text: &mut String, start: usize, end: usize, insertion: &str) -> usize {
+    let char_count = text.chars().count();
+    let start = start.min(char_count);
+    let end = end.clamp(start, char_count);
+    let start_byte = text
+        .char_indices()
+        .nth(start)
+        .map(|(index, _)| index)
+        .unwrap_or(text.len());
+    let end_byte = text
+        .char_indices()
+        .nth(end)
+        .map(|(index, _)| index)
+        .unwrap_or(text.len());
+    text.replace_range(start_byte..end_byte, insertion);
+    start + insertion.chars().count()
 }
 
 impl eframe::App for TypeTextApp {
@@ -1759,25 +1787,46 @@ impl TypeTextApp {
             .inner_margin(egui::Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        egui::RichText::new("Edit Snippet")
+                        egui::RichText::new("Edit")
                             .strong()
                             .size(12.5)
                             .color(ui.visuals().text_color()),
                     );
-                    ui.add_space(8.0);
-                    ui.add_sized(
-                        [42.0, 24.0],
-                        egui::Label::new(egui::RichText::new("Title").small()),
-                    );
-                    let button_width = 66.0;
-                    let reserved_width = (button_width * 2.0) + (ui.spacing().item_spacing.x * 2.0);
+                    ui.label(egui::RichText::new("Title").small());
+                    let button_width = 58.0;
+                    let token_width = 72.0;
+                    let reserved_width =
+                        (button_width * 2.0) + token_width + (ui.spacing().item_spacing.x * 3.0);
                     let title_width = (ui.available_width() - reserved_width).max(120.0);
                     ui.add_sized(
                         [title_width, 24.0],
                         egui::TextEdit::singleline(&mut self.edit_title),
                     );
+                    egui::ComboBox::from_id_salt("snippet_token_picker")
+                        .selected_text("Tokens")
+                        .width(token_width)
+                        .show_ui(ui, |ui| {
+                            for (token_name, description) in SUPPORTED_SNIPPET_TOKENS {
+                                let token = format!("{{{token_name}}}");
+                                if ui
+                                    .selectable_label(false, format!("{token}  —  {description}"))
+                                    .clicked()
+                                {
+                                    let (start, end) = self.edit_body_selection;
+                                    let cursor = insert_at_char_range(
+                                        &mut self.edit_body,
+                                        start,
+                                        end,
+                                        &token,
+                                    );
+                                    self.edit_body_selection = (cursor, cursor);
+                                    self.edit_body_pending_cursor = Some(cursor);
+                                    ui.close();
+                                }
+                            }
+                        });
                     if ui
                         .add_sized([button_width, 24.0], egui::Button::new("Save"))
                         .clicked()
@@ -1794,10 +1843,27 @@ impl TypeTextApp {
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new("Body").small());
                 let body_height = (ui.available_height() - 2.0).max(108.0);
-                ui.add_sized(
+                let response = ui.add_sized(
                     [ui.available_width(), body_height],
-                    egui::TextEdit::multiline(&mut self.edit_body),
+                    egui::TextEdit::multiline(&mut self.edit_body).id_salt("edit_snippet_body"),
                 );
+                if let Some(mut state) =
+                    egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
+                {
+                    if let Some(cursor) = self.edit_body_pending_cursor.take() {
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::one(
+                                egui::text::CCursor::new(cursor),
+                            )));
+                        self.edit_body_selection = (cursor, cursor);
+                        state.store(ui.ctx(), response.id);
+                        response.request_focus();
+                    } else if let Some(cursor_range) = state.cursor.char_range() {
+                        let range = cursor_range.as_sorted_char_range();
+                        self.edit_body_selection = (range.start, range.end);
+                    }
+                }
             });
     }
 
@@ -2548,6 +2614,26 @@ mod tests {
         };
 
         assert_eq!(join_snippet_chain(["One", "Two"], &settings), "One\n\nTwo");
+    }
+
+    #[test]
+    fn token_picker_inserts_at_character_cursor() {
+        let mut body = "Hello café".to_string();
+
+        let cursor = insert_at_char_range(&mut body, 6, 6, "{date.today} ");
+
+        assert_eq!(body, "Hello {date.today} café");
+        assert_eq!(cursor, 19);
+    }
+
+    #[test]
+    fn token_picker_replaces_selected_text() {
+        let mut body = "Use DATE here".to_string();
+
+        let cursor = insert_at_char_range(&mut body, 4, 8, "{date.today}");
+
+        assert_eq!(body, "Use {date.today} here");
+        assert_eq!(cursor, 16);
     }
 
     fn read_settings_hotkey(settings_path: PathBuf) -> String {

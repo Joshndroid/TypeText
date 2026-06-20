@@ -89,6 +89,9 @@ Tokens work in imported and manually created snippets. Queued snippets share
 one timestamp, and the saved snippet text is not changed. Unknown tokens are
 typed unchanged.
 
+In the snippet editor, use the Tokens menu beside Save and Delete to insert a
+token at the body cursor or replace selected body text.
+
 To type a supported token literally, double the braces. For example:
 {{date.today}} types {date.today}
 

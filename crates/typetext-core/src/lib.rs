@@ -8,6 +8,15 @@ pub const DEFAULT_TYPING_DELAY_MS: u64 = 80;
 pub const DEFAULT_WINDOWS_CHARACTER_DELAY_MS: u64 = 22;
 pub const DEFAULT_WINDOWS_SEPARATOR_DELAY_MS: u64 = 35;
 pub const DEFAULT_EMPTY_LINES_BETWEEN_SNIPPETS: u32 = 0;
+pub const SUPPORTED_SNIPPET_TOKENS: &[(&str, &str)] = &[
+    ("time.today", "Current time (legacy DropText alias)"),
+    ("time.now", "Current time"),
+    ("date.today", "Today's date"),
+    ("date.tomorrow", "Tomorrow's date"),
+    ("date.yesterday", "Yesterday's date"),
+    ("datetime.now", "Current date and time"),
+    ("weekday.today", "Current weekday"),
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
