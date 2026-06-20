@@ -27,6 +27,17 @@ fn main() {
     let icon_path = icon_path.display().to_string().replace('\\', "/");
     let display_version = version.strip_prefix('v').unwrap_or(&version);
     let (major, minor, patch, build) = windows_version_parts(display_version);
+    let offline_portable = env::var_os("CARGO_FEATURE_OFFLINE_PORTABLE").is_some();
+    let product_name = if offline_portable {
+        "TypeText Offline Portable"
+    } else {
+        "TypeText"
+    };
+    let file_description = if offline_portable {
+        "TypeText offline portable desktop application"
+    } else {
+        "TypeText desktop application"
+    };
     let resource = format!(
         r#"1 ICON "{icon_path}"
 
@@ -44,12 +55,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "Joshndroid"
-            VALUE "FileDescription", "TypeText desktop application"
+            VALUE "FileDescription", "{file_description}"
             VALUE "FileVersion", "{display_version}"
             VALUE "InternalName", "TypeText"
             VALUE "LegalCopyright", "Copyright (c) 2026 Joshndroid"
             VALUE "OriginalFilename", "TypeText.exe"
-            VALUE "ProductName", "TypeText"
+            VALUE "ProductName", "{product_name}"
             VALUE "ProductVersion", "{display_version}"
         END
     END

@@ -93,8 +93,13 @@ mod windows_platform {
     use std::sync::OnceLock;
     use std::thread;
     use std::time::Duration;
-    use windows::core::{w, PCWSTR};
-    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HWND, WPARAM};
+    use windows::core::w;
+    #[cfg(not(feature = "offline-portable"))]
+    use windows::core::PCWSTR;
+    #[cfg(not(feature = "offline-portable"))]
+    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
+    use windows::Win32::Foundation::{HWND, WPARAM};
+    #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::System::Registry::{
         RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
         RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE,
@@ -114,7 +119,9 @@ mod windows_platform {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const HOTKEY_ID: i32 = 0x5454;
+    #[cfg(not(feature = "offline-portable"))]
     const STARTUP_RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    #[cfg(not(feature = "offline-portable"))]
     const STARTUP_RUN_VALUE: &str = "TypeText";
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
     static HOTKEY_MANAGER: OnceLock<Sender<HotkeyCommand>> = OnceLock::new();
@@ -291,10 +298,17 @@ mod windows_platform {
         TARGET_WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     pub fn startup_enabled() -> bool {
         startup_registry_value().is_some()
     }
 
+    #[cfg(feature = "offline-portable")]
+    pub fn startup_enabled() -> bool {
+        false
+    }
+
+    #[cfg(not(feature = "offline-portable"))]
     pub fn set_startup_enabled(enabled: bool) -> Result<()> {
         if enabled {
             let exe =
@@ -315,6 +329,11 @@ mod windows_platform {
             }
         }
         Ok(())
+    }
+
+    #[cfg(feature = "offline-portable")]
+    pub fn set_startup_enabled(_enabled: bool) -> Result<()> {
+        Err(anyhow!("Startup registration is disabled in this build"))
     }
 
     pub fn tray_status() -> &'static str {
@@ -419,6 +438,7 @@ mod windows_platform {
             .map_err(Into::into)
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     pub fn fetch_text(url: &str) -> Result<String> {
         let output = hidden_command("powershell")
             .env("TYPETEXT_UPDATE_URL", url)
@@ -436,6 +456,11 @@ mod windows_platform {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(anyhow!("Update request failed. {}", stderr.trim()))
         }
+    }
+
+    #[cfg(feature = "offline-portable")]
+    pub fn fetch_text(_url: &str) -> Result<String> {
+        Err(anyhow!("Update checks are disabled in this build"))
     }
 
     pub fn open_droptext_file_dialog() -> Result<Option<PathBuf>> {
@@ -553,10 +578,12 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     fn startup_command(exe_path: &Path) -> String {
         format!("\"{}\" --startup", exe_path.display())
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     fn startup_registry_value() -> Option<String> {
         unsafe {
             let key = open_startup_registry_key(KEY_READ).ok()?;
@@ -598,6 +625,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     fn write_startup_registry_entry(value: &str) -> Result<()> {
         unsafe {
             let key = create_startup_registry_key()?;
@@ -622,6 +650,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         Ok(())
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     fn remove_startup_registry_entry() -> Result<()> {
         unsafe {
             let key = match open_startup_registry_key(KEY_SET_VALUE) {
@@ -638,6 +667,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         Ok(())
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     unsafe fn create_startup_registry_key() -> Result<HKEY> {
         let subkey = wide_null(STARTUP_RUN_SUBKEY);
         let mut key = HKEY::default();
@@ -661,6 +691,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     unsafe fn open_startup_registry_key(access: REG_SAM_FLAGS) -> Result<HKEY> {
         let subkey = wide_null(STARTUP_RUN_SUBKEY);
         let mut key = HKEY::default();
@@ -680,6 +711,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     fn wide_null(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
     }

@@ -14,6 +14,7 @@ use typetext_core::{
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
 const APP_TITLE: &str = concat!("TypeText ", env!("TYPETEXT_APP_VERSION"));
+const OFFLINE_PORTABLE: bool = cfg!(all(windows, feature = "offline-portable"));
 const UPDATE_CHECK_INTERVAL_SECONDS: u64 = 60 * 60 * 24;
 const LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/Joshndroid/TypeText/releases/latest";
@@ -513,7 +514,13 @@ impl TypeTextApp {
             PortablePaths::beside_executable().unwrap_or_else(|_| PortablePaths::from_app_dir("."));
         let snippets = load_or_create_snippets(&paths).unwrap_or_default();
         let mut settings = load_or_create_settings(&paths).unwrap_or_default();
-        settings.open_on_startup = platform::startup_enabled();
+        if OFFLINE_PORTABLE {
+            settings.open_on_startup = false;
+            settings.check_for_updates = false;
+            settings.last_update_check_unix = None;
+        } else {
+            settings.open_on_startup = platform::startup_enabled();
+        }
         settings.theme = normalize_theme(&settings.theme);
         configure_fonts(&cc.egui_ctx);
         apply_theme(&cc.egui_ctx, &settings);
@@ -808,6 +815,9 @@ impl TypeTextApp {
     }
 
     fn schedule_update_check(&mut self, force: bool) {
+        if OFFLINE_PORTABLE {
+            return;
+        }
         if self.update_check_in_progress {
             return;
         }
@@ -1349,7 +1359,10 @@ impl TypeTextApp {
                 if nav_button(ui, self.view == View::Choose, "Choose") {
                     self.switch_view(View::Choose);
                 }
-                if self.update_info.is_some() && ui.button("Download Update").clicked() {
+                if !OFFLINE_PORTABLE
+                    && self.update_info.is_some()
+                    && ui.button("Download Update").clicked()
+                {
                     self.open_update_download();
                 }
             });
@@ -1927,15 +1940,17 @@ impl TypeTextApp {
                     });
                 });
 
-                section_gap(ui);
-                framed_section(ui, "Startup", "launch behavior", |ui| {
-                    if ui
-                        .checkbox(&mut self.settings.open_on_startup, "Open on Startup")
-                        .changed()
-                    {
-                        self.mark_settings_dirty();
-                    }
-                });
+                if !OFFLINE_PORTABLE {
+                    section_gap(ui);
+                    framed_section(ui, "Startup", "launch behavior", |ui| {
+                        if ui
+                            .checkbox(&mut self.settings.open_on_startup, "Open on Startup")
+                            .changed()
+                        {
+                            self.mark_settings_dirty();
+                        }
+                    });
+                }
 
                 section_gap(ui);
                 framed_section(ui, "Typing", "insertion behavior", |ui| {
@@ -2126,8 +2141,9 @@ impl TypeTextApp {
                     });
                 });
 
-                section_gap(ui);
-                framed_section(ui, "Updates", "GitHub releases", |ui| {
+                if !OFFLINE_PORTABLE {
+                    section_gap(ui);
+                    framed_section(ui, "Updates", "GitHub releases", |ui| {
                     if ui
                         .checkbox(
                             &mut self.settings.check_for_updates,
@@ -2185,7 +2201,8 @@ impl TypeTextApp {
                             }
                         });
                     }
-                });
+                    });
+                }
 
                 section_gap(ui);
                 framed_section(ui, "Snippet Data", "import, export, and reset", |ui| {
@@ -2357,7 +2374,9 @@ fn save_settings_with_effects_impl(
     effects: &dyn SettingsEffects,
 ) -> anyhow::Result<()> {
     settings.theme = normalize_theme(&settings.theme);
-    effects.set_startup_enabled(settings.open_on_startup)?;
+    if !OFFLINE_PORTABLE {
+        effects.set_startup_enabled(settings.open_on_startup)?;
+    }
     let requested_hotkey = settings.hotkey.clone();
     if registered_hotkey.as_deref() != Some(requested_hotkey.as_str()) {
         if let Err(error) = effects.reregister_hotkey(&requested_hotkey, hotkey_tx.clone()) {

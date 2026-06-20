@@ -89,6 +89,7 @@ Release artifacts:
 TypeText-macOS.zip
 TypeText-macOS.dmg
 TypeText-Windows-x64.zip
+TypeText-Windows-x64-Offline-Portable.zip
 TypeText-Windows-x64-Setup.exe
 ```
 
@@ -201,9 +202,13 @@ Outputs:
 ```text
 dist\TypeText-Windows\TypeText.exe
 dist\TypeText-Windows-x64.zip
+dist\TypeText-Windows-x64-Offline-Portable.zip
 dist\TypeText-Windows-x64-Setup.exe
 dist\TypeText-Windows-x64-Setup.exe.sha256
 ```
+
+The offline portable build does not check for updates or offer startup
+registration. Those Windows integrations are disabled at compile time.
 
 ## macOS Permissions
 

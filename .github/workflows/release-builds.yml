@@ -141,6 +141,7 @@ jobs:
           name: TypeText-Windows-x64
           path: |
             dist/TypeText-Windows-x64.zip
+            dist/TypeText-Windows-x64-Offline-Portable.zip
             dist/TypeText-Windows-x64-Setup.exe
           if-no-files-found: error
 
@@ -186,6 +187,7 @@ jobs:
             release-assets/TypeText-macOS.zip
             release-assets/TypeText-macOS.dmg
             release-assets/TypeText-Windows-x64.zip
+            release-assets/TypeText-Windows-x64-Offline-Portable.zip
             release-assets/TypeText-Windows-x64-Setup.exe
 
       - name: Create GitHub release
@@ -199,4 +201,5 @@ jobs:
             release-assets/TypeText-macOS.zip
             release-assets/TypeText-macOS.dmg
             release-assets/TypeText-Windows-x64.zip
+            release-assets/TypeText-Windows-x64-Offline-Portable.zip
             release-assets/TypeText-Windows-x64-Setup.exe
