@@ -22,7 +22,8 @@ const LATEST_RELEASE_API_URL: &str =
 
 fn main() -> eframe::Result {
     if let Err(error) = platform::install_app_mutex() {
-        eprintln!("Could not install app mutex: {error}");
+        eprintln!("TypeText is already running or could not acquire its app lock: {error}");
+        return Ok(());
     }
 
     let icon = app_icon_data();

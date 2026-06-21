@@ -96,9 +96,11 @@ mod windows_platform {
     use windows::core::w;
     #[cfg(not(feature = "offline-portable"))]
     use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{
+        CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HWND, WPARAM,
+    };
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
-    use windows::Win32::Foundation::{HWND, WPARAM};
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::System::Registry::{
         RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
@@ -123,13 +125,22 @@ mod windows_platform {
     const STARTUP_RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     #[cfg(not(feature = "offline-portable"))]
     const STARTUP_RUN_VALUE: &str = "TypeText";
+    static APP_MUTEX_HANDLE: AtomicIsize = AtomicIsize::new(0);
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
     static HOTKEY_MANAGER: OnceLock<Sender<HotkeyCommand>> = OnceLock::new();
 
     pub fn install_app_mutex() -> Result<()> {
         unsafe {
-            CreateMutexW(None, false, w!("TypeTextAppMutex"))
+            let handle = CreateMutexW(None, false, w!("TypeTextAppMutex"))
                 .context("Could not create TypeText app mutex")?;
+            if GetLastError() == ERROR_ALREADY_EXISTS {
+                let _ = CloseHandle(handle);
+                return Err(anyhow!("another TypeText instance is already running"));
+            }
+
+            // Win32 HANDLE values are not closed on Rust drop. Retain the raw value
+            // for clarity and let Windows release it when the process exits.
+            APP_MUTEX_HANDLE.store(handle.0 as isize, Ordering::Relaxed);
         }
         Ok(())
     }
@@ -445,7 +456,7 @@ mod windows_platform {
             .args([
                 "-NoProfile",
                 "-Command",
-                "$ProgressPreference='SilentlyContinue'; $uri=[Environment]::GetEnvironmentVariable('TYPETEXT_UPDATE_URL'); (Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='TypeText'} -Uri $uri).Content",
+                "$ProgressPreference='SilentlyContinue'; $uri=[Environment]::GetEnvironmentVariable('TYPETEXT_UPDATE_URL'); (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Headers @{'User-Agent'='TypeText'} -Uri $uri).Content",
             ])
             .output()
             .context("Could not run PowerShell update check")?;
@@ -730,6 +741,8 @@ mod macos_platform {
     use std::ffi::c_char;
     use std::ffi::c_void;
     use std::ffi::CStr;
+    use std::fs::{File, OpenOptions};
+    use std::os::fd::AsRawFd;
     use std::path::PathBuf;
     use std::ptr;
     use std::sync::{Mutex, OnceLock};
@@ -888,6 +901,27 @@ mod macos_platform {
     }
 
     pub fn install_app_mutex() -> Result<()> {
+        static APP_LOCK: OnceLock<File> = OnceLock::new();
+        const LOCK_EXCLUSIVE_NONBLOCKING: i32 = 2 | 4;
+
+        unsafe extern "C" {
+            fn flock(fd: i32, operation: i32) -> i32;
+        }
+
+        let lock_path = std::env::temp_dir().join("typetext.lock");
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("Could not open app lock {}", lock_path.display()))?;
+        if unsafe { flock(lock.as_raw_fd(), LOCK_EXCLUSIVE_NONBLOCKING) } != 0 {
+            return Err(anyhow!("another TypeText instance is already running"));
+        }
+        APP_LOCK
+            .set(lock)
+            .map_err(|_| anyhow!("TypeText app lock was already initialized"))?;
         Ok(())
     }
 
@@ -1036,7 +1070,16 @@ mod macos_platform {
 
     pub fn fetch_text(url: &str) -> Result<String> {
         let output = Command::new("curl")
-            .args(["-fsSL", "-H", "User-Agent: TypeText", url])
+            .args([
+                "-fsSL",
+                "--connect-timeout",
+                "10",
+                "--max-time",
+                "30",
+                "-H",
+                "User-Agent: TypeText",
+                url,
+            ])
             .output()
             .context("Could not run curl update check")?;
 
@@ -1523,7 +1566,16 @@ mod fallback_platform {
 
     pub fn fetch_text(url: &str) -> Result<String> {
         let output = Command::new("curl")
-            .args(["-fsSL", "-H", "User-Agent: TypeText", url])
+            .args([
+                "-fsSL",
+                "--connect-timeout",
+                "10",
+                "--max-time",
+                "30",
+                "-H",
+                "User-Agent: TypeText",
+                url,
+            ])
             .output()
             .context("Could not run curl update check")?;
 

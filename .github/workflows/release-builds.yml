@@ -12,17 +12,61 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    name: Verify release source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must use v.X.X.X format, for example v1.2.3." >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Verify repository versions
+        shell: bash
+        run: |
+          expected_version="${GITHUB_REF_NAME#v}"
+          version_file="$(tr -d '[:space:]' < VERSION)"
+          cargo_version="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
+          if [[ "$version_file" != "$GITHUB_REF_NAME" || "$cargo_version" != "$expected_version" ]]; then
+            echo "Release tag, VERSION, and Cargo.toml must describe the same version." >&2
+            echo "tag=$GITHUB_REF_NAME VERSION=$version_file Cargo.toml=$cargo_version" >&2
+            exit 1
+          fi
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.96.0
+          components: clippy, rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run tests
+        run: cargo test --workspace --all-targets
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
   macos:
     name: macOS app
     runs-on: macos-latest
+    needs: verify
     environment: release-signing
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
+          toolchain: 1.96.0
           targets: aarch64-apple-darwin
 
       - name: Import Developer ID certificate
@@ -107,7 +151,7 @@ jobs:
           rm -f "$RUNNER_TEMP/developer-id.p12"
 
       - name: Upload macOS app
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: TypeText-macOS
           path: |
@@ -118,13 +162,15 @@ jobs:
   windows:
     name: Windows app
     runs-on: windows-latest
+    needs: verify
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
+          toolchain: 1.96.0
           targets: x86_64-pc-windows-msvc
 
       - name: Install Inno Setup
@@ -136,7 +182,7 @@ jobs:
         run: Scripts\build-windows-installer.ps1
 
       - name: Upload Windows app
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: TypeText-Windows-x64
           path: |
@@ -159,7 +205,7 @@ jobs:
       artifact-metadata: write
     steps:
       - name: Checkout release history
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
@@ -175,13 +221,13 @@ jobs:
           Scripts/generate-release-notes.sh release-notes.md "$GITHUB_REF_NAME"
 
       - name: Download portable artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: release-assets
           merge-multiple: true
 
       - name: Attest release artifacts
-        uses: actions/attest@v4
+        uses: actions/attest@281a49d4cbb0a72c9575a50d18f6deb515a11deb # v4
         with:
           subject-path: |
             release-assets/TypeText-macOS.zip
@@ -191,7 +237,7 @@ jobs:
             release-assets/TypeText-Windows-x64-Setup.exe
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
         with:
           name: TypeText ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}

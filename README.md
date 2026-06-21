@@ -117,8 +117,8 @@ TypeText-Windows-x64-Setup.exe
 To publish a GitHub Release, push a version tag in `vX.X.X` format:
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v1.4.0
+git push origin v1.4.0
 ```
 
 The workflow passes the tag through as `TYPETEXT_VERSION`, builds the macOS and
@@ -143,7 +143,7 @@ For local builds that are not run from an exact Git tag, update `VERSION` first.
 You can also override any build explicitly:
 
 ```bash
-TYPETEXT_VERSION=v0.2.1 Scripts/build-macos-app.sh
+TYPETEXT_VERSION=v1.4.0 Scripts/build-macos-app.sh
 ```
 
 TypeText checks that release feed at most once per day when update checks are
