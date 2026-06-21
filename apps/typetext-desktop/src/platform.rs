@@ -354,7 +354,7 @@ mod windows_platform {
     pub fn install_reopen_handler(_tx: Sender<TrayCommand>, _repaint_ctx: eframe::egui::Context) {}
 
     fn send_unicode_unit(unit: u16) -> Result<()> {
-        let mut inputs = [
+        let inputs = [
             INPUT {
                 r#type: INPUT_KEYBOARD,
                 Anonymous: INPUT_0 {
@@ -381,7 +381,7 @@ mod windows_platform {
             },
         ];
 
-        let sent = unsafe { SendInput(&mut inputs, size_of::<INPUT>() as i32) };
+        let sent = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
         if sent == 0 {
             Err(anyhow!("SendInput failed"))
         } else {
@@ -560,7 +560,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         key: VIRTUAL_KEY,
         flags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS,
     ) -> Result<()> {
-        let mut inputs = [INPUT {
+        let inputs = [INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
                 ki: KEYBDINPUT {
@@ -573,7 +573,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             },
         }];
 
-        let sent = unsafe { SendInput(&mut inputs, size_of::<INPUT>() as i32) };
+        let sent = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
         if sent == 0 {
             Err(anyhow!("SendInput failed"))
         } else {
