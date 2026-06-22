@@ -8,4 +8,4 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT"
-version = "1.4.2"
+version = "1.4.3"
