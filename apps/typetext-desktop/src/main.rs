@@ -59,6 +59,13 @@ enum View {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(any(windows, target_os = "macos")),
+    expect(
+        dead_code,
+        reason = "tray commands are produced only on desktop targets"
+    )
+)]
 pub(crate) enum TrayCommand {
     Open,
     Settings,

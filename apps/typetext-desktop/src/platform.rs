@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 use std::process::Command;
-use std::sync::mpsc::{self, Sender};
+#[cfg(any(windows, target_os = "macos"))]
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 
 use crate::TrayCommand;
 
