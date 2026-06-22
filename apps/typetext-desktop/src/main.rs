@@ -1816,7 +1816,7 @@ impl TypeTextApp {
             .inner_margin(egui::Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal_wrapped(|ui| {
+                ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new("Edit")
                             .strong()
@@ -1825,35 +1825,38 @@ impl TypeTextApp {
                     );
                     ui.label(egui::RichText::new("Title").small());
                     let token_width = 72.0;
-                    let reserved_width = token_width + ui.spacing().item_spacing.x;
-                    let title_width = (ui.available_width() - reserved_width).max(120.0);
-                    ui.add_sized(
-                        [title_width, 24.0],
-                        egui::TextEdit::singleline(&mut self.edit_title),
-                    );
-                    egui::ComboBox::from_id_salt("snippet_token_picker")
-                        .selected_text("Tokens")
-                        .width(token_width)
-                        .show_ui(ui, |ui| {
-                            for (token_name, description) in SUPPORTED_SNIPPET_TOKENS {
-                                let token = format!("{{{token_name}}}");
-                                if ui
-                                    .selectable_label(false, format!("{token}  —  {description}"))
-                                    .clicked()
-                                {
-                                    let (start, end) = self.edit_body_selection;
-                                    let cursor = insert_at_char_range(
-                                        &mut self.edit_body,
-                                        start,
-                                        end,
-                                        &token,
-                                    );
-                                    self.edit_body_selection = (cursor, cursor);
-                                    self.edit_body_pending_cursor = Some(cursor);
-                                    ui.close();
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        egui::ComboBox::from_id_salt("snippet_token_picker")
+                            .selected_text("Tokens")
+                            .width(token_width)
+                            .show_ui(ui, |ui| {
+                                for (token_name, description) in SUPPORTED_SNIPPET_TOKENS {
+                                    let token = format!("{{{token_name}}}");
+                                    if ui
+                                        .selectable_label(
+                                            false,
+                                            format!("{token}  —  {description}"),
+                                        )
+                                        .clicked()
+                                    {
+                                        let (start, end) = self.edit_body_selection;
+                                        let cursor = insert_at_char_range(
+                                            &mut self.edit_body,
+                                            start,
+                                            end,
+                                            &token,
+                                        );
+                                        self.edit_body_selection = (cursor, cursor);
+                                        self.edit_body_pending_cursor = Some(cursor);
+                                        ui.close();
+                                    }
                                 }
-                            }
-                        });
+                            });
+                        ui.add_sized(
+                            [ui.available_width(), 24.0],
+                            egui::TextEdit::singleline(&mut self.edit_title),
+                        );
+                    });
                 });
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new("Body").small());
