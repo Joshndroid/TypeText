@@ -4,22 +4,8 @@ function Get-TypeTextVersion {
         [string]$RootDir
     )
 
-    if (![string]::IsNullOrWhiteSpace($env:TYPETEXT_VERSION)) {
-        return $env:TYPETEXT_VERSION.Trim()
-    }
-
-    $Tag = (& git -C $RootDir describe --tags --exact-match 2>$null)
-    if (![string]::IsNullOrWhiteSpace($Tag)) {
-        return $Tag.Trim()
-    }
-
-    $VersionPath = Join-Path $RootDir "VERSION"
-    if (Test-Path $VersionPath) {
-        return (Get-Content $VersionPath -Raw).Trim()
-    }
-
     $CargoVersion = Select-String -Path (Join-Path $RootDir "Cargo.toml") -Pattern '^version = "(.+)"' | Select-Object -First 1
-    return $CargoVersion.Matches[0].Groups[1].Value
+    return "v$($CargoVersion.Matches[0].Groups[1].Value)"
 }
 
 function Get-TypeTextPackageVersion {

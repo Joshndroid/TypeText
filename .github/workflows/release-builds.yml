@@ -5,9 +5,6 @@ on:
     tags:
       - "v*.*.*"
 
-env:
-  TYPETEXT_VERSION: ${{ github.ref_name }}
-
 permissions:
   contents: read
 
@@ -27,15 +24,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Verify repository versions
+      - name: Verify release version
         shell: bash
         run: |
           expected_version="${GITHUB_REF_NAME#v}"
-          version_file="$(tr -d '[:space:]' < VERSION)"
           cargo_version="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
-          if [[ "$version_file" != "$GITHUB_REF_NAME" || "$cargo_version" != "$expected_version" ]]; then
-            echo "Release tag, VERSION, and Cargo.toml must describe the same version." >&2
-            echo "tag=$GITHUB_REF_NAME VERSION=$version_file Cargo.toml=$cargo_version" >&2
+          if [[ "$cargo_version" != "$expected_version" ]]; then
+            echo "Release tag must match the workspace version in Cargo.toml." >&2
+            echo "tag=$GITHUB_REF_NAME Cargo.toml=$cargo_version" >&2
             exit 1
           fi
 

@@ -9,7 +9,6 @@ $OutputDir = Join-Path $RootDir "dist"
 $IssPath = Join-Path $InstallerDir "TypeText.iss"
 $Version = Get-TypeTextVersion -RootDir $RootDir
 $PackageVersion = Get-TypeTextPackageVersion -Version $Version
-$env:TYPETEXT_VERSION = $Version
 
 & $PortableScript
 $ExePath = Join-Path $DistDir "TypeText.exe"

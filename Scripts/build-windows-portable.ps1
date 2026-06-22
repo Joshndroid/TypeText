@@ -3,7 +3,6 @@ $ErrorActionPreference = "Stop"
 $RootDir = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "version.ps1")
 $Version = Get-TypeTextVersion -RootDir $RootDir
-$env:TYPETEXT_VERSION = $Version
 $WindowsTarget = $env:TYPETEXT_WINDOWS_TARGET
 if ([string]::IsNullOrWhiteSpace($WindowsTarget)) {
     $WindowsTarget = "x86_64-pc-windows-msvc"

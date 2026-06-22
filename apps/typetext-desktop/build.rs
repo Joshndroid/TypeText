@@ -7,12 +7,9 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=../../icon/TypeText.ico");
-    println!("cargo:rerun-if-changed=../../VERSION");
-    println!("cargo:rerun-if-env-changed=TYPETEXT_VERSION");
-
     let manifest_dir =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set"));
-    let version = resolved_version(&manifest_dir);
+    let version = resolved_version();
     println!("cargo:rustc-env=TYPETEXT_APP_VERSION={version}");
 
     if env::var("CARGO_CFG_WINDOWS").is_err() {
@@ -209,37 +206,11 @@ fn windows_kit_roots() -> Vec<PathBuf> {
     roots
 }
 
-fn resolved_version(manifest_dir: &std::path::Path) -> String {
-    if let Ok(version) = env::var("TYPETEXT_VERSION") {
-        let version = version.trim();
-        if !version.is_empty() {
-            return version.to_string();
-        }
-    }
-
-    let root_dir = manifest_dir.join("../..");
-    if let Ok(output) = Command::new("git")
-        .args(["describe", "--tags", "--exact-match"])
-        .current_dir(&root_dir)
-        .output()
-    {
-        if output.status.success() {
-            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !version.is_empty() {
-                return version;
-            }
-        }
-    }
-
-    let version_path = root_dir.join("VERSION");
-    if let Ok(version) = fs::read_to_string(version_path) {
-        let version = version.trim();
-        if !version.is_empty() {
-            return version.to_string();
-        }
-    }
-
-    env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string())
+fn resolved_version() -> String {
+    format!(
+        "v{}",
+        env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string())
+    )
 }
 
 fn windows_version_parts(version: &str) -> (u16, u16, u16, u16) {

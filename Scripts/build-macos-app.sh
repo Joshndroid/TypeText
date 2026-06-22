@@ -15,7 +15,6 @@ APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
 APPLE_APP_PASSWORD="${APPLE_APP_PASSWORD:-${APPLE_PASSWORD:-}}"
 VERSION="$(typetext_version "$ROOT_DIR")"
 PACKAGE_VERSION="$(typetext_package_version "$VERSION")"
-export TYPETEXT_VERSION="$VERSION"
 
 set_notarytool_args() {
   if [[ -n "$APPLE_NOTARY_PROFILE" ]]; then
