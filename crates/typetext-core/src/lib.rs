@@ -25,6 +25,12 @@ pub struct SnippetFile {
     pub groups: Vec<SnippetGroup>,
 }
 
+#[derive(Debug, Clone)]
+pub struct DropTextImport {
+    pub snippets: SnippetFile,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnippetGroup {
@@ -266,6 +272,10 @@ pub fn save_settings(paths: &PortablePaths, settings: &AppSettings) -> Result<()
 }
 
 pub fn import_droptext(path: impl AsRef<Path>) -> Result<SnippetFile> {
+    Ok(import_droptext_with_warnings(path)?.snippets)
+}
+
+pub fn import_droptext_with_warnings(path: impl AsRef<Path>) -> Result<DropTextImport> {
     let path = path.as_ref();
     let bytes = fs::read(path).with_context(|| format!("Could not read {}", path.display()))?;
     let raw = decode_droptext_text(&bytes);
@@ -275,18 +285,25 @@ pub fn import_droptext(path: impl AsRef<Path>) -> Result<SnippetFile> {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"));
 
     if is_csv {
-        parse_droptext_csv(&raw)
+        parse_droptext_csv_with_warnings(&raw)
     } else {
-        parse_droptext_ini(&raw)
+        parse_droptext_ini(&raw).map(|snippets| DropTextImport {
+            snippets,
+            warnings: Vec::new(),
+        })
     }
     .with_context(|| format!("Could not parse {}", path.display()))
 }
 
 pub fn parse_droptext_ini(raw: &str) -> Result<SnippetFile> {
-    parse_droptext_data(raw, false)
+    parse_droptext_data(raw, false, &mut Vec::new())
 }
 
 pub fn parse_droptext_csv(raw: &str) -> Result<SnippetFile> {
+    Ok(parse_droptext_csv_with_warnings(raw)?.snippets)
+}
+
+fn parse_droptext_csv_with_warnings(raw: &str) -> Result<DropTextImport> {
     let records = parse_csv_records(raw.trim_start_matches('\u{feff}'))?;
     if records.is_empty() {
         return Err(anyhow!("The DropText CSV file is empty."));
@@ -307,7 +324,9 @@ pub fn parse_droptext_csv(raw: &str) -> Result<SnippetFile> {
         droptext_data.push_str(&record[2]);
     }
 
-    parse_droptext_data(&droptext_data, true)
+    let mut warnings = Vec::new();
+    let snippets = parse_droptext_data(&droptext_data, true, &mut warnings)?;
+    Ok(DropTextImport { snippets, warnings })
 }
 
 pub fn expand_snippet_tokens(body: &str) -> String {
@@ -365,7 +384,11 @@ fn expand_snippet_tokens_at(body: &str, now: DateTime<FixedOffset>) -> String {
     expanded
 }
 
-fn parse_droptext_data(raw: &str, decode_unquoted_escapes: bool) -> Result<SnippetFile> {
+fn parse_droptext_data(
+    raw: &str,
+    decode_unquoted_escapes: bool,
+    warnings: &mut Vec<String>,
+) -> Result<SnippetFile> {
     let mut groups: Vec<SnippetGroup> = Vec::new();
     let mut current_group: Option<usize> = None;
 
@@ -403,9 +426,17 @@ fn parse_droptext_data(raw: &str, decode_unquoted_escapes: bool) -> Result<Snipp
             continue;
         }
 
-        let Some(separator) = line.find('=') else {
-            return Err(anyhow!("Line {line_number}: expected key=value entry"));
-        };
+        let (separator, value_start, repaired_missing_separator) =
+            if let Some(separator) = line.find('=') {
+                (separator, separator + 1, false)
+            } else if decode_unquoted_escapes {
+                let opening_quote = line
+                    .find('"')
+                    .ok_or_else(|| anyhow!("Line {line_number}: expected key=value entry"))?;
+                (opening_quote, opening_quote, true)
+            } else {
+                return Err(anyhow!("Line {line_number}: expected key=value entry"));
+            };
         let Some(group_index) = current_group else {
             return Err(anyhow!(
                 "Line {line_number}: entry appears before any section"
@@ -418,10 +449,15 @@ fn parse_droptext_data(raw: &str, decode_unquoted_escapes: bool) -> Result<Snipp
         }
 
         let body = parse_droptext_value(
-            line[separator + 1..].trim(),
+            line[value_start..].trim(),
             line_number,
             decode_unquoted_escapes,
         )?;
+        if repaired_missing_separator {
+            warnings.push(format!(
+                "Line {line_number}: inserted missing = before quoted value for \"{title}\"."
+            ));
+        }
         groups[group_index].snippets.push(Snippet {
             title: title.to_string(),
             body,
@@ -876,6 +912,26 @@ Two="Second"
         assert_eq!(
             snippets.groups[1].snippets[0].body,
             r"Keep C:\unknown intact"
+        );
+    }
+
+    #[test]
+    fn parse_droptext_csv_recovers_missing_equals_before_quoted_value() {
+        let raw = concat!(
+            "<new>,852,\"[Common]\n",
+            "Extension Last Log\"\"Quoted body\"\"\",680,997,1438,468\r\n",
+        );
+
+        let imported = parse_droptext_csv_with_warnings(raw).unwrap();
+        let snippets = imported.snippets;
+
+        assert_eq!(snippets.groups.len(), 1);
+        assert_eq!(snippets.groups[0].snippets.len(), 1);
+        assert_eq!(snippets.groups[0].snippets[0].title, "Extension Last Log");
+        assert_eq!(snippets.groups[0].snippets[0].body, "Quoted body");
+        assert_eq!(
+            imported.warnings,
+            ["Line 2: inserted missing = before quoted value for \"Extension Last Log\"."]
         );
     }
 

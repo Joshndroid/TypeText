@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use typetext_core::{
-    expand_snippet_tokens, export_snippets, import_droptext, load_or_create_settings,
+    expand_snippet_tokens, export_snippets, import_droptext_with_warnings, load_or_create_settings,
     load_or_create_snippets, save_settings, save_snippets, search_snippets, AppSettings,
     PortablePaths, QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
     SUPPORTED_SNIPPET_TOKENS,
@@ -138,6 +138,7 @@ struct TypeTextApp {
     edit_body_pending_cursor: Option<usize>,
     status: String,
     error_message: Option<String>,
+    warning_message: Option<String>,
     confirm_clear_all: bool,
     capturing_hotkey: bool,
     settings_dirty: bool,
@@ -586,6 +587,7 @@ impl TypeTextApp {
             edit_body_pending_cursor: None,
             status,
             error_message,
+            warning_message: None,
             confirm_clear_all: false,
             capturing_hotkey: false,
             settings_dirty: false,
@@ -785,15 +787,17 @@ impl TypeTextApp {
             }
         };
 
-        match import_droptext(&path) {
+        match import_droptext_with_warnings(&path) {
             Ok(imported) => {
-                let group_count = imported.groups.len();
+                let group_count = imported.snippets.groups.len();
                 let snippet_count = imported
+                    .snippets
                     .groups
                     .iter()
                     .map(|group| group.snippets.len())
                     .sum::<usize>();
-                merge_snippet_file(&mut self.snippets, imported);
+                let warnings = imported.warnings;
+                merge_snippet_file(&mut self.snippets, imported.snippets);
                 self.selected_group = 0;
                 self.selected_snippet = 0;
                 self.edit_group_active = false;
@@ -802,8 +806,22 @@ impl TypeTextApp {
                 match save_snippets(&self.paths, &self.snippets) {
                     Ok(()) => {
                         self.refresh_results();
-                        self.status =
-                            format!("Imported {snippet_count} snippets from {group_count} groups");
+                        self.status = format!(
+                            "Imported {snippet_count} snippets from {group_count} groups{}",
+                            if warnings.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" with {} repair(s)", warnings.len())
+                            }
+                        );
+                        if !warnings.is_empty() {
+                            self.warning_message = Some(format!(
+                                "The import completed, but TypeText repaired {} malformed entr{}:\n\n{}",
+                                warnings.len(),
+                                if warnings.len() == 1 { "y" } else { "ies" },
+                                warnings.join("\n")
+                            ));
+                        }
                     }
                     Err(error) => self.show_error(error.to_string()),
                 }
@@ -1172,6 +1190,7 @@ impl eframe::App for TypeTextApp {
 
         self.ui_clear_all_confirmation(&ctx);
         self.ui_background_notice(&ctx);
+        self.ui_warning_popup(&ctx);
         self.ui_error_popup(&ctx);
     }
 }
@@ -1363,6 +1382,53 @@ impl TypeTextApp {
 
         if dismiss {
             self.error_message = None;
+        }
+    }
+
+    fn ui_warning_popup(&mut self, ctx: &egui::Context) {
+        let Some(message) = self.warning_message.as_deref() else {
+            return;
+        };
+
+        let mut dismiss = false;
+        egui::Area::new(egui::Id::new("warning_popup_dialog"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.set_max_width(460.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new("Import warning")
+                                    .strong()
+                                    .size(15.5)
+                                    .color(ui.visuals().text_color()),
+                            );
+                        });
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.add(egui::Label::new(egui::RichText::new(message).size(11.5)).wrap());
+                        ui.add_space(10.0);
+                        ui.vertical_centered(|ui| {
+                            if ui
+                                .add_sized([78.0, 24.0], egui::Button::new("OK"))
+                                .clicked()
+                            {
+                                dismiss = true;
+                            }
+                        });
+                    });
+            });
+
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            dismiss = true;
+        }
+
+        if dismiss {
+            self.warning_message = None;
         }
     }
 
