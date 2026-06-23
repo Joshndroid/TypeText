@@ -1,4 +1,6 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
+#[cfg(any(windows, target_os = "macos", not(feature = "offline-portable")))]
+use anyhow::Context;
 use std::path::Path;
 use std::process::Command;
 #[cfg(any(windows, target_os = "macos"))]
