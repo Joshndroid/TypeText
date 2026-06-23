@@ -1981,10 +1981,12 @@ impl TypeTextApp {
             .unwrap_or_default();
         match current_sort {
             SnippetSortOrder::Custom => {}
-            SnippetSortOrder::AlphabeticalAscending => snippet_titles
-                .sort_by(|left, right| left.1.to_lowercase().cmp(&right.1.to_lowercase())),
-            SnippetSortOrder::AlphabeticalDescending => snippet_titles
-                .sort_by(|left, right| right.1.to_lowercase().cmp(&left.1.to_lowercase())),
+            SnippetSortOrder::AlphabeticalAscending => {
+                snippet_titles.sort_by_key(|snippet| snippet.1.to_lowercase())
+            }
+            SnippetSortOrder::AlphabeticalDescending => {
+                snippet_titles.sort_by_key(|snippet| std::cmp::Reverse(snippet.1.to_lowercase()))
+            }
         }
         egui::ScrollArea::vertical()
             .id_salt("edit_snippets")

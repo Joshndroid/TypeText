@@ -517,12 +517,12 @@ pub fn search_snippets(snippets: &SnippetFile, query: &str) -> Vec<SearchResult>
                 .collect();
             match group.sort_order {
                 SnippetSortOrder::Custom => {}
-                SnippetSortOrder::AlphabeticalAscending => matches.sort_by(|left, right| {
-                    left.title.to_lowercase().cmp(&right.title.to_lowercase())
-                }),
-                SnippetSortOrder::AlphabeticalDescending => matches.sort_by(|left, right| {
-                    right.title.to_lowercase().cmp(&left.title.to_lowercase())
-                }),
+                SnippetSortOrder::AlphabeticalAscending => {
+                    matches.sort_by_key(|result| result.title.to_lowercase())
+                }
+                SnippetSortOrder::AlphabeticalDescending => {
+                    matches.sort_by_key(|result| std::cmp::Reverse(result.title.to_lowercase()))
+                }
             }
             matches
         })
