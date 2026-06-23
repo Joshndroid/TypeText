@@ -95,14 +95,16 @@ mod windows_platform {
     use std::sync::OnceLock;
     use std::thread;
     use std::time::Duration;
-    use windows::core::w;
-    #[cfg(not(feature = "offline-portable"))]
-    use windows::core::PCWSTR;
+    use windows::core::{w, PCWSTR};
     use windows::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HWND, WPARAM,
+        CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_CANCELLED, HWND, WPARAM,
     };
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::System::Registry::{
         RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
@@ -115,6 +117,12 @@ mod windows_platform {
         INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOD_ALT, MOD_CONTROL,
         MOD_SHIFT, MOD_WIN, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RETURN, VK_RWIN,
         VK_SHIFT,
+    };
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{
+        FileOpenDialog, FileSaveDialog, IFileOpenDialog, IFileSaveDialog, IShellItem,
+        SHCreateItemFromParsingName, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_NOREADONLYRETURN,
+        FOS_OVERWRITEPROMPT, FOS_PATHMUSTEXIST, SIGDN_FILESYSPATH,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, GetForegroundWindow, PeekMessageW, SetForegroundWindow, TranslateMessage,
@@ -477,68 +485,133 @@ mod windows_platform {
     }
 
     pub fn open_droptext_file_dialog() -> Result<Option<PathBuf>> {
-        let script = r#"
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Title = 'Import DropText snippets'
-$dialog.Filter = 'DropText files (*.ini;*.csv)|*.ini;*.csv|DropText INI (*.ini)|*.ini|DropText CSV (*.csv)|*.csv|All files (*.*)|*.*'
-$dialog.CheckFileExists = $true
-$dialog.CheckPathExists = $true
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-    [Console]::Out.Write($dialog.FileName)
-}
-"#;
-        let output = hidden_command("powershell")
-            .args(["-NoProfile", "-STA", "-Command", script])
-            .output()
-            .context("Could not open Windows file dialog")?;
+        unsafe {
+            let _com = ComApartment::initialize()?;
+            let dialog: IFileOpenDialog =
+                CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)
+                    .context("Could not create Windows open-file dialog")?;
+            dialog
+                .SetTitle(w!("Import DropText snippets"))
+                .context("Could not set Windows open-file dialog title")?;
+            dialog
+                .SetFileTypes(&[
+                    COMDLG_FILTERSPEC {
+                        pszName: w!("DropText files (*.ini;*.csv)"),
+                        pszSpec: w!("*.ini;*.csv"),
+                    },
+                    COMDLG_FILTERSPEC {
+                        pszName: w!("DropText INI (*.ini)"),
+                        pszSpec: w!("*.ini"),
+                    },
+                    COMDLG_FILTERSPEC {
+                        pszName: w!("DropText CSV (*.csv)"),
+                        pszSpec: w!("*.csv"),
+                    },
+                    COMDLG_FILTERSPEC {
+                        pszName: w!("All files (*.*)"),
+                        pszSpec: w!("*.*"),
+                    },
+                ])
+                .context("Could not configure Windows open-file dialog filters")?;
+            dialog
+                .SetOptions(FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST)
+                .context("Could not configure Windows open-file dialog")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("Windows file dialog failed. {}", stderr.trim()));
-        }
-
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(PathBuf::from(path)))
+            if !show_file_dialog(&dialog)? {
+                return Ok(None);
+            }
+            shell_item_path(&dialog.GetResult()?)
         }
     }
 
     pub fn open_snippets_export_dialog(initial_dir: &Path) -> Result<Option<PathBuf>> {
-        let script = r#"
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.SaveFileDialog
-$dialog.Title = 'Export TypeText snippets'
-$dialog.Filter = 'TypeText snippets (*.json)|*.json|All files (*.*)|*.*'
-$dialog.FileName = 'snippets.json'
-$dialog.InitialDirectory = [Environment]::GetEnvironmentVariable('TYPETEXT_EXPORT_DIR')
-$dialog.DefaultExt = 'json'
-$dialog.AddExtension = $true
-$dialog.OverwritePrompt = $true
-$dialog.CheckPathExists = $true
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-    [Console]::Out.Write($dialog.FileName)
-}
-"#;
-        let output = hidden_command("powershell")
-            .env("TYPETEXT_EXPORT_DIR", initial_dir)
-            .args(["-NoProfile", "-STA", "-Command", script])
-            .output()
-            .context("Could not open Windows save dialog")?;
+        unsafe {
+            let _com = ComApartment::initialize()?;
+            let dialog: IFileSaveDialog =
+                CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)
+                    .context("Could not create Windows save-file dialog")?;
+            dialog
+                .SetTitle(w!("Export TypeText snippets"))
+                .context("Could not set Windows save-file dialog title")?;
+            dialog
+                .SetFileTypes(&[
+                    COMDLG_FILTERSPEC {
+                        pszName: w!("TypeText snippets (*.json)"),
+                        pszSpec: w!("*.json"),
+                    },
+                    COMDLG_FILTERSPEC {
+                        pszName: w!("All files (*.*)"),
+                        pszSpec: w!("*.*"),
+                    },
+                ])
+                .context("Could not configure Windows save-file dialog filters")?;
+            dialog
+                .SetDefaultExtension(w!("json"))
+                .context("Could not set Windows save-file dialog extension")?;
+            dialog
+                .SetFileName(w!("snippets.json"))
+                .context("Could not set Windows save-file dialog filename")?;
+            dialog
+                .SetOptions(
+                    FOS_FORCEFILESYSTEM
+                        | FOS_PATHMUSTEXIST
+                        | FOS_OVERWRITEPROMPT
+                        | FOS_NOREADONLYRETURN,
+                )
+                .context("Could not configure Windows save-file dialog")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("Windows save dialog failed. {}", stderr.trim()));
-        }
+            let initial_dir_wide = wide_null(&initial_dir.to_string_lossy());
+            if let Ok(folder) = SHCreateItemFromParsingName::<_, _, IShellItem>(
+                PCWSTR(initial_dir_wide.as_ptr()),
+                None,
+            ) {
+                let _ = dialog.SetDefaultFolder(&folder);
+            }
 
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(PathBuf::from(path)))
+            if !show_file_dialog(&dialog)? {
+                return Ok(None);
+            }
+            shell_item_path(&dialog.GetResult()?)
         }
+    }
+
+    struct ComApartment;
+
+    impl ComApartment {
+        unsafe fn initialize() -> Result<Self> {
+            let result = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            result
+                .ok()
+                .context("Could not initialize COM for Windows file dialog")?;
+            Ok(Self)
+        }
+    }
+
+    impl Drop for ComApartment {
+        fn drop(&mut self) {
+            unsafe { CoUninitialize() };
+        }
+    }
+
+    unsafe fn show_file_dialog(dialog: &impl windows::core::Interface) -> Result<bool> {
+        let modal: windows::Win32::UI::Shell::IModalWindow = dialog.cast()?;
+        match modal.Show(None) {
+            Ok(()) => Ok(true),
+            Err(error) if error.code() == windows::core::HRESULT::from_win32(ERROR_CANCELLED.0) => {
+                Ok(false)
+            }
+            Err(error) => Err(error).context("Windows file dialog failed"),
+        }
+    }
+
+    unsafe fn shell_item_path(item: &IShellItem) -> Result<Option<PathBuf>> {
+        let raw_path = item
+            .GetDisplayName(SIGDN_FILESYSPATH)
+            .context("Could not read selected Windows file path")?;
+        let path = raw_path.to_string();
+        CoTaskMemFree(Some(raw_path.0.cast()));
+        let path = path.context("Selected Windows file path was not valid UTF-16")?;
+        Ok(Some(PathBuf::from(path)))
     }
 
     fn release_modifier_keys() -> Result<()> {
@@ -724,7 +797,6 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
     }
 
-    #[cfg(not(feature = "offline-portable"))]
     fn wide_null(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
     }
