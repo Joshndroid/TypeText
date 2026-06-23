@@ -3,7 +3,8 @@
 TypeText is a small native Rust desktop app for storing reusable text snippets and typing them into the active app. Keep snippets in simple JSON files, open the chooser with a global hotkey, search or filter by group, then insert one snippet or a queued chain of snippets.
 
 The app is portable by design: no installer is required for portable builds, and
-runtime data uses simple JSON files.
+runtime data uses simple JSON files. Windows integration uses native operating
+system APIs rather than a browser engine or web-based application runtime.
 
 ## Features
 
@@ -24,17 +25,19 @@ runtime data uses simple JSON files.
 - Daily GitHub release update checks with platform-specific download links
 - Bundled JetBrains Mono UI font for consistent rendering
 - Low-footprint native Rust/egui desktop app
+- Stripped-down Windows offline-portable build with update, URL-opening, and
+  startup-registration code removed at compile time
 
 ## Implementation
 
 - Rust workspace with a shared `typetext-core` crate
 - `egui/eframe` desktop UI in `apps/typetext-desktop`
 - Windows support for:
-  - global hotkey registration
-  - target-window restore
-  - text insertion with `SendInput`
+  - native global hotkey registration with `RegisterHotKey`
+  - native target-window restore with `SetForegroundWindow`
+  - native Unicode text insertion with `SendInput`
   - configurable character and separator input delays
-  - Startup folder integration
+  - per-user startup registration through the Windows Registry
 - macOS support for:
   - Carbon global hotkey registration
   - target-application restore
@@ -73,8 +76,17 @@ data/
 ```
 
 The Windows offline-portable build requires this adjacent `data` directory to
-be writable. It does not fall back to AppData. Its update checking, external
-update URLs, and Windows startup-registry support are excluded at compile time.
+be writable and never falls back to AppData. It is intentionally lean from a
+security perspective: update checking, external update URL opening, and Windows
+startup-registry support are excluded at compile time, not merely hidden or
+disabled in settings. Its dependency graph is also checked during the build to
+ensure that Windows Registry support has not been included. This reduces the
+build's network-facing and persistence-related capability surface; it is not a
+claim that any software is risk-free.
+
+The offline build still uses the native Windows APIs required for its core job:
+registering the global hotkey, restoring the target window, and inserting
+Unicode text. It does not include a browser engine or web application runtime.
 
 Installable builds use the normal per-user app data location:
 
@@ -117,6 +129,22 @@ TypeText-Windows-x64.zip
 TypeText-Windows-x64-Offline-Portable.zip
 TypeText-Windows-x64-Setup.exe
 ```
+
+For Windows, choose the package that matches the environment:
+
+- `TypeText-Windows-x64-Setup.exe` installs TypeText and uses the normal
+  per-user AppData location.
+- `TypeText-Windows-x64.zip` is the full portable build. It keeps data beside
+  the executable while retaining update checks and optional per-user startup
+  registration.
+- `TypeText-Windows-x64-Offline-Portable.zip` is the stripped, strictly local
+  variant for controlled or disconnected environments. It keeps data beside
+  the executable and compiles out update checks, external update links, and
+  Registry-based startup registration.
+
+All three are native 64-bit Windows applications. They use Windows APIs for
+global hotkeys, window activation, and Unicode input, with no bundled browser
+engine or web application runtime.
 
 To publish a GitHub Release, push a version tag in `vX.X.X` format:
 
@@ -238,8 +266,9 @@ dist\TypeText-Windows-x64-Setup.exe
 dist\TypeText-Windows-x64-Setup.exe.sha256
 ```
 
-The offline portable build does not check for updates or offer startup
-registration. Those Windows integrations are disabled at compile time.
+The offline portable build does not check for updates, open update links, or
+offer startup registration. Those Windows integrations and the Registry
+dependency are excluded at compile time.
 
 ## macOS Permissions
 

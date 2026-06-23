@@ -10,9 +10,20 @@ snippets, then click the target text field.
 ------------
 
 Windows:
+- Choose the Windows installer, standard portable ZIP, or offline portable ZIP.
+- The installer stores data in your normal per-user AppData folder.
+- Standard portable stores data beside TypeText.exe and includes update checks
+  and optional Open on Startup support.
+- Offline portable is the stripped-down option for controlled or disconnected
+  environments. It stores data beside TypeText.exe and does not include update
+  checks, external update links, or startup registration.
 - Run TypeText.exe or install TypeText with the Windows installer.
 - TypeText can stay running in the tray.
-- Use Settings > Open on Startup if you want it to launch with Windows.
+- Except in offline portable, use Settings > Open on Startup if you want it to
+  launch with Windows.
+- All Windows versions are native applications. They use Windows features for
+  the global hotkey, returning focus to the target window, and typing Unicode
+  text; they do not bundle a browser engine or web application runtime.
 
 macOS:
 - Open TypeText.app.
@@ -143,12 +154,12 @@ click Save Settings before leaving the app.
 
 Settings include:
 - Hotkey
-- Open on Startup
+- Open on Startup (not included in Windows offline portable)
 - Delay before typing
 - Queue paragraph separator behavior
 - Theme
 - Accent color
-- Update checks
+- Update checks (not included in Windows offline portable)
 
 
 9. Import, Export, And Data
@@ -167,6 +178,12 @@ Installed builds use normal per-user data folders.
 Portable Windows builds store data beside TypeText.exe in a data folder.
 Offline portable Windows builds never fall back to AppData. Keep TypeText.exe
 and its data folder in a location where the user has write access.
+
+The offline portable build is intentionally lean from a security perspective:
+its update, external update-link, and Windows startup-registration features are
+removed when the app is built, rather than simply switched off in Settings.
+This reduces its network-facing and persistence-related capabilities. It still
+uses the native Windows features needed for hotkeys, focus, and text insertion.
 
 
 10. Troubleshooting
@@ -194,12 +211,12 @@ Typing misses characters on Windows:
 - Use Reset to Default if needed.
 
 
-10. Recommended First Setup
+11. Recommended First Setup
 ---------------------------
 
 1. Open TypeText.
 2. Set your preferred hotkey.
-3. Enable Open on Startup if wanted.
+3. Enable Open on Startup if wanted and available in your build.
 4. Add your snippet groups and snippets in Edit.
 5. Choose a theme and accent color.
 6. Click Save Settings.
