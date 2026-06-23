@@ -1,0 +1,63 @@
+name: Microsoft Defender smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  defender-smoke-test:
+    name: Check Microsoft Defender availability
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Verify Microsoft Defender status
+        shell: pwsh
+        run: |
+          $status = Get-MpComputerStatus -ErrorAction Stop
+
+          $status | Select-Object `
+            AMRunningMode, `
+            AMServiceEnabled, `
+            AntivirusEnabled, `
+            RealTimeProtectionEnabled, `
+            AntivirusSignatureVersion, `
+            AntivirusSignatureLastUpdated | Format-List
+
+          if (-not $status.AMServiceEnabled) {
+            throw "Microsoft Defender's antimalware service is not enabled."
+          }
+
+          if (-not $status.AntivirusEnabled) {
+            throw "Microsoft Defender Antivirus is not enabled."
+          }
+
+          if ($status.AMRunningMode -ne "Normal") {
+            throw "Microsoft Defender is not active (mode: $($status.AMRunningMode))."
+          }
+
+      - name: Update signatures and scan a harmless file
+        shell: pwsh
+        run: |
+          Update-MpSignature -ErrorAction Stop
+          Start-MpScan `
+            -ScanType CustomScan `
+            -ScanPath "$PWD\README.md" `
+            -ErrorAction Stop
+
+          $detections = @(Get-MpThreatDetection -ErrorAction Stop)
+          if ($detections.Count -gt 0) {
+            $detections | Format-List
+            throw "Microsoft Defender reported a detection during the smoke test."
+          }
+
+          $status = Get-MpComputerStatus -ErrorAction Stop
+          Write-Host "Defender smoke test passed."
+          Write-Host "Engine version: $($status.AMEngineVersion)"
+          Write-Host "Signature version: $($status.AntivirusSignatureVersion)"
+          Write-Host "Signatures updated: $($status.AntivirusSignatureLastUpdated)"
