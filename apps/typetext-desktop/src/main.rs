@@ -10,7 +10,7 @@ use typetext_core::{
     expand_snippet_tokens, export_snippets, import_droptext_with_warnings, load_or_create_settings,
     load_or_create_snippets, save_settings, save_snippets, search_snippets, AppSettings,
     PortablePaths, QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
-    SUPPORTED_SNIPPET_TOKENS,
+    SnippetSortOrder, SUPPORTED_SNIPPET_TOKENS,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -1902,9 +1902,71 @@ impl TypeTextApp {
             return;
         }
 
+        let current_sort = self
+            .snippets
+            .groups
+            .get(self.selected_group)
+            .map(|group| group.sort_order)
+            .unwrap_or_default();
+        let mut requested_sort = current_sort;
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Order").small());
+            egui::ComboBox::from_id_salt("snippet_sort_order")
+                .selected_text(match current_sort {
+                    SnippetSortOrder::Custom => "Custom",
+                    SnippetSortOrder::AlphabeticalAscending => "A–Z",
+                    SnippetSortOrder::AlphabeticalDescending => "Z–A",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut requested_sort, SnippetSortOrder::Custom, "Custom");
+                    ui.selectable_value(
+                        &mut requested_sort,
+                        SnippetSortOrder::AlphabeticalAscending,
+                        "Alphabetical (A–Z)",
+                    );
+                    ui.selectable_value(
+                        &mut requested_sort,
+                        SnippetSortOrder::AlphabeticalDescending,
+                        "Alphabetical (Z–A)",
+                    );
+                });
+
+            let can_reorder = self.edit_snippet_active && current_sort == SnippetSortOrder::Custom;
+            let can_move_earlier = can_reorder && self.selected_snippet > 0;
+            let snippet_count = self
+                .snippets
+                .groups
+                .get(self.selected_group)
+                .map(|group| group.snippets.len())
+                .unwrap_or_default();
+            let can_move_later = can_reorder && self.selected_snippet + 1 < snippet_count;
+            if ui
+                .add_enabled(can_move_earlier, egui::Button::new("Earlier"))
+                .on_hover_text("Move selected snippet earlier in the custom order")
+                .clicked()
+            {
+                self.move_selected_editor_snippet(-1);
+            }
+            if ui
+                .add_enabled(can_move_later, egui::Button::new("Later"))
+                .on_hover_text("Move selected snippet later in the custom order")
+                .clicked()
+            {
+                self.move_selected_editor_snippet(1);
+            }
+        });
+        if requested_sort != current_sort {
+            if let Some(group) = self.selected_group_mut() {
+                group.sort_order = requested_sort;
+                self.save_snippets();
+            }
+        }
+
+        ui.add_space(4.0);
+
         let snippet_list_height =
             (ui.available_height() * 0.22).clamp(min_list_height, max_snippet_list_height);
-        let snippet_titles: Vec<String> = self
+        let mut snippet_titles: Vec<(usize, String)> = self
             .snippets
             .groups
             .get(self.selected_group)
@@ -1912,19 +1974,27 @@ impl TypeTextApp {
                 group
                     .snippets
                     .iter()
-                    .map(|snippet| snippet.title.clone())
+                    .enumerate()
+                    .map(|(index, snippet)| (index, snippet.title.clone()))
                     .collect()
             })
             .unwrap_or_default();
+        match current_sort {
+            SnippetSortOrder::Custom => {}
+            SnippetSortOrder::AlphabeticalAscending => snippet_titles
+                .sort_by(|left, right| left.1.to_lowercase().cmp(&right.1.to_lowercase())),
+            SnippetSortOrder::AlphabeticalDescending => snippet_titles
+                .sort_by(|left, right| right.1.to_lowercase().cmp(&left.1.to_lowercase())),
+        }
         egui::ScrollArea::vertical()
             .id_salt("edit_snippets")
             .max_height(snippet_list_height)
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    for (index, title) in snippet_titles.iter().enumerate() {
+                    for (index, title) in &snippet_titles {
                         let button_width =
                             (title.chars().count() as f32 * 7.0 + 22.0).clamp(80.0, 190.0);
-                        let selected = self.edit_snippet_active && self.selected_snippet == index;
+                        let selected = self.edit_snippet_active && self.selected_snippet == *index;
                         if ui
                             .add_sized(
                                 [button_width, 24.0],
@@ -1932,7 +2002,7 @@ impl TypeTextApp {
                             )
                             .clicked()
                         {
-                            self.selected_snippet = index;
+                            self.selected_snippet = *index;
                             self.edit_snippet_active = true;
                             self.load_selected_editor_snippet();
                         }
@@ -2033,6 +2103,7 @@ impl TypeTextApp {
         self.snippets.groups.push(SnippetGroup {
             name: "New Group".to_string(),
             snippets: Vec::new(),
+            sort_order: SnippetSortOrder::Custom,
         });
         self.selected_group = self.snippets.groups.len() - 1;
         self.selected_snippet = 0;
@@ -2047,6 +2118,7 @@ impl TypeTextApp {
             self.snippets.groups.push(SnippetGroup {
                 name: "Common Replies".to_string(),
                 snippets: Vec::new(),
+                sort_order: SnippetSortOrder::Custom,
             });
             self.selected_group = 0;
         }
@@ -2090,6 +2162,7 @@ impl TypeTextApp {
             self.snippets.groups.push(SnippetGroup {
                 name: "Common Replies".to_string(),
                 snippets: Vec::new(),
+                sort_order: SnippetSortOrder::Custom,
             });
             self.selected_group = 0;
         }
@@ -2113,6 +2186,22 @@ impl TypeTextApp {
                 self.save_snippets();
             }
         }
+    }
+
+    fn move_selected_editor_snippet(&mut self, offset: isize) {
+        let current = self.selected_snippet;
+        let Some(target) = current.checked_add_signed(offset) else {
+            return;
+        };
+        let Some(group) = self.selected_group_mut() else {
+            return;
+        };
+        if target >= group.snippets.len() {
+            return;
+        }
+        group.snippets.swap(current, target);
+        self.selected_snippet = target;
+        self.save_snippets();
     }
 
     fn transfer_selected_editor_snippet(&mut self, target_group: usize, transfer: SnippetTransfer) {
@@ -2850,10 +2939,12 @@ mod tests {
                         title: "Greeting".to_string(),
                         body: "Hello".to_string(),
                     }],
+                    sort_order: SnippetSortOrder::Custom,
                 },
                 SnippetGroup {
                     name: "Target".to_string(),
                     snippets: Vec::new(),
+                    sort_order: SnippetSortOrder::Custom,
                 },
             ],
         }

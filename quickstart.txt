@@ -54,6 +54,8 @@ Snippets:
 - Click Save after changing a snippet.
 - Use Copy to duplicate the selected snippet into another group.
 - Use Move to transfer the selected snippet completely into another group.
+- Choose Custom, A-Z, or Z-A from Order for each group.
+- In Custom order, select a snippet and use Earlier or Later to arrange it.
 
 
 4. Typing Snippets

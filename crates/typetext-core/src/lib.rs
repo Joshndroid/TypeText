@@ -36,6 +36,17 @@ pub struct DropTextImport {
 pub struct SnippetGroup {
     pub name: String,
     pub snippets: Vec<Snippet>,
+    #[serde(default)]
+    pub sort_order: SnippetSortOrder,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SnippetSortOrder {
+    #[default]
+    Custom,
+    AlphabeticalAscending,
+    AlphabeticalDescending,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -115,6 +126,7 @@ impl Default for SnippetFile {
                         body: "Thanks for your help. I appreciate it.".to_string(),
                     },
                 ],
+                sort_order: SnippetSortOrder::Custom,
             }],
         }
     }
@@ -420,6 +432,7 @@ fn parse_droptext_data(
                 groups.push(SnippetGroup {
                     name: name.to_string(),
                     snippets: Vec::new(),
+                    sort_order: SnippetSortOrder::Custom,
                 });
                 current_group = Some(groups.len() - 1);
             }
@@ -482,7 +495,7 @@ pub fn search_snippets(snippets: &SnippetFile, query: &str) -> Vec<SearchResult>
         .enumerate()
         .flat_map(|(group_index, group)| {
             let query = query.clone();
-            group
+            let mut matches: Vec<_> = group
                 .snippets
                 .iter()
                 .enumerate()
@@ -501,6 +514,17 @@ pub fn search_snippets(snippets: &SnippetFile, query: &str) -> Vec<SearchResult>
                         None
                     }
                 })
+                .collect();
+            match group.sort_order {
+                SnippetSortOrder::Custom => {}
+                SnippetSortOrder::AlphabeticalAscending => matches.sort_by(|left, right| {
+                    left.title.to_lowercase().cmp(&right.title.to_lowercase())
+                }),
+                SnippetSortOrder::AlphabeticalDescending => matches.sort_by(|left, right| {
+                    right.title.to_lowercase().cmp(&left.title.to_lowercase())
+                }),
+            }
+            matches
         })
         .collect()
 }
@@ -841,6 +865,34 @@ mod tests {
         assert_eq!(search_snippets(&snippets, "follow").len(), 1);
         assert_eq!(search_snippets(&snippets, "help").len(), 1);
         assert_eq!(search_snippets(&snippets, "common").len(), 2);
+    }
+
+    #[test]
+    fn search_respects_each_groups_alphabetical_sort_order() {
+        let mut snippets = SnippetFile::default();
+        snippets.groups[0].sort_order = SnippetSortOrder::AlphabeticalAscending;
+
+        let ascending: Vec<_> = search_snippets(&snippets, "")
+            .into_iter()
+            .map(|result| result.title)
+            .collect();
+        assert_eq!(ascending, ["Follow up", "Thanks"]);
+
+        snippets.groups[0].sort_order = SnippetSortOrder::AlphabeticalDescending;
+        let descending: Vec<_> = search_snippets(&snippets, "")
+            .into_iter()
+            .map(|result| result.title)
+            .collect();
+        assert_eq!(descending, ["Thanks", "Follow up"]);
+    }
+
+    #[test]
+    fn snippet_files_without_sort_order_default_to_custom() {
+        let snippets: SnippetFile =
+            serde_json::from_str(r#"{"version":1,"groups":[{"name":"Existing","snippets":[]}]}"#)
+                .unwrap();
+
+        assert_eq!(snippets.groups[0].sort_order, SnippetSortOrder::Custom);
     }
 
     #[test]
