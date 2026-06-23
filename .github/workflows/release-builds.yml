@@ -155,8 +155,62 @@ jobs:
             dist/TypeText-macOS.dmg
           if-no-files-found: error
 
-  windows:
-    name: Windows app
+  windows-portable:
+    name: Windows portable
+    runs-on: windows-latest
+    needs: verify
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.96.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build standard portable app
+        shell: pwsh
+        run: Scripts\build-windows-portable.ps1 -Variant Standard
+
+      - name: Upload standard portable app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: TypeText-Windows-x64-portable
+          path: dist/TypeText-Windows-x64.zip
+          if-no-files-found: error
+
+  windows-offline-portable:
+    name: Windows offline portable
+    runs-on: windows-latest
+    needs: verify
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.96.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Test offline feature configuration
+        shell: pwsh
+        run: cargo test --workspace --all-targets --no-default-features --features offline-portable --locked
+
+      - name: Build offline portable app
+        shell: pwsh
+        run: Scripts\build-windows-portable.ps1 -Variant Offline
+
+      - name: Upload offline portable app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: TypeText-Windows-x64-offline-portable
+          path: dist/TypeText-Windows-x64-Offline-Portable.zip
+          if-no-files-found: error
+
+  windows-installer:
+    name: Windows installer
     runs-on: windows-latest
     needs: verify
     steps:
@@ -173,18 +227,15 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
-      - name: Build portable and installable apps
+      - name: Build installer
         shell: pwsh
         run: Scripts\build-windows-installer.ps1
 
-      - name: Upload Windows app
+      - name: Upload installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: TypeText-Windows-x64
-          path: |
-            dist/TypeText-Windows-x64.zip
-            dist/TypeText-Windows-x64-Offline-Portable.zip
-            dist/TypeText-Windows-x64-Setup.exe
+          name: TypeText-Windows-x64-installer
+          path: dist/TypeText-Windows-x64-Setup.exe
           if-no-files-found: error
 
   release:
@@ -192,7 +243,9 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - macos
-      - windows
+      - windows-portable
+      - windows-offline-portable
+      - windows-installer
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -216,7 +269,7 @@ jobs:
         run: |
           Scripts/generate-release-notes.sh release-notes.md "$GITHUB_REF_NAME"
 
-      - name: Download portable artifacts
+      - name: Download release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: release-assets

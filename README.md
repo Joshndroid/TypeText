@@ -72,6 +72,10 @@ data/
   settings.json
 ```
 
+The Windows offline-portable build requires this adjacent `data` directory to
+be writable. It does not fall back to AppData. Its update checking, external
+update URLs, and Windows startup-registry support are excluded at compile time.
+
 Installable builds use the normal per-user app data location:
 
 ```text
@@ -194,6 +198,13 @@ Build the portable app:
 
 ```powershell
 Scripts\build-windows-portable.ps1
+```
+
+Build only one portable variant:
+
+```powershell
+Scripts\build-windows-portable.ps1 -Variant Standard
+Scripts\build-windows-portable.ps1 -Variant Offline
 ```
 
 The Windows build targets 64-bit Windows:

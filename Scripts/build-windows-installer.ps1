@@ -10,7 +10,7 @@ $IssPath = Join-Path $InstallerDir "TypeText.iss"
 $Version = Get-TypeTextVersion -RootDir $RootDir
 $PackageVersion = Get-TypeTextPackageVersion -Version $Version
 
-& $PortableScript
+& $PortableScript -Variant Standard
 $ExePath = Join-Path $DistDir "TypeText.exe"
 
 if (Test-Path $InstallerDir) {

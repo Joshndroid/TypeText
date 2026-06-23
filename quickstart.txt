@@ -165,6 +165,8 @@ Settings > Storage:
 
 Installed builds use normal per-user data folders.
 Portable Windows builds store data beside TypeText.exe in a data folder.
+Offline portable Windows builds never fall back to AppData. Keep TypeText.exe
+and its data folder in a location where the user has write access.
 
 
 10. Troubleshooting

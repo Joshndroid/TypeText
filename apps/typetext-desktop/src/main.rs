@@ -3,9 +3,12 @@
 mod platform;
 
 use eframe::egui;
+#[cfg(not(feature = "offline-portable"))]
 use serde::Deserialize;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+#[cfg(not(feature = "offline-portable"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 use typetext_core::{
     expand_snippet_tokens, export_snippets, import_droptext_with_warnings, load_or_create_settings,
     load_or_create_snippets, save_settings, save_snippets, search_snippets, AppSettings,
@@ -16,7 +19,9 @@ use typetext_core::{
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
 const APP_TITLE: &str = concat!("TypeText ", env!("TYPETEXT_APP_VERSION"));
 const OFFLINE_PORTABLE: bool = cfg!(all(windows, feature = "offline-portable"));
+#[cfg(not(feature = "offline-portable"))]
 const UPDATE_CHECK_INTERVAL_SECONDS: u64 = 60 * 60 * 24;
+#[cfg(not(feature = "offline-portable"))]
 const LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/Joshndroid/TypeText/releases/latest";
 
@@ -43,7 +48,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         APP_TITLE,
         options,
-        Box::new(|cc| Ok(Box::new(TypeTextApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(TypeTextApp::new(cc)?))),
     )
 }
 
@@ -125,6 +130,7 @@ fn join_snippet_chain<'a>(
     bodies.into_iter().collect::<Vec<_>>().join(&separator)
 }
 
+#[cfg(not(feature = "offline-portable"))]
 #[derive(Debug, Clone)]
 struct UpdateInfo {
     version: String,
@@ -133,6 +139,7 @@ struct UpdateInfo {
     asset_name: String,
 }
 
+#[cfg(not(feature = "offline-portable"))]
 #[derive(Debug)]
 enum UpdateCheckMessage {
     Available(UpdateInfo),
@@ -140,6 +147,7 @@ enum UpdateCheckMessage {
     Failed { error: String, notify: bool },
 }
 
+#[cfg(not(feature = "offline-portable"))]
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
     tag_name: String,
@@ -147,6 +155,7 @@ struct GitHubRelease {
     assets: Vec<GitHubReleaseAsset>,
 }
 
+#[cfg(not(feature = "offline-portable"))]
 #[derive(Debug, Deserialize)]
 struct GitHubReleaseAsset {
     name: String,
@@ -184,8 +193,11 @@ struct TypeTextApp {
     hotkey_rx: Receiver<()>,
     tray_rx: Receiver<TrayCommand>,
     tray_handle: Option<platform::TrayHandle>,
+    #[cfg(not(feature = "offline-portable"))]
     update_rx: Receiver<UpdateCheckMessage>,
+    #[cfg(not(feature = "offline-portable"))]
     update_info: Option<UpdateInfo>,
+    #[cfg(not(feature = "offline-portable"))]
     update_check_in_progress: bool,
     allow_quit: bool,
     show_background_notice: bool,
@@ -556,7 +568,10 @@ fn sidebar_group_row(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Res
 }
 
 impl TypeTextApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>) -> anyhow::Result<Self> {
+        #[cfg(feature = "offline-portable")]
+        let paths = PortablePaths::strictly_beside_executable()?;
+        #[cfg(not(feature = "offline-portable"))]
         let paths =
             PortablePaths::beside_executable().unwrap_or_else(|_| PortablePaths::from_app_dir("."));
         let snippets = load_or_create_snippets(&paths).unwrap_or_default();
@@ -575,6 +590,7 @@ impl TypeTextApp {
         let (tx, rx) = mpsc::channel();
         let (tray_tx, tray_rx) = mpsc::channel();
         platform::install_reopen_handler(tray_tx.clone(), cc.egui_ctx.clone());
+        #[cfg(not(feature = "offline-portable"))]
         let (_update_tx, update_rx) = mpsc::channel();
         let (status, error_message, registered_hotkey) = match platform::register_hotkey(
             settings.hotkey.clone(),
@@ -633,8 +649,11 @@ impl TypeTextApp {
             hotkey_rx: rx,
             tray_rx,
             tray_handle,
+            #[cfg(not(feature = "offline-portable"))]
             update_rx,
+            #[cfg(not(feature = "offline-portable"))]
             update_info: None,
+            #[cfg(not(feature = "offline-portable"))]
             update_check_in_progress: false,
             allow_quit: false,
             show_background_notice: false,
@@ -643,9 +662,10 @@ impl TypeTextApp {
         if let Some(error) = tray_error {
             app.show_error(error);
         }
+        #[cfg(not(feature = "offline-portable"))]
         app.schedule_update_check(false);
         app.load_selected_editor_snippet();
-        app
+        Ok(app)
     }
 
     fn refresh_results(&mut self) {
@@ -883,10 +903,8 @@ impl TypeTextApp {
         }
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     fn schedule_update_check(&mut self, force: bool) {
-        if OFFLINE_PORTABLE {
-            return;
-        }
         if self.update_check_in_progress {
             return;
         }
@@ -929,6 +947,7 @@ impl TypeTextApp {
         });
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     fn handle_update_messages(&mut self) {
         while let Ok(message) = self.update_rx.try_recv() {
             self.update_check_in_progress = false;
@@ -953,6 +972,7 @@ impl TypeTextApp {
         }
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     fn open_update_download(&mut self) {
         let Some(update) = self.update_info.as_ref() else {
             return;
@@ -1180,7 +1200,9 @@ impl eframe::App for TypeTextApp {
         self.handle_window_lifecycle(ctx);
         self.handle_tray_commands(ctx);
         self.handle_hotkey_capture(ctx);
+        #[cfg(not(feature = "offline-portable"))]
         self.handle_update_messages();
+        #[cfg(not(feature = "offline-portable"))]
         self.schedule_update_check(false);
 
         while self.hotkey_rx.try_recv().is_ok() {
@@ -1498,11 +1520,11 @@ impl TypeTextApp {
                 if nav_button(ui, self.view == View::Choose, "Choose") {
                     self.switch_view(View::Choose);
                 }
-                if !OFFLINE_PORTABLE
-                    && self.update_info.is_some()
-                    && ui.button("Download Update").clicked()
+                #[cfg(not(feature = "offline-portable"))]
                 {
-                    self.open_update_download();
+                    if self.update_info.is_some() && ui.button("Download Update").clicked() {
+                        self.open_update_download();
+                    }
                 }
             });
         });
@@ -2524,7 +2546,8 @@ impl TypeTextApp {
                     });
                 });
 
-                if !OFFLINE_PORTABLE {
+                #[cfg(not(feature = "offline-portable"))]
+                {
                     section_gap(ui);
                     framed_section(ui, "Updates", "GitHub releases", |ui| {
                     if ui
@@ -2617,6 +2640,7 @@ impl TypeTextApp {
     }
 }
 
+#[cfg(not(feature = "offline-portable"))]
 fn check_latest_release() -> anyhow::Result<Option<UpdateInfo>> {
     let raw = platform::fetch_text(LATEST_RELEASE_API_URL)?;
     let raw = raw.trim_start_matches('\u{feff}').trim();
@@ -2647,6 +2671,7 @@ fn check_latest_release() -> anyhow::Result<Option<UpdateInfo>> {
     }))
 }
 
+#[cfg(not(feature = "offline-portable"))]
 fn asset_platform_rank(name: &str) -> Option<u8> {
     if cfg!(target_os = "macos") {
         match name {
@@ -2665,10 +2690,12 @@ fn asset_platform_rank(name: &str) -> Option<u8> {
     }
 }
 
+#[cfg(not(feature = "offline-portable"))]
 fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
     parse_version_triplet(left).cmp(&parse_version_triplet(right))
 }
 
+#[cfg(not(feature = "offline-portable"))]
 fn parse_version_triplet(value: &str) -> Option<(u64, u64, u64)> {
     let value = value.trim().trim_start_matches('v');
     let mut parts = value.split('.');
@@ -2681,6 +2708,7 @@ fn parse_version_triplet(value: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
+#[cfg(not(feature = "offline-portable"))]
 fn current_unix_time() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2688,6 +2716,7 @@ fn current_unix_time() -> u64 {
         .unwrap_or_default()
 }
 
+#[cfg(not(feature = "offline-portable"))]
 fn relative_time_label(timestamp: u64) -> String {
     let elapsed = current_unix_time().saturating_sub(timestamp);
     if elapsed < 60 {
@@ -2855,9 +2884,11 @@ fn hotkey_key_name(key: egui::Key) -> Option<&'static str> {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    #[cfg(not(feature = "offline-portable"))]
     use std::cmp::Ordering;
     use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[derive(Default)]
     struct MockSettingsEffects {
@@ -3119,6 +3150,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "offline-portable"))]
     fn compares_release_tags_against_app_versions() {
         assert_eq!(compare_versions("v0.2.2", "v0.2.1"), Ordering::Greater);
         assert_eq!(compare_versions("v0.2.1", "v0.2.1"), Ordering::Equal);
@@ -3127,6 +3159,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "offline-portable"))]
     fn matches_current_platform_release_asset() {
         let matching_asset = if cfg!(target_os = "macos") {
             "TypeText-macOS.dmg"

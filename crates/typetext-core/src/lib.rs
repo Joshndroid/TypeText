@@ -153,6 +153,25 @@ impl Default for AppSettings {
 }
 
 impl PortablePaths {
+    pub fn strictly_beside_executable() -> Result<Self> {
+        let exe = std::env::current_exe().context("Could not determine current executable path")?;
+        let app_dir = exe
+            .parent()
+            .ok_or_else(|| anyhow!("Could not determine executable directory"))?;
+        Self::strictly_from_app_dir(app_dir)
+    }
+
+    fn strictly_from_app_dir(app_dir: &Path) -> Result<Self> {
+        let paths = Self::from_app_dir(app_dir);
+        if !writable_data_dir(&paths.data_dir) {
+            return Err(anyhow!(
+                "The portable data folder is not writable: {}",
+                paths.data_dir.display()
+            ));
+        }
+        Ok(paths)
+    }
+
     pub fn beside_executable() -> Result<Self> {
         let exe = std::env::current_exe().context("Could not determine current executable path")?;
         let app_dir = exe
@@ -1044,6 +1063,24 @@ Two="Second"
         let app_dir = Path::new(r"C:\Program Files\TypeText");
 
         assert_eq!(is_windows_installed_app_dir(app_dir), cfg!(windows));
+    }
+
+    #[test]
+    fn strict_portable_paths_never_fall_back_from_the_app_directory() {
+        let base = std::env::temp_dir().join(format!(
+            "typetext-strict-path-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("data"), "blocks directory creation").unwrap();
+
+        let error = PortablePaths::strictly_from_app_dir(&base).unwrap_err();
+
+        assert!(error.to_string().contains("portable data folder"));
+        let _ = fs::remove_dir_all(base);
     }
 
     #[test]

@@ -450,6 +450,7 @@ mod windows_platform {
         command.arg(path).spawn().map(|_| ()).map_err(Into::into)
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     pub fn open_url(url: &str) -> Result<()> {
         let mut command = hidden_command("rundll32");
         command
@@ -477,11 +478,6 @@ mod windows_platform {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(anyhow!("Update request failed. {}", stderr.trim()))
         }
-    }
-
-    #[cfg(feature = "offline-portable")]
-    pub fn fetch_text(_url: &str) -> Result<String> {
-        Err(anyhow!("Update checks are disabled in this build"))
     }
 
     pub fn open_droptext_file_dialog() -> Result<Option<PathBuf>> {
@@ -689,7 +685,7 @@ mod windows_platform {
                 return None;
             }
 
-            let mut buffer = vec![0u16; (byte_len as usize + 1) / 2];
+            let mut buffer = vec![0u16; (byte_len as usize).div_ceil(2)];
             let query_value = RegQueryValueExW(
                 key,
                 PCWSTR(value_name.as_ptr()),
@@ -1134,6 +1130,7 @@ mod macos_platform {
             .map_err(Into::into)
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     pub fn open_url(url: &str) -> Result<()> {
         Command::new("open")
             .arg(url)
@@ -1142,6 +1139,7 @@ mod macos_platform {
             .map_err(Into::into)
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     pub fn fetch_text(url: &str) -> Result<String> {
         let output = Command::new("curl")
             .args([
@@ -1630,6 +1628,7 @@ mod fallback_platform {
             .map_err(Into::into)
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     pub fn open_url(url: &str) -> Result<()> {
         Command::new("xdg-open")
             .arg(url)
@@ -1638,6 +1637,7 @@ mod fallback_platform {
             .map_err(Into::into)
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     pub fn fetch_text(url: &str) -> Result<String> {
         let output = Command::new("curl")
             .args([
@@ -1712,23 +1712,34 @@ mod fallback_platform {
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub use fallback_platform::{
-    fetch_text, install_app_mutex, install_reopen_handler, install_tray_icon,
-    open_droptext_file_dialog, open_folder, open_snippets_export_dialog, open_url, register_hotkey,
-    reregister_hotkey, set_startup_enabled, startup_enabled, tray_status, type_text,
-    type_text_current_focus, TrayHandle,
+    install_app_mutex, install_reopen_handler, install_tray_icon, open_droptext_file_dialog,
+    open_folder, open_snippets_export_dialog, register_hotkey, reregister_hotkey,
+    set_startup_enabled, startup_enabled, tray_status, type_text, type_text_current_focus,
+    TrayHandle,
 };
 #[cfg(target_os = "macos")]
 pub use macos_platform::{
-    fetch_text, install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
-    open_snippets_export_dialog, open_url, register_hotkey, reregister_hotkey, set_startup_enabled,
+    install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
+    open_snippets_export_dialog, register_hotkey, reregister_hotkey, set_startup_enabled,
     startup_enabled, tray_status, type_text, type_text_current_focus,
 };
 #[cfg(windows)]
 pub use windows_platform::{
-    fetch_text, install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
-    open_snippets_export_dialog, open_url, register_hotkey, reregister_hotkey, set_startup_enabled,
+    install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
+    open_snippets_export_dialog, register_hotkey, reregister_hotkey, set_startup_enabled,
     startup_enabled, tray_status, type_text, type_text_current_focus,
 };
+
+#[cfg(all(
+    not(feature = "offline-portable"),
+    not(windows),
+    not(target_os = "macos")
+))]
+pub use fallback_platform::{fetch_text, open_url};
+#[cfg(all(not(feature = "offline-portable"), target_os = "macos"))]
+pub use macos_platform::{fetch_text, open_url};
+#[cfg(all(not(feature = "offline-portable"), windows))]
+pub use windows_platform::{fetch_text, open_url};
 
 #[cfg(any(windows, target_os = "macos"))]
 pub use tray_integration::{install_tray_icon, TrayHandle};
