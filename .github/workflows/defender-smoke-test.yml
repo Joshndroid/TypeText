@@ -1,4 +1,4 @@
-name: Microsoft Defender smoke test
+name: Windows release and Defender dry run
 
 on:
   workflow_dispatch:
@@ -7,16 +7,22 @@ permissions:
   contents: read
 
 jobs:
-  defender-smoke-test:
-    name: Check Microsoft Defender availability
+  windows-release-dry-run:
+    name: Build and scan Windows release artifacts
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Verify Microsoft Defender status
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.96.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Verify Microsoft Defender and update signatures
         shell: pwsh
         run: |
           $status = Get-MpComputerStatus -ErrorAction Stop
@@ -26,6 +32,7 @@ jobs:
             AMServiceEnabled, `
             AntivirusEnabled, `
             RealTimeProtectionEnabled, `
+            AMEngineVersion, `
             AntivirusSignatureVersion, `
             AntivirusSignatureLastUpdated | Format-List
 
@@ -41,23 +48,104 @@ jobs:
             throw "Microsoft Defender is not active (mode: $($status.AMRunningMode))."
           }
 
-      - name: Update signatures and scan a harmless file
+          $existingDetections = @(Get-MpThreatDetection -ErrorAction Stop)
+          if ($existingDetections.Count -gt 0) {
+            $existingDetections | Format-List
+            throw "The fresh runner already reports a Defender detection."
+          }
+
+          Update-MpSignature -ErrorAction Stop
+
+      - name: Test offline feature configuration
+        shell: pwsh
+        run: cargo test --workspace --all-targets --no-default-features --features offline-portable --locked
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build standard portable app and installer
+        shell: pwsh
+        run: Scripts\build-windows-installer.ps1
+
+      - name: Build offline portable app
+        shell: pwsh
+        run: Scripts\build-windows-portable.ps1 -Variant Offline
+
+      - name: Prepare release artifacts for scanning
         shell: pwsh
         run: |
-          Update-MpSignature -ErrorAction Stop
+          $scanRoot = Join-Path $PWD "defender-scan"
+          $expandedRoot = Join-Path $scanRoot "expanded"
+          New-Item -ItemType Directory -Path $expandedRoot -Force | Out-Null
+
+          $artifacts = @(
+            "dist\TypeText-Windows-x64.zip",
+            "dist\TypeText-Windows-x64-Offline-Portable.zip",
+            "dist\TypeText-Windows-x64-Setup.exe"
+          )
+
+          foreach ($artifact in $artifacts) {
+            if (-not (Test-Path $artifact)) {
+              throw "Expected release artifact was not built: $artifact"
+            }
+            Copy-Item $artifact $scanRoot
+          }
+
+          Expand-Archive `
+            -Path "dist\TypeText-Windows-x64.zip" `
+            -DestinationPath (Join-Path $expandedRoot "standard-portable") `
+            -Force
+          Expand-Archive `
+            -Path "dist\TypeText-Windows-x64-Offline-Portable.zip" `
+            -DestinationPath (Join-Path $expandedRoot "offline-portable") `
+            -Force
+
+      - name: Scan Windows release artifacts with Microsoft Defender
+        shell: pwsh
+        run: |
+          $scanRoot = Join-Path $PWD "defender-scan"
           Start-MpScan `
             -ScanType CustomScan `
-            -ScanPath "$PWD\README.md" `
+            -ScanPath $scanRoot `
             -ErrorAction Stop
 
           $detections = @(Get-MpThreatDetection -ErrorAction Stop)
           if ($detections.Count -gt 0) {
             $detections | Format-List
-            throw "Microsoft Defender reported a detection during the smoke test."
+            throw "Microsoft Defender reported a detection in the Windows release artifacts."
           }
 
           $status = Get-MpComputerStatus -ErrorAction Stop
-          Write-Host "Defender smoke test passed."
-          Write-Host "Engine version: $($status.AMEngineVersion)"
-          Write-Host "Signature version: $($status.AntivirusSignatureVersion)"
-          Write-Host "Signatures updated: $($status.AntivirusSignatureLastUpdated)"
+          $reportPath = Join-Path $PWD "dist\defender-scan-report.txt"
+          @(
+            "Microsoft Defender release dry run: no detections",
+            "Scan time (UTC): $([DateTime]::UtcNow.ToString('O'))",
+            "Engine version: $($status.AMEngineVersion)",
+            "Signature version: $($status.AntivirusSignatureVersion)",
+            "Signatures updated: $($status.AntivirusSignatureLastUpdated)",
+            "",
+            "SHA-256 release artifact hashes:"
+          ) | Set-Content -Path $reportPath -Encoding UTF8
+
+          $releaseArtifacts = @(
+            "dist\TypeText-Windows-x64.zip",
+            "dist\TypeText-Windows-x64-Offline-Portable.zip",
+            "dist\TypeText-Windows-x64-Setup.exe"
+          )
+          Get-FileHash -Algorithm SHA256 -Path $releaseArtifacts |
+            ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } |
+            Add-Content -Path $reportPath -Encoding UTF8
+
+          Get-Content $reportPath
+
+      - name: Upload scanned dry-run artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: TypeText-Windows-Defender-dry-run
+          path: |
+            dist/TypeText-Windows-x64.zip
+            dist/TypeText-Windows-x64-Offline-Portable.zip
+            dist/TypeText-Windows-x64-Setup.exe
+            dist/defender-scan-report.txt
+          if-no-files-found: error
