@@ -186,6 +186,7 @@ struct TypeTextApp {
     confirm_clear_all: bool,
     capturing_hotkey: bool,
     settings_dirty: bool,
+    applied_startup_enabled: bool,
     snippet_chain: Vec<SearchResult>,
     insert_when_focus_lost: bool,
     registered_hotkey: Option<String>,
@@ -584,6 +585,7 @@ impl TypeTextApp {
             settings.open_on_startup = platform::startup_enabled();
         }
         settings.theme = normalize_theme(&settings.theme);
+        let applied_startup_enabled = settings.open_on_startup;
         configure_fonts(&cc.egui_ctx);
         apply_theme(&cc.egui_ctx, &settings);
         let results = search_snippets(&snippets, "");
@@ -642,6 +644,7 @@ impl TypeTextApp {
             confirm_clear_all: false,
             capturing_hotkey: false,
             settings_dirty: false,
+            applied_startup_enabled,
             snippet_chain: Vec::new(),
             insert_when_focus_lost: false,
             registered_hotkey,
@@ -1095,6 +1098,7 @@ impl TypeTextApp {
             &mut self.settings,
             &self.hotkey_tx,
             &mut self.registered_hotkey,
+            &mut self.applied_startup_enabled,
         ) {
             Ok(()) => {
                 apply_theme(ctx, &self.settings);
@@ -2768,12 +2772,14 @@ fn save_settings_with_effects(
     settings: &mut AppSettings,
     hotkey_tx: &Sender<()>,
     registered_hotkey: &mut Option<String>,
+    applied_startup_enabled: &mut bool,
 ) -> anyhow::Result<()> {
     save_settings_with_effects_impl(
         paths,
         settings,
         hotkey_tx,
         registered_hotkey,
+        applied_startup_enabled,
         &PlatformSettingsEffects,
     )
 }
@@ -2783,11 +2789,13 @@ fn save_settings_with_effects_impl(
     settings: &mut AppSettings,
     hotkey_tx: &Sender<()>,
     registered_hotkey: &mut Option<String>,
+    applied_startup_enabled: &mut bool,
     effects: &dyn SettingsEffects,
 ) -> anyhow::Result<()> {
     settings.theme = normalize_theme(&settings.theme);
-    if !OFFLINE_PORTABLE {
+    if !OFFLINE_PORTABLE && settings.open_on_startup != *applied_startup_enabled {
         effects.set_startup_enabled(settings.open_on_startup)?;
+        *applied_startup_enabled = settings.open_on_startup;
     }
     let requested_hotkey = settings.hotkey.clone();
     if registered_hotkey.as_deref() != Some(requested_hotkey.as_str()) {
@@ -3045,12 +3053,14 @@ mod tests {
             ..Default::default()
         };
         let mut registered_hotkey = Some("Ctrl+Alt+Space".to_string());
+        let mut applied_startup_enabled = false;
 
         save_settings_with_effects_impl(
             &paths,
             &mut settings,
             &tx,
             &mut registered_hotkey,
+            &mut applied_startup_enabled,
             &effects,
         )
         .unwrap();
@@ -3078,12 +3088,14 @@ mod tests {
             ..Default::default()
         };
         let mut registered_hotkey = Some("Ctrl+Alt+Space".to_string());
+        let mut applied_startup_enabled = false;
 
         let error = save_settings_with_effects_impl(
             &paths,
             &mut settings,
             &tx,
             &mut registered_hotkey,
+            &mut applied_startup_enabled,
             &effects,
         )
         .unwrap_err();
@@ -3092,6 +3104,59 @@ mod tests {
         assert_eq!(settings.hotkey, "Ctrl+Alt+Space");
         assert_eq!(registered_hotkey, Some("Ctrl+Alt+Space".to_string()));
         assert!(!paths.settings_path.exists());
+        cleanup_paths(&paths);
+    }
+
+    #[test]
+    fn saving_unchanged_startup_setting_does_not_touch_platform_service() {
+        let paths = test_paths("startup-save-unchanged");
+        let (tx, _rx) = mpsc::channel();
+        let effects = MockSettingsEffects::default();
+        let mut settings = AppSettings {
+            open_on_startup: false,
+            ..Default::default()
+        };
+        let mut registered_hotkey = Some(settings.hotkey.clone());
+        let mut applied_startup_enabled = false;
+
+        save_settings_with_effects_impl(
+            &paths,
+            &mut settings,
+            &tx,
+            &mut registered_hotkey,
+            &mut applied_startup_enabled,
+            &effects,
+        )
+        .unwrap();
+
+        assert!(effects.startup_calls.borrow().is_empty());
+        cleanup_paths(&paths);
+    }
+
+    #[test]
+    fn saving_changed_startup_setting_updates_platform_service_once() {
+        let paths = test_paths("startup-save-changed");
+        let (tx, _rx) = mpsc::channel();
+        let effects = MockSettingsEffects::default();
+        let mut settings = AppSettings {
+            open_on_startup: true,
+            ..Default::default()
+        };
+        let mut registered_hotkey = Some(settings.hotkey.clone());
+        let mut applied_startup_enabled = false;
+
+        save_settings_with_effects_impl(
+            &paths,
+            &mut settings,
+            &tx,
+            &mut registered_hotkey,
+            &mut applied_startup_enabled,
+            &effects,
+        )
+        .unwrap();
+
+        assert_eq!(effects.startup_calls.borrow().as_slice(), &[true]);
+        assert!(applied_startup_enabled);
         cleanup_paths(&paths);
     }
 
