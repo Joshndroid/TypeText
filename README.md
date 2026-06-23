@@ -175,6 +175,25 @@ gh attestation verify TypeText-Windows-x64.zip --repo fruitmac/TypeText
 Attestations prove the artifact was produced by this repository's GitHub Actions
 workflow.
 
+### Release Security Checks
+
+The release workflow must complete platform security checks before it publishes
+any GitHub Release:
+
+- The macOS app is signed with an Apple Developer ID, submitted to Apple for
+  notarization, and assessed with Gatekeeper. The workflow also validates the
+  notarization ticket stapled to both the app and DMG.
+- Microsoft Defender scans the completed Windows portable archives, their
+  extracted contents, and the Windows installer using current signatures. Any
+  detection, unavailable Defender service, or incomplete scan blocks release
+  publication.
+- GitHub generates provenance attestations for the exact artifacts that passed
+  those checks before they are attached to the release.
+
+A successful scan means that the named security service reported no detections
+at build time. It is an additional release safeguard, not a guarantee that
+software can never contain or later develop a security issue.
+
 Local builds also read their version from `Cargo.toml`.
 
 TypeText checks that release feed at most once per day when update checks are

@@ -238,6 +238,132 @@ jobs:
           path: dist/TypeText-Windows-x64-Setup.exe
           if-no-files-found: error
 
+  windows-defender-scan:
+    name: Scan Windows release artifacts
+    runs-on: windows-latest
+    needs:
+      - windows-portable
+      - windows-offline-portable
+      - windows-installer
+    timeout-minutes: 15
+    steps:
+      - name: Download Windows release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: TypeText-Windows-x64-*
+          path: defender-input
+          merge-multiple: true
+
+      - name: Verify Microsoft Defender and update signatures
+        shell: pwsh
+        run: |
+          $status = Get-MpComputerStatus -ErrorAction Stop
+
+          $status | Select-Object `
+            AMRunningMode, `
+            AMServiceEnabled, `
+            AntivirusEnabled, `
+            RealTimeProtectionEnabled, `
+            AMEngineVersion, `
+            AntivirusSignatureVersion, `
+            AntivirusSignatureLastUpdated | Format-List
+
+          if (-not $status.AMServiceEnabled) {
+            throw "Microsoft Defender's antimalware service is not enabled."
+          }
+
+          if (-not $status.AntivirusEnabled) {
+            throw "Microsoft Defender Antivirus is not enabled."
+          }
+
+          if ($status.AMRunningMode -ne "Normal") {
+            throw "Microsoft Defender is not active (mode: $($status.AMRunningMode))."
+          }
+
+          $existingDetections = @(Get-MpThreatDetection -ErrorAction Stop)
+          if ($existingDetections.Count -gt 0) {
+            $existingDetections | Format-List
+            throw "The fresh runner already reports a Defender detection."
+          }
+
+          Update-MpSignature -ErrorAction Stop
+
+      - name: Prepare Windows artifacts for scanning
+        shell: pwsh
+        run: |
+          $inputRoot = Join-Path $PWD "defender-input"
+          $scanRoot = Join-Path $PWD "defender-scan"
+          $expandedRoot = Join-Path $scanRoot "expanded"
+          New-Item -ItemType Directory -Path $expandedRoot -Force | Out-Null
+
+          $artifacts = @(
+            "TypeText-Windows-x64.zip",
+            "TypeText-Windows-x64-Offline-Portable.zip",
+            "TypeText-Windows-x64-Setup.exe"
+          )
+
+          foreach ($artifact in $artifacts) {
+            $source = Join-Path $inputRoot $artifact
+            if (-not (Test-Path $source)) {
+              throw "Expected release artifact was not downloaded: $artifact"
+            }
+            Copy-Item $source $scanRoot
+          }
+
+          Expand-Archive `
+            -Path (Join-Path $inputRoot "TypeText-Windows-x64.zip") `
+            -DestinationPath (Join-Path $expandedRoot "standard-portable") `
+            -Force
+          Expand-Archive `
+            -Path (Join-Path $inputRoot "TypeText-Windows-x64-Offline-Portable.zip") `
+            -DestinationPath (Join-Path $expandedRoot "offline-portable") `
+            -Force
+
+      - name: Scan Windows release artifacts with Microsoft Defender
+        shell: pwsh
+        run: |
+          $scanRoot = Join-Path $PWD "defender-scan"
+          Start-MpScan `
+            -ScanType CustomScan `
+            -ScanPath $scanRoot `
+            -ErrorAction Stop
+
+          $detections = @(Get-MpThreatDetection -ErrorAction Stop)
+          if ($detections.Count -gt 0) {
+            $detections | Format-List
+            throw "Microsoft Defender reported a detection in the Windows release artifacts."
+          }
+
+          $status = Get-MpComputerStatus -ErrorAction Stop
+          $reportPath = Join-Path $PWD "defender-scan-report.txt"
+          @(
+            "Microsoft Defender release scan: no detections",
+            "Scan time (UTC): $([DateTime]::UtcNow.ToString('O'))",
+            "Engine version: $($status.AMEngineVersion)",
+            "Signature version: $($status.AntivirusSignatureVersion)",
+            "Signatures updated: $($status.AntivirusSignatureLastUpdated)",
+            "",
+            "SHA-256 release artifact hashes:"
+          ) | Set-Content -Path $reportPath -Encoding UTF8
+
+          $releaseArtifacts = @(
+            "defender-input\TypeText-Windows-x64.zip",
+            "defender-input\TypeText-Windows-x64-Offline-Portable.zip",
+            "defender-input\TypeText-Windows-x64-Setup.exe"
+          )
+          Get-FileHash -Algorithm SHA256 -Path $releaseArtifacts |
+            ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } |
+            Add-Content -Path $reportPath -Encoding UTF8
+
+          Get-Content $reportPath
+
+      - name: Upload Microsoft Defender scan report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: TypeText-Windows-Defender-scan-report
+          path: defender-scan-report.txt
+          if-no-files-found: error
+
   release:
     name: GitHub release
     runs-on: ubuntu-latest
@@ -246,6 +372,7 @@ jobs:
       - windows-portable
       - windows-offline-portable
       - windows-installer
+      - windows-defender-scan
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
