@@ -52,6 +52,8 @@ Snippets:
 - Click an existing snippet to edit it.
 - The snippet editor only appears after you click or add a snippet.
 - Click Save after changing a snippet.
+- Use Copy to duplicate the selected snippet into another group.
+- Use Move to transfer the selected snippet completely into another group.
 
 
 4. Typing Snippets

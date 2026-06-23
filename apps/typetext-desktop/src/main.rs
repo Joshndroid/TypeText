@@ -77,6 +77,41 @@ struct ChainInsertion {
     body: String,
 }
 
+#[derive(Clone, Copy)]
+enum SnippetTransfer {
+    Copy,
+    Move,
+}
+
+fn transfer_snippet(
+    snippets: &mut SnippetFile,
+    source_group: usize,
+    source_snippet: usize,
+    target_group: usize,
+    transfer: SnippetTransfer,
+) -> Option<usize> {
+    if source_group == target_group || target_group >= snippets.groups.len() {
+        return None;
+    }
+
+    let snippet = snippets
+        .groups
+        .get(source_group)?
+        .snippets
+        .get(source_snippet)?
+        .clone();
+
+    if matches!(transfer, SnippetTransfer::Move) {
+        snippets.groups[source_group]
+            .snippets
+            .remove(source_snippet);
+    }
+
+    let target = &mut snippets.groups[target_group].snippets;
+    target.push(snippet);
+    Some(target.len() - 1)
+}
+
 fn join_snippet_chain<'a>(
     bodies: impl IntoIterator<Item = &'a str>,
     settings: &AppSettings,
@@ -1798,6 +1833,45 @@ impl TypeTextApp {
                         .get(self.selected_group)
                         .and_then(|group| group.snippets.get(self.selected_snippet))
                         .is_some();
+                let transfer_targets: Vec<(usize, String)> = self
+                    .snippets
+                    .groups
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| *index != self.selected_group)
+                    .map(|(index, group)| (index, group.name.clone()))
+                    .collect();
+                let can_transfer = can_edit_snippet && !transfer_targets.is_empty();
+                let mut requested_transfer = None;
+
+                ui.add_enabled_ui(can_transfer, |ui| {
+                    egui::ComboBox::from_id_salt("move_snippet_to_group")
+                        .selected_text("Move")
+                        .show_ui(ui, |ui| {
+                            for (index, name) in &transfer_targets {
+                                if ui.selectable_label(false, name).clicked() {
+                                    requested_transfer = Some((*index, SnippetTransfer::Move));
+                                    ui.close();
+                                }
+                            }
+                        });
+                })
+                .response
+                .on_hover_text("Move selected snippet to another group");
+                ui.add_enabled_ui(can_transfer, |ui| {
+                    egui::ComboBox::from_id_salt("copy_snippet_to_group")
+                        .selected_text("Copy")
+                        .show_ui(ui, |ui| {
+                            for (index, name) in &transfer_targets {
+                                if ui.selectable_label(false, name).clicked() {
+                                    requested_transfer = Some((*index, SnippetTransfer::Copy));
+                                    ui.close();
+                                }
+                            }
+                        });
+                })
+                .response
+                .on_hover_text("Copy selected snippet to another group");
                 if ui
                     .add_enabled(can_edit_snippet, egui::Button::new("Delete"))
                     .on_hover_text("Delete selected snippet")
@@ -1814,6 +1888,10 @@ impl TypeTextApp {
                 }
                 if ui.button("Add").on_hover_text("Add snippet").clicked() {
                     self.add_editor_snippet();
+                }
+
+                if let Some((target_group, transfer)) = requested_transfer {
+                    self.transfer_selected_editor_snippet(target_group, transfer);
                 }
             });
         });
@@ -2034,6 +2112,68 @@ impl TypeTextApp {
                 self.load_selected_editor_snippet();
                 self.save_snippets();
             }
+        }
+    }
+
+    fn transfer_selected_editor_snippet(&mut self, target_group: usize, transfer: SnippetTransfer) {
+        let body = self.edit_body.clone();
+        let title = self.edit_title.trim().to_string();
+        let title = if title.is_empty() {
+            title_from_body(&body)
+        } else {
+            Some(title)
+        };
+        let Some(title) = title else {
+            self.show_error("Snippet title or body is required");
+            return;
+        };
+
+        let source_group = self.selected_group;
+        let source_snippet = self.selected_snippet;
+        let Some(target_name) = self
+            .snippets
+            .groups
+            .get(target_group)
+            .map(|group| group.name.clone())
+        else {
+            return;
+        };
+
+        self.edit_title = title.clone();
+        if let Some(snippet) = self.selected_snippet_mut() {
+            snippet.title = title;
+            snippet.body = body;
+        } else {
+            return;
+        }
+
+        let Some(target_snippet) = transfer_snippet(
+            &mut self.snippets,
+            source_group,
+            source_snippet,
+            target_group,
+            transfer,
+        ) else {
+            return;
+        };
+
+        let action = match transfer {
+            SnippetTransfer::Copy => "Copied",
+            SnippetTransfer::Move => {
+                self.selected_group = target_group;
+                self.selected_snippet = target_snippet;
+                self.edit_group_active = true;
+                self.edit_snippet_active = true;
+                self.load_selected_editor_snippet();
+                "Moved"
+            }
+        };
+        match save_snippets(&self.paths, &self.snippets) {
+            Ok(()) => {
+                self.refresh_results();
+                self.status = format!("{action} snippet to {target_name}");
+            }
+            Err(error) => self.show_error(error.to_string()),
         }
     }
 
@@ -2698,6 +2838,50 @@ mod tests {
         };
 
         assert_eq!(join_snippet_chain(["One", "Two"], &settings), "One\n\nTwo");
+    }
+
+    fn transfer_test_snippets() -> SnippetFile {
+        SnippetFile {
+            version: 1,
+            groups: vec![
+                SnippetGroup {
+                    name: "Source".to_string(),
+                    snippets: vec![Snippet {
+                        title: "Greeting".to_string(),
+                        body: "Hello".to_string(),
+                    }],
+                },
+                SnippetGroup {
+                    name: "Target".to_string(),
+                    snippets: Vec::new(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn copying_snippet_keeps_source_and_adds_target_copy() {
+        let mut snippets = transfer_test_snippets();
+
+        let target_index = transfer_snippet(&mut snippets, 0, 0, 1, SnippetTransfer::Copy).unwrap();
+
+        assert_eq!(target_index, 0);
+        assert_eq!(snippets.groups[0].snippets.len(), 1);
+        assert_eq!(snippets.groups[1].snippets.len(), 1);
+        assert_eq!(snippets.groups[1].snippets[0].title, "Greeting");
+        assert_eq!(snippets.groups[1].snippets[0].body, "Hello");
+    }
+
+    #[test]
+    fn moving_snippet_removes_source_and_adds_target_snippet() {
+        let mut snippets = transfer_test_snippets();
+
+        let target_index = transfer_snippet(&mut snippets, 0, 0, 1, SnippetTransfer::Move).unwrap();
+
+        assert_eq!(target_index, 0);
+        assert!(snippets.groups[0].snippets.is_empty());
+        assert_eq!(snippets.groups[1].snippets.len(), 1);
+        assert_eq!(snippets.groups[1].snippets[0].title, "Greeting");
     }
 
     #[test]
