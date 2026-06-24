@@ -90,6 +90,7 @@ mod tray_integration {
 mod windows_platform {
     use super::*;
     use std::mem::size_of;
+    #[cfg(not(feature = "offline-portable"))]
     use std::os::windows::process::CommandExt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
@@ -132,6 +133,7 @@ mod windows_platform {
         SetForegroundWindow, TranslateMessage, MSG, PM_REMOVE, SW_SHOWNORMAL, WM_HOTKEY,
     };
 
+    #[cfg(not(feature = "offline-portable"))]
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const DRIVE_REMOTE_TYPE: u32 = 4;
     const HOTKEY_ID: i32 = 0x5454;
@@ -906,6 +908,7 @@ mod windows_platform {
         value.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
+    #[cfg(not(feature = "offline-portable"))]
     fn hidden_command(program: &str) -> Command {
         let mut command = Command::new(program);
         command.creation_flags(CREATE_NO_WINDOW);
