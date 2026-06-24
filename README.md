@@ -186,7 +186,7 @@ GitHub release artifacts also include build provenance attestations. Verify a
 downloaded artifact with the GitHub CLI:
 
 ```bash
-gh attestation verify TypeText-Windows-x64.zip --repo fruitmac/TypeText
+gh attestation verify TypeText-Windows-x64.zip --repo Joshndroid/TypeText
 ```
 
 Attestations prove the artifact was produced by this repository's GitHub Actions

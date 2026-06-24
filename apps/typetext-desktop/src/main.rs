@@ -3429,20 +3429,21 @@ mod tests {
     #[cfg(not(feature = "offline-portable"))]
     fn accepts_only_trusted_github_update_urls() {
         assert!(
-            validate_update_url("https://github.com/fruitmac/TypeText/releases/tag/v1.0.0").is_ok()
+            validate_update_url("https://github.com/Joshndroid/TypeText/releases/tag/v1.0.0")
+                .is_ok()
         );
         assert!(validate_update_url(
-            "https://github.com/fruitmac/TypeText/releases/download/v1.0.0/TypeText.zip"
+            "https://github.com/Joshndroid/TypeText/releases/download/v1.0.0/TypeText.zip"
         )
         .is_ok());
 
         for url in [
-            "http://github.com/fruitmac/TypeText/releases",
+            "http://github.com/Joshndroid/TypeText/releases",
             "file:///tmp/TypeText.zip",
             "https://github.com.evil.example/TypeText.zip",
             "https://github.com@evil.example/TypeText.zip",
-            "https://user@github.com/fruitmac/TypeText/releases",
-            "https://github.com:444/fruitmac/TypeText/releases",
+            "https://user@github.com/Joshndroid/TypeText/releases",
+            "https://github.com:444/Joshndroid/TypeText/releases",
             "not a URL",
         ] {
             assert!(
