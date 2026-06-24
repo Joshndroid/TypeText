@@ -29,6 +29,8 @@ const UPDATE_CHECK_INTERVAL_SECONDS: u64 = 60 * 60 * 24;
 #[cfg(not(feature = "offline-portable"))]
 const LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/Joshndroid/TypeText/releases/latest";
+#[cfg(not(feature = "offline-portable"))]
+const TRUSTED_UPDATE_PATH_PREFIX: &str = "/Joshndroid/TypeText/";
 
 fn main() -> eframe::Result {
     if let Err(error) = platform::install_app_mutex() {
@@ -2845,6 +2847,7 @@ fn validate_update_url(url: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
         parsed.scheme() == "https"
             && parsed.host_str() == Some("github.com")
+            && parsed.path().starts_with(TRUSTED_UPDATE_PATH_PREFIX)
             && parsed.username().is_empty()
             && parsed.password().is_none()
             && parsed.port().is_none(),
@@ -3442,6 +3445,8 @@ mod tests {
             "file:///tmp/TypeText.zip",
             "https://github.com.evil.example/TypeText.zip",
             "https://github.com@evil.example/TypeText.zip",
+            "https://github.com/fruitmac/TypeText/releases",
+            "https://github.com/Joshndroid/OtherRepo/releases",
             "https://user@github.com/Joshndroid/TypeText/releases",
             "https://github.com:444/Joshndroid/TypeText/releases",
             "not a URL",
