@@ -2,7 +2,6 @@
 
 mod platform;
 
-#[cfg(feature = "offline-portable")]
 use anyhow::Context;
 use eframe::egui;
 #[cfg(not(feature = "offline-portable"))]
@@ -596,8 +595,8 @@ impl TypeTextApp {
             PortablePaths::strictly_beside_executable()?
         };
         #[cfg(not(feature = "offline-portable"))]
-        let paths =
-            PortablePaths::beside_executable().unwrap_or_else(|_| PortablePaths::from_app_dir("."));
+        let paths = PortablePaths::beside_executable()
+            .context("Could not determine a safe TypeText data directory")?;
         if OFFLINE_PORTABLE {
             if let Some(warning) = platform::storage_security_warning(&paths.data_dir) {
                 return Err(anyhow::anyhow!(
