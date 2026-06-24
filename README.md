@@ -60,6 +60,7 @@ docs/
 examples/
   snippets.json
   settings.json
+  settings.offline.json
 
 quickstart.txt          user-facing setup and usage handout
 ```
@@ -79,8 +80,11 @@ The Windows offline-portable build requires this adjacent `data` directory to
 be writable and never falls back to AppData. It is intentionally lean from a
 security perspective: update checking, external update URL opening, and Windows
 startup-registry support are excluded at compile time, not merely hidden or
-disabled in settings. Its dependency graph is also checked during the build to
-ensure that Windows Registry support has not been included. This reduces the
+disabled in settings. The package also seeds `data/settings.json` from the
+offline example, with update checks and startup opening set to false, so its
+on-disk configuration accurately describes that behavior. Its dependency graph
+is also checked during the build to ensure that Windows Registry support has not
+been included. This reduces the
 build's network-facing and persistence-related capability surface; it is not a
 claim that any software is risk-free.
 

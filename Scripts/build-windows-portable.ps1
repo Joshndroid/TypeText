@@ -26,6 +26,7 @@ $OfflineExeDest = Join-Path $OfflineDistDir "TypeText.exe"
 
 $SnippetsSource = Join-Path $RootDir "examples\snippets.json"
 $SettingsSource = Join-Path $RootDir "examples\settings.json"
+$OfflineSettingsSource = Join-Path $RootDir "examples\settings.offline.json"
 
 Set-Location $RootDir
 Write-Host "Building TypeText for Windows target: $WindowsTarget"
@@ -79,8 +80,8 @@ if ($Variant -in @("All", "Offline")) {
     if (Test-Path $SnippetsSource) {
         Copy-Item $SnippetsSource (Join-Path $OfflineDataDir "snippets.json")
     }
-    if (Test-Path $SettingsSource) {
-        Copy-Item $SettingsSource (Join-Path $OfflineDataDir "settings.json")
+    if (Test-Path $OfflineSettingsSource) {
+        Copy-Item $OfflineSettingsSource (Join-Path $OfflineDataDir "settings.json")
     }
     if (Test-Path $OfflineZipPath) {
         Remove-Item $OfflineZipPath -Force
