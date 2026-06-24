@@ -202,8 +202,10 @@ Local builds also read their version from `Cargo.toml`.
 
 TypeText checks that release feed at most once per day when update checks are
 enabled. When a newer platform-specific package is available, the app offers a
-download link and prefers installable packages over portable archives; it does
-not replace the running app automatically.
+download link and prefers installable packages over portable archives. It only
+offers assets with valid SHA-256 metadata from GitHub and displays the expected
+digest for verification after download. TypeText does not download, execute, or
+replace the running app automatically.
 
 For a user-facing setup guide to include with releases, see `quickstart.txt`.
 

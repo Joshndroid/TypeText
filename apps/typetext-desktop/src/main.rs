@@ -137,6 +137,7 @@ struct UpdateInfo {
     release_url: String,
     download_url: String,
     asset_name: String,
+    asset_sha256: String,
 }
 
 #[cfg(not(feature = "offline-portable"))]
@@ -160,6 +161,7 @@ struct GitHubRelease {
 struct GitHubReleaseAsset {
     name: String,
     browser_download_url: String,
+    digest: Option<String>,
 }
 
 struct TypeTextApp {
@@ -2600,11 +2602,23 @@ impl TypeTextApp {
                             .color(ui.visuals().text_color()),
                         );
                         ui.label(egui::RichText::new(&update.asset_name).small().weak());
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(egui::RichText::new("SHA-256").small().weak());
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&update.asset_sha256)
+                                        .small()
+                                        .monospace(),
+                                )
+                                .selectable(true),
+                            )
+                            .on_hover_text("Expected digest reported by GitHub for this asset");
+                        });
                         ui.horizontal(|ui| {
                             if ui.button("Download").clicked() {
                                 self.open_update_download();
                             }
-                            if ui.button("Release Notes").clicked() {
+                            if ui.button("Release & Verify").clicked() {
                                 if let Err(error) = open_update_url(&update.release_url) {
                                     self.show_error(error.to_string());
                                 }
@@ -2669,13 +2683,28 @@ fn check_latest_release() -> anyhow::Result<Option<UpdateInfo>> {
 
     validate_update_url(&release.html_url)?;
     validate_update_url(&asset.browser_download_url)?;
+    let asset_sha256 = release_asset_sha256(asset.digest.as_deref())?;
 
     Ok(Some(UpdateInfo {
         version: release.tag_name,
         release_url: release.html_url,
         download_url: asset.browser_download_url,
         asset_name: asset.name,
+        asset_sha256,
     }))
+}
+
+#[cfg(not(feature = "offline-portable"))]
+fn release_asset_sha256(digest: Option<&str>) -> anyhow::Result<String> {
+    let digest = digest
+        .and_then(|value| value.strip_prefix("sha256:"))
+        .ok_or_else(|| anyhow::anyhow!("Release asset is missing its SHA-256 digest"))?;
+
+    anyhow::ensure!(
+        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "Release asset has an invalid SHA-256 digest"
+    );
+    Ok(digest.to_ascii_lowercase())
 }
 
 #[cfg(not(feature = "offline-portable"))]
@@ -3290,6 +3319,26 @@ mod tests {
                 validate_update_url(url).is_err(),
                 "unexpectedly trusted {url}"
             );
+        }
+    }
+
+    #[test]
+    #[cfg(not(feature = "offline-portable"))]
+    fn accepts_only_well_formed_github_sha256_digests() {
+        let uppercase = "A".repeat(64);
+        assert_eq!(
+            release_asset_sha256(Some(&format!("sha256:{uppercase}"))).unwrap(),
+            "a".repeat(64)
+        );
+
+        for digest in [
+            None,
+            Some(""),
+            Some("md5:d41d8cd98f00b204e9800998ecf8427e"),
+            Some("sha256:abc"),
+            Some("sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"),
+        ] {
+            assert!(release_asset_sha256(digest).is_err());
         }
     }
 }
