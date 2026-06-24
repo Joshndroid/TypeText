@@ -981,7 +981,7 @@ impl TypeTextApp {
             return;
         };
 
-        if let Err(error) = platform::open_url(&update.download_url) {
+        if let Err(error) = open_update_url(&update.download_url) {
             self.show_error(error.to_string());
         }
     }
@@ -2605,7 +2605,7 @@ impl TypeTextApp {
                                 self.open_update_download();
                             }
                             if ui.button("Release Notes").clicked() {
-                                if let Err(error) = platform::open_url(&update.release_url) {
+                                if let Err(error) = open_update_url(&update.release_url) {
                                     self.show_error(error.to_string());
                                 }
                             }
@@ -2667,12 +2667,37 @@ fn check_latest_release() -> anyhow::Result<Option<UpdateInfo>> {
         return Ok(None);
     };
 
+    validate_update_url(&release.html_url)?;
+    validate_update_url(&asset.browser_download_url)?;
+
     Ok(Some(UpdateInfo {
         version: release.tag_name,
         release_url: release.html_url,
         download_url: asset.browser_download_url,
         asset_name: asset.name,
     }))
+}
+
+#[cfg(not(feature = "offline-portable"))]
+fn validate_update_url(url: &str) -> anyhow::Result<()> {
+    let parsed =
+        url::Url::parse(url).map_err(|error| anyhow::anyhow!("Invalid update URL: {error}"))?;
+
+    anyhow::ensure!(
+        parsed.scheme() == "https"
+            && parsed.host_str() == Some("github.com")
+            && parsed.username().is_empty()
+            && parsed.password().is_none()
+            && parsed.port().is_none(),
+        "Refusing to open an untrusted update URL"
+    );
+    Ok(())
+}
+
+#[cfg(not(feature = "offline-portable"))]
+fn open_update_url(url: &str) -> anyhow::Result<()> {
+    validate_update_url(url)?;
+    platform::open_url(url)
 }
 
 #[cfg(not(feature = "offline-portable"))]
@@ -3239,5 +3264,32 @@ mod tests {
             cfg!(any(target_os = "macos", windows))
         );
         assert!(asset_platform_rank("TypeText-source.zip").is_none());
+    }
+
+    #[test]
+    #[cfg(not(feature = "offline-portable"))]
+    fn accepts_only_trusted_github_update_urls() {
+        assert!(
+            validate_update_url("https://github.com/fruitmac/TypeText/releases/tag/v1.0.0").is_ok()
+        );
+        assert!(validate_update_url(
+            "https://github.com/fruitmac/TypeText/releases/download/v1.0.0/TypeText.zip"
+        )
+        .is_ok());
+
+        for url in [
+            "http://github.com/fruitmac/TypeText/releases",
+            "file:///tmp/TypeText.zip",
+            "https://github.com.evil.example/TypeText.zip",
+            "https://github.com@evil.example/TypeText.zip",
+            "https://user@github.com/fruitmac/TypeText/releases",
+            "https://github.com:444/fruitmac/TypeText/releases",
+            "not a URL",
+        ] {
+            assert!(
+                validate_update_url(url).is_err(),
+                "unexpectedly trusted {url}"
+            );
+        }
     }
 }

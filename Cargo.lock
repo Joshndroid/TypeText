@@ -3288,6 +3288,7 @@ dependencies = [
  "serde_json",
  "tray-icon",
  "typetext-core",
+ "url",
  "windows",
 ]
 
