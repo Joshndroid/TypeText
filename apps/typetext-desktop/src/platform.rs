@@ -555,7 +555,7 @@ mod windows_platform {
     }
 
     pub fn open_droptext_file_dialog() -> Result<Option<PathBuf>> {
-        unsafe {
+        run_file_dialog_in_sta(|| unsafe {
             let _com = ComApartment::initialize()?;
             let dialog: IFileOpenDialog =
                 CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)
@@ -591,11 +591,12 @@ mod windows_platform {
                 return Ok(None);
             }
             shell_item_path(&dialog.GetResult()?)
-        }
+        })
     }
 
     pub fn open_snippets_export_dialog(initial_dir: &Path) -> Result<Option<PathBuf>> {
-        unsafe {
+        let initial_dir = initial_dir.to_path_buf();
+        run_file_dialog_in_sta(move || unsafe {
             let _com = ComApartment::initialize()?;
             let dialog: IFileSaveDialog =
                 CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)
@@ -642,7 +643,21 @@ mod windows_platform {
                 return Ok(None);
             }
             shell_item_path(&dialog.GetResult()?)
-        }
+        })
+    }
+
+    fn run_file_dialog_in_sta<T>(
+        operation: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T>
+    where
+        T: Send + 'static,
+    {
+        thread::Builder::new()
+            .name("typetext-file-dialog".to_string())
+            .spawn(operation)
+            .context("Could not start Windows file dialog thread")?
+            .join()
+            .map_err(|_| anyhow!("Windows file dialog thread unexpectedly stopped"))?
     }
 
     struct ComApartment;
