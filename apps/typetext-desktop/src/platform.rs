@@ -924,8 +924,10 @@ mod macos_platform {
     use std::ffi::c_void;
     use std::ffi::CStr;
     use std::fs::{File, OpenOptions};
+    use std::io::Write;
     use std::os::fd::AsRawFd;
     use std::path::PathBuf;
+    use std::process::Stdio;
     use std::ptr;
     use std::sync::{Mutex, OnceLock};
     use std::thread;
@@ -1212,16 +1214,24 @@ mod macos_platform {
         _character_delay_ms: u64,
         _separator_delay_ms: u64,
     ) -> Result<()> {
-        let mut args = Vec::new();
-        for line in apple_script_for_text(text) {
-            args.push("-e".to_string());
-            args.push(line);
+        let script = apple_script_for_text(text).join("\n");
+        let mut child = typing_command()
+            .spawn()
+            .context("Could not run osascript")?;
+
+        {
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| anyhow!("Could not open osascript stdin"))?;
+            stdin
+                .write_all(script.as_bytes())
+                .context("Could not send text to osascript")?;
         }
 
-        let output = Command::new("osascript")
-            .args(args)
-            .output()
-            .context("Could not run osascript")?;
+        let output = child
+            .wait_with_output()
+            .context("Could not wait for osascript")?;
 
         if output.status.success() {
             Ok(())
@@ -1232,6 +1242,15 @@ mod macos_platform {
                 stderr.trim()
             ))
         }
+    }
+
+    fn typing_command() -> Command {
+        let mut command = Command::new("osascript");
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
     }
 
     pub fn open_folder(path: &Path) -> Result<()> {
@@ -1699,6 +1718,18 @@ end try
 
     fn macos_startup_manual_instructions() -> &'static str {
         "Enable it manually in System Settings > General > Login Items & Extensions > Open at Login, then turn on TypeText."
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn typing_command_keeps_script_out_of_process_arguments() {
+            let command = typing_command();
+            assert_eq!(command.get_program(), "osascript");
+            assert!(command.get_args().next().is_none());
+        }
     }
 }
 
