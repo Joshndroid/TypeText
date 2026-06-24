@@ -3320,6 +3320,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(all(windows, feature = "offline-portable")))]
     fn saving_changed_startup_setting_updates_platform_service_once() {
         let paths = test_paths("startup-save-changed");
         let (tx, _rx) = mpsc::channel();
@@ -3343,6 +3344,34 @@ mod tests {
 
         assert_eq!(effects.startup_calls.borrow().as_slice(), &[true]);
         assert!(applied_startup_enabled);
+        cleanup_paths(&paths);
+    }
+
+    #[test]
+    #[cfg(all(windows, feature = "offline-portable"))]
+    fn saving_changed_startup_setting_skips_disabled_platform_service() {
+        let paths = test_paths("startup-save-offline-portable");
+        let (tx, _rx) = mpsc::channel();
+        let effects = MockSettingsEffects::default();
+        let mut settings = AppSettings {
+            open_on_startup: true,
+            ..Default::default()
+        };
+        let mut registered_hotkey = Some(settings.hotkey.clone());
+        let mut applied_startup_enabled = false;
+
+        save_settings_with_effects_impl(
+            &paths,
+            &mut settings,
+            &tx,
+            &mut registered_hotkey,
+            &mut applied_startup_enabled,
+            &effects,
+        )
+        .unwrap();
+
+        assert!(effects.startup_calls.borrow().is_empty());
+        assert!(!applied_startup_enabled);
         cleanup_paths(&paths);
     }
 
