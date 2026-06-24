@@ -112,6 +112,34 @@ Windows: %LOCALAPPDATA%\TypeText\data
 macOS:   ~/Library/Application Support/TypeText/data
 ```
 
+## Security Features
+
+TypeText uses several safeguards to limit its local and update-related attack
+surface:
+
+- Snippet and settings files are subject to byte-size, item-count, field-length,
+  UTF-8, and numeric-range limits before their contents are used.
+- Data files are saved using unique temporary files, flushed to storage, and
+  atomically renamed, reducing the risk of partial or corrupted saves.
+- Data-directory resolution fails closed if TypeText cannot identify a safe
+  executable-adjacent or per-user location; it does not fall back to the current
+  working directory.
+- Windows inserts Unicode through native `SendInput` events and rechecks the
+  target window before each character. macOS sends generated AppleScript to
+  `osascript` over standard input, keeping snippet text out of process arguments.
+- Update checks use GitHub over HTTPS. Links offered by the app must belong to
+  `github.com/Joshndroid/TypeText/`, and TypeText never automatically downloads,
+  executes, or installs an update.
+- Release assets must include well-formed SHA-256 metadata before TypeText offers
+  them. Published builds also receive GitHub provenance attestations and the
+  platform checks described under [Release Security Checks](#release-security-checks).
+- The Windows offline-portable build removes update, external-URL, and startup
+  registration code at compile time and refuses remote data storage.
+
+These controls reduce risk but do not make TypeText a secrets manager. Snippets
+are stored as readable, unencrypted JSON; do not store passwords, recovery codes,
+API keys, or other secrets in TypeText.
+
 ## Dynamic Tokens
 
 TypeText expands supported tokens immediately before typing. Dates and times use
