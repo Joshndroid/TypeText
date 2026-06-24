@@ -41,6 +41,11 @@ jobs:
           toolchain: 1.96.0
           components: clippy, rustfmt
 
+      - name: Audit Rust dependencies
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 

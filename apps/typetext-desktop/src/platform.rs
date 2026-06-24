@@ -92,7 +92,7 @@ mod windows_platform {
     use std::mem::size_of;
     use std::os::windows::process::CommandExt;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicIsize, Ordering};
+    use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
     use std::sync::mpsc::Receiver;
     use std::sync::OnceLock;
     use std::thread;
@@ -103,6 +103,7 @@ mod windows_platform {
     };
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
+    use windows::Win32::Storage::FileSystem::GetDriveTypeW;
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
@@ -123,15 +124,16 @@ mod windows_platform {
     use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
     use windows::Win32::UI::Shell::{
         FileOpenDialog, FileSaveDialog, IFileOpenDialog, IFileSaveDialog, IShellItem,
-        SHCreateItemFromParsingName, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_NOREADONLYRETURN,
-        FOS_OVERWRITEPROMPT, FOS_PATHMUSTEXIST, SIGDN_FILESYSPATH,
+        SHCreateItemFromParsingName, ShellExecuteW, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM,
+        FOS_NOREADONLYRETURN, FOS_OVERWRITEPROMPT, FOS_PATHMUSTEXIST, SIGDN_FILESYSPATH,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetForegroundWindow, PeekMessageW, SetForegroundWindow, TranslateMessage,
-        MSG, PM_REMOVE, WM_HOTKEY,
+        DispatchMessageW, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, PeekMessageW,
+        SetForegroundWindow, TranslateMessage, MSG, PM_REMOVE, SW_SHOWNORMAL, WM_HOTKEY,
     };
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DRIVE_REMOTE_TYPE: u32 = 4;
     const HOTKEY_ID: i32 = 0x5454;
     #[cfg(not(feature = "offline-portable"))]
     const STARTUP_RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -139,6 +141,7 @@ mod windows_platform {
     const STARTUP_RUN_VALUE: &str = "TypeText";
     static APP_MUTEX_HANDLE: AtomicIsize = AtomicIsize::new(0);
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
+    static TARGET_PROCESS_ID: AtomicU32 = AtomicU32::new(0);
     static HOTKEY_MANAGER: OnceLock<Sender<HotkeyCommand>> = OnceLock::new();
 
     pub fn install_app_mutex() -> Result<()> {
@@ -276,8 +279,8 @@ mod windows_platform {
     }
 
     pub fn type_text(text: &str, character_delay_ms: u64, separator_delay_ms: u64) -> Result<()> {
-        restore_target_window();
-        send_text(text, character_delay_ms, separator_delay_ms)
+        let target = restore_target_window()?;
+        send_text(text, character_delay_ms, separator_delay_ms, target)
     }
 
     pub fn type_text_current_focus(
@@ -285,15 +288,26 @@ mod windows_platform {
         character_delay_ms: u64,
         separator_delay_ms: u64,
     ) -> Result<()> {
-        send_text(text, character_delay_ms, separator_delay_ms)
+        let target = unsafe { GetForegroundWindow() };
+        if target.0.is_null() {
+            return Err(anyhow!("No target window is focused; no text was typed"));
+        }
+        send_text(text, character_delay_ms, separator_delay_ms, target)
     }
 
-    fn send_text(text: &str, character_delay_ms: u64, separator_delay_ms: u64) -> Result<()> {
+    fn send_text(
+        text: &str,
+        character_delay_ms: u64,
+        separator_delay_ms: u64,
+        expected_target: HWND,
+    ) -> Result<()> {
+        ensure_target_is_foreground(expected_target)?;
         release_modifier_keys()?;
         thread::sleep(Duration::from_millis(20));
         let character_interval = Duration::from_millis(character_delay_ms);
         let separator_interval = Duration::from_millis(separator_delay_ms);
         for character in text.chars() {
+            ensure_target_is_foreground(expected_target)?;
             if character == '\r' {
                 continue;
             }
@@ -319,6 +333,11 @@ mod windows_platform {
     pub fn remember_target_window() {
         let hwnd = unsafe { GetForegroundWindow() };
         TARGET_WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
+        let mut process_id = 0u32;
+        if !hwnd.0.is_null() {
+            unsafe { GetWindowThreadProcessId(hwnd, Some(&mut process_id)) };
+        }
+        TARGET_PROCESS_ID.store(process_id, Ordering::Relaxed);
     }
 
     #[cfg(not(feature = "offline-portable"))]
@@ -448,8 +467,58 @@ mod windows_platform {
     }
 
     pub fn open_folder(path: &Path) -> Result<()> {
-        let mut command = hidden_command("explorer");
-        command.arg(path).spawn().map(|_| ()).map_err(Into::into)
+        let path = wide_null(&path.to_string_lossy());
+        let result = unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                PCWSTR(path.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result.0 as isize <= 32 {
+            Err(anyhow!("Windows could not open the data folder"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn storage_security_warning(path: &Path) -> Option<String> {
+        use std::path::{Component, Prefix};
+
+        if path.components().any(|component| {
+            matches!(
+                component,
+                Component::Prefix(prefix)
+                    if matches!(prefix.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
+            )
+        }) {
+            return Some(
+                "This portable data folder is on a network path. File reads and writes may cross the network even though update and web features are absent."
+                    .to_string(),
+            );
+        }
+
+        let drive_root = path.components().find_map(|component| match component {
+            Component::Prefix(prefix) => match prefix.kind() {
+                Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                    Some(format!("{}:\\", letter as char))
+                }
+                _ => None,
+            },
+            _ => None,
+        });
+        let root = drive_root.map(|root| wide_null(&root))?;
+        if unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) } == DRIVE_REMOTE_TYPE {
+            Some(
+                "This portable data folder is on a mapped network drive. File reads and writes may cross the network even though update and web features are absent."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
     }
 
     #[cfg(not(feature = "offline-portable"))]
@@ -654,11 +723,49 @@ mod windows_platform {
         }
     }
 
-    fn restore_target_window() {
+    fn restore_target_window() -> Result<HWND> {
         let raw = TARGET_WINDOW.load(Ordering::Relaxed);
-        if raw != 0 {
-            let _ = unsafe { SetForegroundWindow(HWND(raw as *mut std::ffi::c_void)) };
-            std::thread::sleep(std::time::Duration::from_millis(40));
+        if raw == 0 {
+            return Err(anyhow!("The original target window is no longer available"));
+        }
+        let target = HWND(raw as *mut std::ffi::c_void);
+        if !unsafe { IsWindow(Some(target)) }.as_bool() {
+            return Err(anyhow!(
+                "The original target window has closed; no text was typed"
+            ));
+        }
+
+        let mut process_id = 0u32;
+        unsafe { GetWindowThreadProcessId(target, Some(&mut process_id)) };
+        if process_id == 0 || process_id != TARGET_PROCESS_ID.load(Ordering::Relaxed) {
+            return Err(anyhow!(
+                "The original target window changed; no text was typed"
+            ));
+        }
+        if !unsafe { SetForegroundWindow(target) }.as_bool() {
+            return Err(anyhow!(
+                "Windows refused to focus the target window; no text was typed"
+            ));
+        }
+
+        for _ in 0..10 {
+            if unsafe { GetForegroundWindow() } == target {
+                return Ok(target);
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        Err(anyhow!(
+            "The target window did not receive focus; no text was typed"
+        ))
+    }
+
+    fn ensure_target_is_foreground(expected: HWND) -> Result<()> {
+        if unsafe { GetForegroundWindow() } == expected {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Typing stopped because focus moved to another window"
+            ))
         }
     }
 
@@ -1130,6 +1237,10 @@ mod macos_platform {
             .spawn()
             .map(|_| ())
             .map_err(Into::into)
+    }
+
+    pub fn storage_security_warning(_path: &Path) -> Option<String> {
+        None
     }
 
     #[cfg(not(feature = "offline-portable"))]
@@ -1630,6 +1741,10 @@ mod fallback_platform {
             .map_err(Into::into)
     }
 
+    pub fn storage_security_warning(_path: &Path) -> Option<String> {
+        None
+    }
+
     #[cfg(not(feature = "offline-portable"))]
     pub fn open_url(url: &str) -> Result<()> {
         Command::new("xdg-open")
@@ -1716,20 +1831,20 @@ mod fallback_platform {
 pub use fallback_platform::{
     install_app_mutex, install_reopen_handler, install_tray_icon, open_droptext_file_dialog,
     open_folder, open_snippets_export_dialog, register_hotkey, reregister_hotkey,
-    set_startup_enabled, startup_enabled, tray_status, type_text, type_text_current_focus,
-    TrayHandle,
+    set_startup_enabled, startup_enabled, storage_security_warning, tray_status, type_text,
+    type_text_current_focus, TrayHandle,
 };
 #[cfg(target_os = "macos")]
 pub use macos_platform::{
     install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
     open_snippets_export_dialog, register_hotkey, reregister_hotkey, set_startup_enabled,
-    startup_enabled, tray_status, type_text, type_text_current_focus,
+    startup_enabled, storage_security_warning, tray_status, type_text, type_text_current_focus,
 };
 #[cfg(windows)]
 pub use windows_platform::{
     install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
     open_snippets_export_dialog, register_hotkey, reregister_hotkey, set_startup_enabled,
-    startup_enabled, tray_status, type_text, type_text_current_focus,
+    startup_enabled, storage_security_warning, tray_status, type_text, type_text_current_focus,
 };
 
 #[cfg(all(

@@ -179,11 +179,19 @@ Portable Windows builds store data beside TypeText.exe in a data folder.
 Offline portable Windows builds never fall back to AppData. Keep TypeText.exe
 and its data folder in a location where the user has write access.
 
+The offline portable build refuses UNC and mapped network locations for its data
+folder, imports, and exports. Its snippets are readable JSON, not encrypted.
+Keep the complete TypeText folder private and do not use TypeText to store
+passwords, recovery codes, API keys, or other secrets. Review imported snippets
+before using them because snippets can type arbitrary text and Enter keys.
+
 The offline portable build is intentionally lean from a security perspective:
 its update, external update-link, and Windows startup-registration features are
 removed when the app is built, rather than simply switched off in Settings.
-This reduces its network-facing and persistence-related capabilities. It still
-uses the native Windows features needed for hotkeys, focus, and text insertion.
+This reduces its network-facing and persistence-related capabilities. It means
+TypeText initiates no update or web traffic; it does not disable networking in
+Windows or other applications. It still uses the native Windows features needed
+for hotkeys, verified target focus, and text insertion.
 
 
 10. Troubleshooting

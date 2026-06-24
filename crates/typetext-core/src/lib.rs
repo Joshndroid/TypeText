@@ -2,12 +2,24 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, FixedOffset, Local};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{Read, Take, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const DEFAULT_TYPING_DELAY_MS: u64 = 80;
 pub const DEFAULT_WINDOWS_CHARACTER_DELAY_MS: u64 = 22;
 pub const DEFAULT_WINDOWS_SEPARATOR_DELAY_MS: u64 = 35;
 pub const DEFAULT_EMPTY_LINES_BETWEEN_SNIPPETS: u32 = 0;
+pub const MAX_TYPING_DELAY_MS: u64 = 2_000;
+pub const MAX_WINDOWS_INPUT_DELAY_MS: u64 = 250;
+pub const MAX_EMPTY_LINES_BETWEEN_SNIPPETS: u32 = 12;
+pub const MAX_SNIPPET_FILE_BYTES: u64 = 10 * 1024 * 1024;
+pub const MAX_SETTINGS_FILE_BYTES: u64 = 64 * 1024;
+pub const MAX_GROUPS: usize = 1_000;
+pub const MAX_SNIPPETS: usize = 10_000;
+pub const MAX_GROUP_NAME_CHARS: usize = 256;
+pub const MAX_SNIPPET_TITLE_CHARS: usize = 512;
+pub const MAX_SNIPPET_BODY_CHARS: usize = 1_000_000;
 pub const SUPPORTED_SNIPPET_TOKENS: &[(&str, &str)] = &[
     ("time.today", "Current time (legacy DropText alias)"),
     ("time.now", "Current time"),
@@ -278,7 +290,12 @@ fn is_macos_app_bundle_executable_dir(app_dir: &Path) -> bool {
 }
 
 pub fn load_or_create_snippets(paths: &PortablePaths) -> Result<SnippetFile> {
-    load_or_create_json(&paths.snippets_path, &SnippetFile::default()).and_then(|file| {
+    load_or_create_json(
+        &paths.snippets_path,
+        &SnippetFile::default(),
+        MAX_SNIPPET_FILE_BYTES,
+    )
+    .and_then(|file| {
         validate_snippets(&file)?;
         Ok(file)
     })
@@ -295,10 +312,17 @@ pub fn export_snippets(path: impl AsRef<Path>, snippets: &SnippetFile) -> Result
 }
 
 pub fn load_or_create_settings(paths: &PortablePaths) -> Result<AppSettings> {
-    load_or_create_json(&paths.settings_path, &AppSettings::default())
+    let settings = load_or_create_json(
+        &paths.settings_path,
+        &AppSettings::default(),
+        MAX_SETTINGS_FILE_BYTES,
+    )?;
+    validate_settings(&settings)?;
+    Ok(settings)
 }
 
 pub fn save_settings(paths: &PortablePaths, settings: &AppSettings) -> Result<()> {
+    validate_settings(settings)?;
     save_json(paths.settings_path.as_path(), settings)
 }
 
@@ -308,7 +332,7 @@ pub fn import_droptext(path: impl AsRef<Path>) -> Result<SnippetFile> {
 
 pub fn import_droptext_with_warnings(path: impl AsRef<Path>) -> Result<DropTextImport> {
     let path = path.as_ref();
-    let bytes = fs::read(path).with_context(|| format!("Could not read {}", path.display()))?;
+    let bytes = read_limited(path, MAX_SNIPPET_FILE_BYTES)?;
     let raw = decode_droptext_text(&bytes);
     let is_csv = path
         .extension()
@@ -549,14 +573,44 @@ pub fn search_snippets(snippets: &SnippetFile, query: &str) -> Vec<SearchResult>
 }
 
 pub fn validate_snippets(snippets: &SnippetFile) -> Result<()> {
+    if snippets.groups.len() > MAX_GROUPS {
+        return Err(anyhow!(
+            "Snippet data contains more than {MAX_GROUPS} groups."
+        ));
+    }
+
+    let mut snippet_count = 0usize;
     for group in &snippets.groups {
         if group.name.trim().is_empty() {
             return Err(anyhow!("Every group needs a name."));
         }
+        if group.name.chars().count() > MAX_GROUP_NAME_CHARS {
+            return Err(anyhow!(
+                "Group names cannot exceed {MAX_GROUP_NAME_CHARS} characters."
+            ));
+        }
 
         for snippet in &group.snippets {
+            snippet_count = snippet_count
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("Snippet count overflowed."))?;
+            if snippet_count > MAX_SNIPPETS {
+                return Err(anyhow!(
+                    "Snippet data contains more than {MAX_SNIPPETS} snippets."
+                ));
+            }
             if snippet.title.trim().is_empty() {
                 return Err(anyhow!("Every snippet needs a title."));
+            }
+            if snippet.title.chars().count() > MAX_SNIPPET_TITLE_CHARS {
+                return Err(anyhow!(
+                    "Snippet titles cannot exceed {MAX_SNIPPET_TITLE_CHARS} characters."
+                ));
+            }
+            if snippet.body.chars().count() > MAX_SNIPPET_BODY_CHARS {
+                return Err(anyhow!(
+                    "Snippet bodies cannot exceed {MAX_SNIPPET_BODY_CHARS} characters."
+                ));
             }
         }
     }
@@ -564,7 +618,34 @@ pub fn validate_snippets(snippets: &SnippetFile) -> Result<()> {
     Ok(())
 }
 
-fn load_or_create_json<T>(path: &Path, default_value: &T) -> Result<T>
+pub fn validate_settings(settings: &AppSettings) -> Result<()> {
+    if settings.typing_delay_ms > MAX_TYPING_DELAY_MS {
+        return Err(anyhow!(
+            "Typing delay cannot exceed {MAX_TYPING_DELAY_MS} milliseconds."
+        ));
+    }
+    if settings.windows_character_delay_ms > MAX_WINDOWS_INPUT_DELAY_MS
+        || settings.windows_separator_delay_ms > MAX_WINDOWS_INPUT_DELAY_MS
+    {
+        return Err(anyhow!(
+            "Windows input delays cannot exceed {MAX_WINDOWS_INPUT_DELAY_MS} milliseconds."
+        ));
+    }
+    if settings.empty_lines_between_snippets > MAX_EMPTY_LINES_BETWEEN_SNIPPETS {
+        return Err(anyhow!(
+            "Empty lines between snippets cannot exceed {MAX_EMPTY_LINES_BETWEEN_SNIPPETS}."
+        ));
+    }
+    if settings.hotkey.len() > 128 {
+        return Err(anyhow!("The hotkey value is too long."));
+    }
+    if settings.theme.len() > 32 || settings.accent_color.len() > 32 {
+        return Err(anyhow!("A display setting is too long."));
+    }
+    Ok(())
+}
+
+fn load_or_create_json<T>(path: &Path, default_value: &T, max_bytes: u64) -> Result<T>
 where
     T: Serialize + for<'de> Deserialize<'de> + Clone,
 {
@@ -573,9 +654,28 @@ where
         return Ok(default_value.clone());
     }
 
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
+    let bytes = read_limited(path, max_bytes)?;
+    let raw = String::from_utf8(bytes)
+        .with_context(|| format!("{} is not valid UTF-8", path.display()))?;
     serde_json::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))
+}
+
+fn read_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
+    let file =
+        fs::File::open(path).with_context(|| format!("Could not read {}", path.display()))?;
+    let mut reader: Take<fs::File> = file.take(max_bytes.saturating_add(1));
+    let mut bytes = Vec::new();
+    reader
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("Could not read {}", path.display()))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(anyhow!(
+            "{} exceeds the {} byte safety limit.",
+            path.display(),
+            max_bytes
+        ));
+    }
+    Ok(bytes)
 }
 
 fn save_json<T>(path: &Path, value: &T) -> Result<()>
@@ -588,16 +688,61 @@ where
     }
 
     let raw = serde_json::to_string_pretty(value)?;
-    let temp_path = path.with_extension("json.tmp");
-    fs::write(&temp_path, format!("{raw}\n"))
-        .with_context(|| format!("Could not write {}", temp_path.display()))?;
-    fs::rename(&temp_path, path).with_context(|| {
-        format!(
-            "Could not move {} to {}",
-            temp_path.display(),
-            path.display()
+    static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("typetext.json");
+    let mut temp_file = None;
+    for _ in 0..16 {
+        let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".{file_name}.{}.{}.tmp",
+            std::process::id(),
+            sequence
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                temp_file = Some((candidate, file));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("Could not create a temporary file in {}", parent.display())
+                });
+            }
+        }
+    }
+    let (temp_path, mut file) = temp_file.ok_or_else(|| {
+        anyhow!(
+            "Could not allocate a unique temporary file in {}",
+            parent.display()
         )
     })?;
+    if let Err(error) = file
+        .write_all(format!("{raw}\n").as_bytes())
+        .and_then(|_| file.sync_all())
+    {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error).with_context(|| format!("Could not write {}", temp_path.display()));
+    }
+    drop(file);
+    if let Err(error) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error).with_context(|| {
+            format!(
+                "Could not move {} to {}",
+                temp_path.display(),
+                path.display()
+            )
+        });
+    }
     Ok(())
 }
 
@@ -884,6 +1029,35 @@ mod tests {
         assert_eq!(search_snippets(&snippets, "follow").len(), 1);
         assert_eq!(search_snippets(&snippets, "help").len(), 1);
         assert_eq!(search_snippets(&snippets, "common").len(), 2);
+    }
+
+    #[test]
+    fn rejects_settings_outside_runtime_safety_limits() {
+        let settings = AppSettings {
+            typing_delay_ms: MAX_TYPING_DELAY_MS + 1,
+            ..AppSettings::default()
+        };
+        assert!(validate_settings(&settings).is_err());
+
+        let settings = AppSettings {
+            windows_character_delay_ms: MAX_WINDOWS_INPUT_DELAY_MS + 1,
+            ..AppSettings::default()
+        };
+        assert!(validate_settings(&settings).is_err());
+
+        let settings = AppSettings {
+            empty_lines_between_snippets: MAX_EMPTY_LINES_BETWEEN_SNIPPETS + 1,
+            ..AppSettings::default()
+        };
+        assert!(validate_settings(&settings).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_snippet_content() {
+        let mut snippets = SnippetFile::default();
+        snippets.groups[0].snippets[0].body = "x".repeat(MAX_SNIPPET_BODY_CHARS + 1);
+
+        assert!(validate_snippets(&snippets).is_err());
     }
 
     #[test]

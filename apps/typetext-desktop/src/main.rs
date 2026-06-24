@@ -2,6 +2,8 @@
 
 mod platform;
 
+#[cfg(feature = "offline-portable")]
+use anyhow::Context;
 use eframe::egui;
 #[cfg(not(feature = "offline-portable"))]
 use serde::Deserialize;
@@ -9,11 +11,14 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 #[cfg(not(feature = "offline-portable"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(windows)]
+use typetext_core::MAX_WINDOWS_INPUT_DELAY_MS;
 use typetext_core::{
     expand_snippet_tokens, export_snippets, import_droptext_with_warnings, load_or_create_settings,
     load_or_create_snippets, save_settings, save_snippets, search_snippets, AppSettings,
     PortablePaths, QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
-    SnippetSortOrder, SUPPORTED_SNIPPET_TOKENS,
+    SnippetSortOrder, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_TYPING_DELAY_MS,
+    SUPPORTED_SNIPPET_TOKENS,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -122,7 +127,11 @@ fn join_snippet_chain<'a>(
     settings: &AppSettings,
 ) -> String {
     let separator = if settings.start_snippets_on_new_line {
-        "\n".repeat((settings.empty_lines_between_snippets + 1) as usize)
+        let line_count = settings
+            .empty_lines_between_snippets
+            .checked_add(1)
+            .unwrap_or(MAX_EMPTY_LINES_BETWEEN_SNIPPETS + 1);
+        "\n".repeat(line_count as usize)
     } else {
         String::new()
     };
@@ -186,6 +195,7 @@ struct TypeTextApp {
     error_message: Option<String>,
     warning_message: Option<String>,
     confirm_clear_all: bool,
+    confirm_import: bool,
     capturing_hotkey: bool,
     settings_dirty: bool,
     applied_startup_enabled: bool,
@@ -573,12 +583,44 @@ fn sidebar_group_row(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Res
 impl TypeTextApp {
     fn new(cc: &eframe::CreationContext<'_>) -> anyhow::Result<Self> {
         #[cfg(feature = "offline-portable")]
-        let paths = PortablePaths::strictly_beside_executable()?;
+        let paths = {
+            let executable = std::env::current_exe()
+                .context("Could not determine the offline portable executable path")?;
+            if let Some(warning) = platform::storage_security_warning(&executable) {
+                return Err(anyhow::anyhow!(
+                    "Offline portable mode refuses remote storage. {warning}"
+                ));
+            }
+            PortablePaths::strictly_beside_executable()?
+        };
         #[cfg(not(feature = "offline-portable"))]
         let paths =
             PortablePaths::beside_executable().unwrap_or_else(|_| PortablePaths::from_app_dir("."));
-        let snippets = load_or_create_snippets(&paths).unwrap_or_default();
-        let mut settings = load_or_create_settings(&paths).unwrap_or_default();
+        if OFFLINE_PORTABLE {
+            if let Some(warning) = platform::storage_security_warning(&paths.data_dir) {
+                return Err(anyhow::anyhow!(
+                    "Offline portable mode refuses remote data storage. {warning}"
+                ));
+            }
+        }
+        let (snippets, snippets_load_error) = match load_or_create_snippets(&paths) {
+            Ok(snippets) => (snippets, None),
+            Err(error) => (
+                SnippetFile::default(),
+                Some(format!(
+                    "Stored snippets were rejected and were not used: {error}"
+                )),
+            ),
+        };
+        let (mut settings, settings_load_error) = match load_or_create_settings(&paths) {
+            Ok(settings) => (settings, None),
+            Err(error) => (
+                AppSettings::default(),
+                Some(format!(
+                    "Stored settings were rejected; safe defaults are active: {error}"
+                )),
+            ),
+        };
         if OFFLINE_PORTABLE {
             settings.open_on_startup = false;
             settings.check_for_updates = false;
@@ -596,7 +638,7 @@ impl TypeTextApp {
         platform::install_reopen_handler(tray_tx.clone(), cc.egui_ctx.clone());
         #[cfg(not(feature = "offline-portable"))]
         let (_update_tx, update_rx) = mpsc::channel();
-        let (status, error_message, registered_hotkey) = match platform::register_hotkey(
+        let (status, hotkey_error, registered_hotkey) = match platform::register_hotkey(
             settings.hotkey.clone(),
             tx.clone(),
             cc.egui_ctx.clone(),
@@ -612,6 +654,12 @@ impl TypeTextApp {
                 None,
             ),
         };
+        let error_message = [snippets_load_error, settings_load_error, hotkey_error]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let error_message = (!error_message.is_empty()).then_some(error_message);
         let icon_rgba = app_icon_data().map(|icon| (icon.rgba, icon.width, icon.height));
         let (tray_handle, tray_error) =
             match platform::install_tray_icon(tray_tx, cc.egui_ctx.clone(), icon_rgba) {
@@ -644,6 +692,7 @@ impl TypeTextApp {
             error_message,
             warning_message: None,
             confirm_clear_all: false,
+            confirm_import: false,
             capturing_hotkey: false,
             settings_dirty: false,
             applied_startup_enabled,
@@ -846,6 +895,14 @@ impl TypeTextApp {
                 return;
             }
         };
+        if OFFLINE_PORTABLE {
+            if let Some(warning) = platform::storage_security_warning(&path) {
+                self.show_error(format!(
+                    "Offline portable mode refuses imports from remote storage. {warning}"
+                ));
+                return;
+            }
+        }
 
         match import_droptext_with_warnings(&path) {
             Ok(imported) => {
@@ -899,6 +956,14 @@ impl TypeTextApp {
                 return;
             }
         };
+        if OFFLINE_PORTABLE {
+            if let Some(warning) = platform::storage_security_warning(&path) {
+                self.show_error(format!(
+                    "Offline portable mode refuses exports to remote storage. {warning}"
+                ));
+                return;
+            }
+        }
 
         match export_snippets(&path, &self.snippets) {
             Ok(()) => {
@@ -1252,6 +1317,7 @@ impl eframe::App for TypeTextApp {
             });
 
         self.ui_clear_all_confirmation(&ctx);
+        self.ui_import_confirmation(&ctx);
         self.ui_background_notice(&ctx);
         self.ui_warning_popup(&ctx);
         self.ui_error_popup(&ctx);
@@ -1259,6 +1325,62 @@ impl eframe::App for TypeTextApp {
 }
 
 impl TypeTextApp {
+    fn ui_import_confirmation(&mut self, ctx: &egui::Context) {
+        if !self.confirm_import {
+            return;
+        }
+
+        let mut cancel = false;
+        let mut choose_file = false;
+        egui::Area::new(egui::Id::new("import_confirmation_dialog"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.set_max_width(460.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new("Import a trusted file")
+                                    .strong()
+                                    .size(15.5),
+                            );
+                        });
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::Label::new(
+                                "Imported files can contain text that TypeText will type into other applications. Only import files you trust, and review imported snippets before using them.",
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button("Choose File").clicked() {
+                                        choose_file = true;
+                                    }
+                                    if ui.button("Cancel").clicked() {
+                                        cancel = true;
+                                    }
+                                },
+                            );
+                        });
+                    });
+            });
+
+        if cancel {
+            self.confirm_import = false;
+        } else if choose_file {
+            self.confirm_import = false;
+            self.import_droptext_snippets();
+        }
+    }
+
     fn ui_background_notice(&mut self, ctx: &egui::Context) {
         if !self.show_background_notice {
             return;
@@ -2370,7 +2492,7 @@ impl TypeTextApp {
                         if ui
                             .add(
                                 egui::DragValue::new(&mut self.settings.typing_delay_ms)
-                                    .range(0..=2_000),
+                                    .range(0..=MAX_TYPING_DELAY_MS),
                             )
                             .changed()
                         {
@@ -2393,7 +2515,7 @@ impl TypeTextApp {
                                     egui::DragValue::new(
                                         &mut self.settings.windows_character_delay_ms,
                                     )
-                                    .range(0..=250),
+                                    .range(0..=MAX_WINDOWS_INPUT_DELAY_MS),
                                 )
                                 .changed()
                             {
@@ -2416,7 +2538,7 @@ impl TypeTextApp {
                                     egui::DragValue::new(
                                         &mut self.settings.windows_separator_delay_ms,
                                     )
-                                    .range(0..=250),
+                                    .range(0..=MAX_WINDOWS_INPUT_DELAY_MS),
                                 )
                                 .changed()
                             {
@@ -2466,7 +2588,7 @@ impl TypeTextApp {
                                 egui::DragValue::new(
                                     &mut self.settings.empty_lines_between_snippets,
                                 )
-                                .range(0..=12),
+                                .range(0..=MAX_EMPTY_LINES_BETWEEN_SNIPPETS),
                             )
                             .changed()
                         {
@@ -2632,7 +2754,7 @@ impl TypeTextApp {
                 framed_section(ui, "Snippet Data", "import, export, and reset", |ui| {
                     ui.horizontal(|ui| {
                         if ui.button("Import").clicked() {
-                            self.import_droptext_snippets();
+                            self.confirm_import = true;
                         }
                         if ui.button("Export").clicked() {
                             self.export_typetext_snippets();
@@ -2646,6 +2768,14 @@ impl TypeTextApp {
                 section_gap(ui);
                 framed_section(ui, "Storage", "data folder", |ui| {
                     ui.monospace(self.paths.data_dir.display().to_string());
+                    if let Some(warning) = platform::storage_security_warning(&self.paths.data_dir)
+                    {
+                        ui.label(
+                            egui::RichText::new(warning)
+                                .small()
+                                .color(egui::Color32::from_rgb(190, 70, 60)),
+                        );
+                    }
                     ui.label(egui::RichText::new(platform::tray_status()).small().weak());
                     ui.add_space(2.0);
                     if ui.button("Open Data").clicked() {

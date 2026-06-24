@@ -88,6 +88,19 @@ been included. This reduces the
 build's network-facing and persistence-related capability surface; it is not a
 claim that any software is risk-free.
 
+Offline portable mode also refuses to start with its data folder on a UNC or
+mapped network drive, and refuses imports from or exports to remote Windows
+storage. "Offline" means TypeText initiates no update or web traffic and keeps
+its application data on local storage; Windows and other applications retain
+their normal networking capabilities.
+
+Portable snippet data is readable JSON and is not encrypted. Treat the complete
+TypeText folder as private, review imported snippets before using them, and do
+not store passwords, recovery codes, API keys, or other secrets in TypeText.
+Anyone able to modify the data folder can alter text that TypeText will later
+type. Use operating-system or full-device encryption when the storage device
+needs protection at rest.
+
 The offline build still uses the native Windows APIs required for its core job:
 registering the global hotkey, restoring the target window, and inserting
 Unicode text. It does not include a browser engine or web application runtime.
@@ -215,6 +228,11 @@ Check the shared core and desktop app:
 cargo test -p typetext-core
 cargo check -p typetext-desktop
 ```
+
+Release verification also audits `Cargo.lock` against the current RustSec
+advisory database. A separate scheduled workflow repeats that audit weekly so a
+new advisory can block subsequent builds even when the dependency lockfile has
+not changed.
 
 Run the desktop app during development:
 

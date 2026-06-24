@@ -70,6 +70,20 @@ if ($Variant -in @("All", "Offline")) {
     Write-Host "Building offline portable TypeText"
     cargo build --release --target $WindowsTarget -p typetext-desktop --no-default-features --features offline-portable --locked
 
+    Write-Host "Verifying offline portable binary capability markers"
+    $OfflineBinaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($ExeSource))
+    $ForbiddenMarkers = @(
+        "api.github.com/repos/Joshndroid/TypeText/releases/latest",
+        "Invoke-WebRequest",
+        "url.dll,FileProtocolHandler",
+        "Software\Microsoft\Windows\CurrentVersion\Run"
+    )
+    foreach ($Marker in $ForbiddenMarkers) {
+        if ($OfflineBinaryText.Contains($Marker)) {
+            throw "Offline portable binary unexpectedly contains disabled capability marker: $Marker"
+        }
+    }
+
     if (Test-Path $OfflineDistDir) {
         Remove-Item $OfflineDistDir -Recurse -Force
     }
