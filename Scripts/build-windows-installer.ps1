@@ -12,6 +12,9 @@ $PackageVersion = Get-TypeTextPackageVersion -Version $Version
 
 & $PortableScript -Variant Standard
 $ExePath = Join-Path $DistDir "TypeText.exe"
+if (!(Test-Path $ExePath)) {
+    throw "Expected portable app build output was not found: $ExePath"
+}
 
 if (Test-Path $InstallerDir) {
     Remove-Item $InstallerDir -Recurse -Force
@@ -105,8 +108,14 @@ end;
 
 $InnoScript | Set-Content -Path $IssPath -Encoding UTF8
 & $Iscc $IssPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Inno Setup compiler failed with exit code $LASTEXITCODE."
+}
 
 $SetupPath = Join-Path $OutputDir "TypeText-Windows-x64-Setup.exe"
+if (!(Test-Path $SetupPath)) {
+    throw "Expected installer output was not found: $SetupPath"
+}
 Invoke-TypeTextOptionalSigning -Path $SetupPath
 Write-TypeTextSha256Checksum -Path $SetupPath
 

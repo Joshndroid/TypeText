@@ -2737,10 +2737,10 @@ impl TypeTextApp {
                             if ui.button("Download").clicked() {
                                 self.open_update_download();
                             }
-                            if ui.button("Release & Verify").clicked() {
-                                if let Err(error) = open_update_url(&update.release_url) {
-                                    self.show_error(error.to_string());
-                                }
+                            if ui.button("Release & Verify").clicked()
+                                && let Err(error) = open_update_url(&update.release_url)
+                            {
+                                self.show_error(error.to_string());
                             }
                         });
                     }

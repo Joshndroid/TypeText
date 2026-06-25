@@ -14,7 +14,9 @@ data/
 Thumbs.db
 
 # Editor and IDE state
-.vscode/
+.vscode/*
+!.vscode/
+!.vscode/tasks.json
 .idea/
 *.swp
 *.swo

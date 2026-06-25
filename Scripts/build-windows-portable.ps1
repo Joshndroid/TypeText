@@ -28,6 +28,29 @@ $SnippetsSource = Join-Path $RootDir "examples\snippets.json"
 $SettingsSource = Join-Path $RootDir "examples\settings.json"
 $OfflineSettingsSource = Join-Path $RootDir "examples\settings.offline.json"
 
+function Invoke-TypeTextCargo {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$CargoArgs
+    )
+
+    & cargo @CargoArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo $($CargoArgs -join ' ') failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Assert-TypeTextBuiltExecutable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (!(Test-Path $Path)) {
+        throw "Expected build output was not found: $Path"
+    }
+}
+
 Set-Location $RootDir
 Write-Host "Building TypeText for Windows target: $WindowsTarget"
 Write-Host "Version: $Version"
@@ -35,7 +58,11 @@ Write-Host "Variant: $Variant"
 Write-Host "If the target is missing, run: rustup target add $WindowsTarget"
 
 if ($Variant -in @("All", "Standard")) {
-    cargo build --release --target $WindowsTarget -p typetext-desktop --locked
+    if (Test-Path $ExeSource) {
+        Remove-Item $ExeSource -Force
+    }
+    Invoke-TypeTextCargo build --release --target $WindowsTarget -p typetext-desktop --locked
+    Assert-TypeTextBuiltExecutable -Path $ExeSource
 
     if (Test-Path $DistDir) {
         Remove-Item $DistDir -Recurse -Force
@@ -62,13 +89,35 @@ if ($Variant -in @("All", "Standard")) {
 
 if ($Variant -in @("All", "Offline")) {
     Write-Host "Verifying offline portable dependency features"
-    $RegistryFeatures = cargo tree -p typetext-desktop --target $WindowsTarget --no-default-features --features offline-portable -e features --locked | Select-String -Pattern "Win32_System_Registry|windows-startup-registry"
+    $TreeArgs = @(
+        "tree",
+        "-p",
+        "typetext-desktop",
+        "--target",
+        $WindowsTarget,
+        "--no-default-features",
+        "--features",
+        "offline-portable",
+        "-e",
+        "features",
+        "--locked"
+    )
+    $TreeOutput = & cargo @TreeArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo $($TreeArgs -join ' ') failed with exit code $LASTEXITCODE. $($TreeOutput | Out-String)"
+    }
+
+    $RegistryFeatures = $TreeOutput | Select-String -Pattern "Win32_System_Registry|windows-startup-registry"
     if ($RegistryFeatures) {
         throw "Offline portable dependency graph unexpectedly includes Windows Registry support."
     }
 
     Write-Host "Building offline portable TypeText"
-    cargo build --release --target $WindowsTarget -p typetext-desktop --no-default-features --features offline-portable --locked
+    if (Test-Path $ExeSource) {
+        Remove-Item $ExeSource -Force
+    }
+    Invoke-TypeTextCargo build --release --target $WindowsTarget -p typetext-desktop --no-default-features --features offline-portable --locked
+    Assert-TypeTextBuiltExecutable -Path $ExeSource
 
     Write-Host "Verifying offline portable binary capability markers"
     $OfflineBinaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($ExeSource))
