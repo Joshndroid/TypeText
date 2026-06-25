@@ -663,7 +663,7 @@ mod windows_platform {
 
     impl ComApartment {
         unsafe fn initialize() -> Result<Self> {
-            let result = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let result = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
             result
                 .ok()
                 .context("Could not initialize COM for Windows file dialog")?;
@@ -679,7 +679,7 @@ mod windows_platform {
 
     unsafe fn show_file_dialog(dialog: &impl windows::core::Interface) -> Result<bool> {
         let modal: windows::Win32::UI::Shell::IModalWindow = dialog.cast()?;
-        match modal.Show(None) {
+        match unsafe { modal.Show(None) } {
             Ok(()) => Ok(true),
             Err(error) if error.code() == windows::core::HRESULT::from_win32(ERROR_CANCELLED.0) => {
                 Ok(false)
@@ -689,11 +689,10 @@ mod windows_platform {
     }
 
     unsafe fn shell_item_path(item: &IShellItem) -> Result<Option<PathBuf>> {
-        let raw_path = item
-            .GetDisplayName(SIGDN_FILESYSPATH)
+        let raw_path = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }
             .context("Could not read selected Windows file path")?;
-        let path = raw_path.to_string();
-        CoTaskMemFree(Some(raw_path.0.cast()));
+        let path = unsafe { raw_path.to_string() };
+        unsafe { CoTaskMemFree(Some(raw_path.0.cast())) };
         let path = path.context("Selected Windows file path was not valid UTF-16")?;
         Ok(Some(PathBuf::from(path)))
     }
@@ -879,17 +878,19 @@ mod windows_platform {
     unsafe fn create_startup_registry_key() -> Result<HKEY> {
         let subkey = wide_null(STARTUP_RUN_SUBKEY);
         let mut key = HKEY::default();
-        let status = RegCreateKeyExW(
-            HKEY_CURRENT_USER,
-            PCWSTR(subkey.as_ptr()),
-            None,
-            None,
-            REG_OPTION_NON_VOLATILE,
-            KEY_SET_VALUE,
-            None,
-            &mut key,
-            None,
-        );
+        let status = unsafe {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                PCWSTR(subkey.as_ptr()),
+                None,
+                None,
+                REG_OPTION_NON_VOLATILE,
+                KEY_SET_VALUE,
+                None,
+                &mut key,
+                None,
+            )
+        };
         if status == ERROR_SUCCESS {
             Ok(key)
         } else {
@@ -903,13 +904,15 @@ mod windows_platform {
     unsafe fn open_startup_registry_key(access: REG_SAM_FLAGS) -> Result<HKEY> {
         let subkey = wide_null(STARTUP_RUN_SUBKEY);
         let mut key = HKEY::default();
-        let status = RegOpenKeyExW(
-            HKEY_CURRENT_USER,
-            PCWSTR(subkey.as_ptr()),
-            None,
-            access,
-            &mut key,
-        );
+        let status = unsafe {
+            RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                PCWSTR(subkey.as_ptr()),
+                None,
+                access,
+                &mut key,
+            )
+        };
         if status == ERROR_SUCCESS {
             Ok(key)
         } else {
