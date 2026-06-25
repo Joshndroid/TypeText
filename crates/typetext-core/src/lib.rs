@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, FixedOffset, Local};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -407,24 +407,24 @@ fn expand_snippet_tokens_at(body: &str, now: DateTime<FixedOffset>) -> String {
     while offset < body.len() {
         let remaining = &body[offset..];
 
-        if let Some(after_opening) = remaining.strip_prefix("{{") {
-            if let Some(end) = after_opening.find("}}") {
-                expanded.push('{');
-                expanded.push_str(&after_opening[..end]);
-                expanded.push('}');
-                offset += 2 + end + 2;
-                continue;
-            }
+        if let Some(after_opening) = remaining.strip_prefix("{{")
+            && let Some(end) = after_opening.find("}}")
+        {
+            expanded.push('{');
+            expanded.push_str(&after_opening[..end]);
+            expanded.push('}');
+            offset += 2 + end + 2;
+            continue;
         }
 
-        if let Some(after_opening) = remaining.strip_prefix('{') {
-            if let Some(end) = after_opening.find('}') {
-                let token = &after_opening[..end];
-                if let Some((_, value)) = replacements.iter().find(|(name, _)| *name == token) {
-                    expanded.push_str(value);
-                    offset += 1 + end + 1;
-                    continue;
-                }
+        if let Some(after_opening) = remaining.strip_prefix('{')
+            && let Some(end) = after_opening.find('}')
+        {
+            let token = &after_opening[..end];
+            if let Some((_, value)) = replacements.iter().find(|(name, _)| *name == token) {
+                expanded.push_str(value);
+                offset += 1 + end + 1;
+                continue;
             }
         }
 

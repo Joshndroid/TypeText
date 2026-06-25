@@ -133,7 +133,7 @@ fn compile_gnu_resource(
     {
         Ok(output) => output,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(ResourceCompile::Skipped)
+            return Ok(ResourceCompile::Skipped);
         }
         Err(error) => return Err(format!("windres: {error}")),
     };
@@ -172,11 +172,7 @@ fn msvc_rc_candidates() -> Vec<OsString> {
         let mut version_dirs = entries
             .filter_map(|entry| {
                 let path = entry.ok()?.path();
-                if path.is_dir() {
-                    Some(path)
-                } else {
-                    None
-                }
+                if path.is_dir() { Some(path) } else { None }
             })
             .collect::<Vec<_>>();
         version_dirs.sort();

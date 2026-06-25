@@ -13,11 +13,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use typetext_core::MAX_WINDOWS_INPUT_DELAY_MS;
 use typetext_core::{
-    expand_snippet_tokens, export_snippets, import_droptext_with_warnings, load_or_create_settings,
-    load_or_create_snippets, save_settings, save_snippets, search_snippets, AppSettings,
-    PortablePaths, QueuedSnippetClickAction, SearchResult, Snippet, SnippetFile, SnippetGroup,
-    SnippetSortOrder, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_TYPING_DELAY_MS,
-    SUPPORTED_SNIPPET_TOKENS,
+    AppSettings, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_TYPING_DELAY_MS, PortablePaths,
+    QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet, SnippetFile,
+    SnippetGroup, SnippetSortOrder, expand_snippet_tokens, export_snippets,
+    import_droptext_with_warnings, load_or_create_settings, load_or_create_snippets, save_settings,
+    save_snippets, search_snippets,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -597,12 +597,12 @@ impl TypeTextApp {
         #[cfg(not(feature = "offline-portable"))]
         let paths = PortablePaths::beside_executable()
             .context("Could not determine a safe TypeText data directory")?;
-        if OFFLINE_PORTABLE {
-            if let Some(warning) = platform::storage_security_warning(&paths.data_dir) {
-                return Err(anyhow::anyhow!(
-                    "Offline portable mode refuses remote data storage. {warning}"
-                ));
-            }
+        if OFFLINE_PORTABLE
+            && let Some(warning) = platform::storage_security_warning(&paths.data_dir)
+        {
+            return Err(anyhow::anyhow!(
+                "Offline portable mode refuses remote data storage. {warning}"
+            ));
         }
         let (snippets, snippets_load_error) = match load_or_create_snippets(&paths) {
             Ok(snippets) => (snippets, None),
@@ -896,13 +896,11 @@ impl TypeTextApp {
                 return;
             }
         };
-        if OFFLINE_PORTABLE {
-            if let Some(warning) = platform::storage_security_warning(&path) {
-                self.show_error(format!(
-                    "Offline portable mode refuses imports from remote storage. {warning}"
-                ));
-                return;
-            }
+        if OFFLINE_PORTABLE && let Some(warning) = platform::storage_security_warning(&path) {
+            self.show_error(format!(
+                "Offline portable mode refuses imports from remote storage. {warning}"
+            ));
+            return;
         }
 
         match import_droptext_with_warnings(&path) {
@@ -957,13 +955,11 @@ impl TypeTextApp {
                 return;
             }
         };
-        if OFFLINE_PORTABLE {
-            if let Some(warning) = platform::storage_security_warning(&path) {
-                self.show_error(format!(
-                    "Offline portable mode refuses exports to remote storage. {warning}"
-                ));
-                return;
-            }
+        if OFFLINE_PORTABLE && let Some(warning) = platform::storage_security_warning(&path) {
+            self.show_error(format!(
+                "Offline portable mode refuses exports to remote storage. {warning}"
+            ));
+            return;
         }
 
         match export_snippets(&path, &self.snippets) {
@@ -2106,11 +2102,11 @@ impl TypeTextApp {
                 self.move_selected_editor_snippet(1);
             }
         });
-        if requested_sort != current_sort {
-            if let Some(group) = self.selected_group_mut() {
-                group.sort_order = requested_sort;
-                self.save_snippets();
-            }
+        if requested_sort != current_sort
+            && let Some(group) = self.selected_group_mut()
+        {
+            group.sort_order = requested_sort;
+            self.save_snippets();
         }
 
         ui.add_space(4.0);
@@ -2330,14 +2326,14 @@ impl TypeTextApp {
 
     fn delete_selected_editor_snippet(&mut self) {
         let selected_snippet = self.selected_snippet;
-        if let Some(group) = self.selected_group_mut() {
-            if selected_snippet < group.snippets.len() {
-                group.snippets.remove(selected_snippet);
-                self.selected_snippet = self.selected_snippet.saturating_sub(1);
-                self.edit_snippet_active = false;
-                self.load_selected_editor_snippet();
-                self.save_snippets();
-            }
+        if let Some(group) = self.selected_group_mut()
+            && selected_snippet < group.snippets.len()
+        {
+            group.snippets.remove(selected_snippet);
+            self.selected_snippet = self.selected_snippet.saturating_sub(1);
+            self.edit_snippet_active = false;
+            self.load_selected_editor_snippet();
+            self.save_snippets();
         }
     }
 
@@ -2779,10 +2775,10 @@ impl TypeTextApp {
                     }
                     ui.label(egui::RichText::new(platform::tray_status()).small().weak());
                     ui.add_space(2.0);
-                    if ui.button("Open Data").clicked() {
-                        if let Err(error) = platform::open_folder(&self.paths.data_dir) {
-                            self.show_error(error.to_string());
-                        }
+                    if ui.button("Open Data").clicked()
+                        && let Err(error) = platform::open_folder(&self.paths.data_dir)
+                    {
+                        self.show_error(error.to_string());
                     }
                 });
             });
@@ -3463,10 +3459,12 @@ mod tests {
             validate_update_url("https://github.com/Joshndroid/TypeText/releases/tag/v1.0.0")
                 .is_ok()
         );
-        assert!(validate_update_url(
-            "https://github.com/Joshndroid/TypeText/releases/download/v1.0.0/TypeText.zip"
-        )
-        .is_ok());
+        assert!(
+            validate_update_url(
+                "https://github.com/Joshndroid/TypeText/releases/download/v1.0.0/TypeText.zip"
+            )
+            .is_ok()
+        );
 
         for url in [
             "http://github.com/Joshndroid/TypeText/releases",

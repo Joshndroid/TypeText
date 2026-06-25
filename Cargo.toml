@@ -6,6 +6,6 @@ members = [
 resolver = "2"
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 license = "MIT"
 version = "1.6.0"

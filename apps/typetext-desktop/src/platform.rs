@@ -1,6 +1,6 @@
 #[cfg(any(windows, target_os = "macos", not(feature = "offline-portable")))]
 use anyhow::Context;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::Path;
 #[cfg(any(not(windows), not(feature = "offline-portable")))]
 use std::process::Command;
@@ -17,8 +17,8 @@ mod tray_integration {
     use std::thread;
     use std::time::Duration;
     use tray_icon::{
-        menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
         Icon, TrayIcon, TrayIconBuilder,
+        menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
     };
 
     pub struct TrayHandle {
@@ -94,45 +94,44 @@ mod windows_platform {
     #[cfg(not(feature = "offline-portable"))]
     use std::os::windows::process::CommandExt;
     use std::path::PathBuf;
+    use std::sync::OnceLock;
     use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
     use std::sync::mpsc::Receiver;
-    use std::sync::OnceLock;
     use std::thread;
     use std::time::Duration;
-    use windows::core::{w, PCWSTR};
     use windows::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_CANCELLED, HWND, WPARAM,
+        CloseHandle, ERROR_ALREADY_EXISTS, ERROR_CANCELLED, GetLastError, HWND, WPARAM,
     };
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
     use windows::Win32::Storage::FileSystem::GetDriveTypeW;
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
-        COINIT_APARTMENTTHREADED,
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+        CoTaskMemFree, CoUninitialize,
     };
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::System::Registry::{
-        RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
-        RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE,
-        REG_SAM_FLAGS, REG_SZ,
+        HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS,
+        REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
+        RegSetValueExW,
     };
     use windows::Win32::System::Threading::CreateMutexW;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        RegisterHotKey, SendInput, UnregisterHotKey, HOT_KEY_MODIFIERS, INPUT, INPUT_0,
-        INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOD_ALT, MOD_CONTROL,
-        MOD_SHIFT, MOD_WIN, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RETURN, VK_RWIN,
-        VK_SHIFT,
+        HOT_KEY_MODIFIERS, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+        KEYEVENTF_UNICODE, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, RegisterHotKey, SendInput,
+        UnregisterHotKey, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RETURN, VK_RWIN, VK_SHIFT,
     };
     use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
     use windows::Win32::UI::Shell::{
-        FileOpenDialog, FileSaveDialog, IFileOpenDialog, IFileSaveDialog, IShellItem,
-        SHCreateItemFromParsingName, ShellExecuteW, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM,
-        FOS_NOREADONLYRETURN, FOS_OVERWRITEPROMPT, FOS_PATHMUSTEXIST, SIGDN_FILESYSPATH,
+        FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_NOREADONLYRETURN, FOS_OVERWRITEPROMPT,
+        FOS_PATHMUSTEXIST, FileOpenDialog, FileSaveDialog, IFileOpenDialog, IFileSaveDialog,
+        IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH, ShellExecuteW,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, PeekMessageW,
-        SetForegroundWindow, TranslateMessage, MSG, PM_REMOVE, SW_SHOWNORMAL, WM_HOTKEY,
+        DispatchMessageW, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, MSG, PM_REMOVE,
+        PeekMessageW, SW_SHOWNORMAL, SetForegroundWindow, TranslateMessage, WM_HOTKEY,
     };
+    use windows::core::{PCWSTR, w};
 
     #[cfg(not(feature = "offline-portable"))]
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -936,9 +935,9 @@ mod windows_platform {
 mod macos_platform {
     use super::*;
     use eframe::egui;
+    use std::ffi::CStr;
     use std::ffi::c_char;
     use std::ffi::c_void;
-    use std::ffi::CStr;
     use std::fs::{File, OpenOptions};
     use std::io::Write;
     use std::os::fd::AsRawFd;
@@ -974,7 +973,7 @@ mod macos_platform {
     }
 
     #[link(name = "Carbon", kind = "framework")]
-    extern "C" {
+    unsafe extern "C" {
         fn GetApplicationEventTarget() -> EventTargetRef;
         fn InstallEventHandler(
             target: EventTargetRef,
@@ -997,7 +996,7 @@ mod macos_platform {
     }
 
     #[link(name = "objc", kind = "dylib")]
-    extern "C" {
+    unsafe extern "C" {
         fn objc_getClass(name: *const c_char) -> ObjcClass;
         fn sel_registerName(name: *const c_char) -> ObjcSel;
         #[link_name = "objc_msgSend"]
@@ -1011,7 +1010,7 @@ mod macos_platform {
     }
 
     #[link(name = "ServiceManagement", kind = "framework")]
-    extern "C" {}
+    unsafe extern "C" {}
 
     const HOTKEY_SIGNATURE: UInt32 = u32::from_be_bytes(*b"TyTx");
     const HOTKEY_ID: UInt32 = 1;
@@ -1186,8 +1185,9 @@ mod macos_platform {
             id: HOTKEY_ID,
         };
         let mut hotkey_ref = ptr::null_mut();
-        let register_status =
-            RegisterEventHotKey(key_code, modifiers, hotkey_id, target, 0, &mut hotkey_ref);
+        let register_status = unsafe {
+            RegisterEventHotKey(key_code, modifiers, hotkey_id, target, 0, &mut hotkey_ref)
+        };
         if register_status != NO_ERR {
             Err(register_status)
         } else {
@@ -1686,17 +1686,17 @@ end try
     }
 
     unsafe fn main_app_service() -> Option<ObjcId> {
-        let service_class = objc_getClass(c"SMAppService".as_ptr());
+        let service_class = unsafe { objc_getClass(c"SMAppService".as_ptr()) };
         if service_class.is_null() {
             return None;
         }
 
-        let selector = sel_registerName(c"mainAppService".as_ptr());
+        let selector = unsafe { sel_registerName(c"mainAppService".as_ptr()) };
         if selector.is_null() {
             return None;
         }
 
-        let service = objc_msg_send(service_class.cast::<c_void>(), selector);
+        let service = unsafe { objc_msg_send(service_class.cast::<c_void>(), selector) };
         if service.is_null() {
             None
         } else {
@@ -1709,22 +1709,24 @@ end try
             return "No error details were provided by macOS.".to_string();
         }
 
-        let description_selector = sel_registerName(c"localizedDescription".as_ptr());
-        let utf8_selector = sel_registerName(c"UTF8String".as_ptr());
+        let description_selector = unsafe { sel_registerName(c"localizedDescription".as_ptr()) };
+        let utf8_selector = unsafe { sel_registerName(c"UTF8String".as_ptr()) };
         if description_selector.is_null() || utf8_selector.is_null() {
             return "No error details were provided by macOS.".to_string();
         }
 
-        let description = objc_msg_send(error, description_selector);
+        let description = unsafe { objc_msg_send(error, description_selector) };
         if description.is_null() {
             return "No error details were provided by macOS.".to_string();
         }
 
-        let bytes = objc_msg_send(description, utf8_selector).cast::<c_char>();
+        let bytes = unsafe { objc_msg_send(description, utf8_selector).cast::<c_char>() };
         if bytes.is_null() {
             "No error details were provided by macOS.".to_string()
         } else {
-            CStr::from_ptr(bytes).to_string_lossy().into_owned()
+            unsafe { CStr::from_ptr(bytes) }
+                .to_string_lossy()
+                .into_owned()
         }
     }
 
@@ -1879,10 +1881,10 @@ mod fallback_platform {
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub use fallback_platform::{
-    install_app_mutex, install_reopen_handler, install_tray_icon, open_droptext_file_dialog,
-    open_folder, open_snippets_export_dialog, register_hotkey, reregister_hotkey,
-    set_startup_enabled, startup_enabled, storage_security_warning, tray_status, type_text,
-    type_text_current_focus, TrayHandle,
+    TrayHandle, install_app_mutex, install_reopen_handler, install_tray_icon,
+    open_droptext_file_dialog, open_folder, open_snippets_export_dialog, register_hotkey,
+    reregister_hotkey, set_startup_enabled, startup_enabled, storage_security_warning, tray_status,
+    type_text, type_text_current_focus,
 };
 #[cfg(target_os = "macos")]
 pub use macos_platform::{
@@ -1909,4 +1911,4 @@ pub use macos_platform::{fetch_text, open_url};
 pub use windows_platform::{fetch_text, open_url};
 
 #[cfg(any(windows, target_os = "macos"))]
-pub use tray_integration::{install_tray_icon, TrayHandle};
+pub use tray_integration::{TrayHandle, install_tray_icon};
