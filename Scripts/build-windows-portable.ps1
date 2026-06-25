@@ -61,7 +61,15 @@ if ($Variant -in @("All", "Standard")) {
     if (Test-Path $ExeSource) {
         Remove-Item $ExeSource -Force
     }
-    Invoke-TypeTextCargo build --release --target $WindowsTarget -p typetext-desktop --locked
+    Invoke-TypeTextCargo -CargoArgs @(
+        "build",
+        "--release",
+        "--target",
+        $WindowsTarget,
+        "-p",
+        "typetext-desktop",
+        "--locked"
+    )
     Assert-TypeTextBuiltExecutable -Path $ExeSource
 
     if (Test-Path $DistDir) {
@@ -116,7 +124,18 @@ if ($Variant -in @("All", "Offline")) {
     if (Test-Path $ExeSource) {
         Remove-Item $ExeSource -Force
     }
-    Invoke-TypeTextCargo build --release --target $WindowsTarget -p typetext-desktop --no-default-features --features offline-portable --locked
+    Invoke-TypeTextCargo -CargoArgs @(
+        "build",
+        "--release",
+        "--target",
+        $WindowsTarget,
+        "-p",
+        "typetext-desktop",
+        "--no-default-features",
+        "--features",
+        "offline-portable",
+        "--locked"
+    )
     Assert-TypeTextBuiltExecutable -Path $ExeSource
 
     Write-Host "Verifying offline portable binary capability markers"
