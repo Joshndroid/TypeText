@@ -62,6 +62,64 @@ verify_dmg_app() {
   return "$status"
 }
 
+create_dmg() {
+  local attempt
+  local diskutil_attempts=2
+  local hdiutil_attempts=3
+  local method
+  local max_attempts
+  local status=0
+  local temp_dir
+  local temp_dmg
+
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/typetext-dmg-create.XXXXXX")"
+  temp_dmg="$temp_dir/TypeText-macOS.dmg"
+
+  for method in diskutil hdiutil; do
+    if [[ "$method" == "diskutil" ]]; then
+      max_attempts="$diskutil_attempts"
+    else
+      max_attempts="$hdiutil_attempts"
+    fi
+
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+      rm -f "$temp_dmg"
+      if [[ "$method" == "diskutil" ]]; then
+        diskutil image create from \
+          --format UDZO \
+          "$DMG_ROOT" \
+          "$temp_dmg" && status=0 || status=$?
+      else
+        hdiutil create \
+          -volname "TypeText" \
+          -srcfolder "$DMG_ROOT" \
+          -ov \
+          -format UDZO \
+          "$temp_dmg" && status=0 || status=$?
+      fi
+
+      if [[ "$status" == "0" ]]; then
+        mv -f "$temp_dmg" "$DMG_PATH"
+        rm -rf "$temp_dir"
+        return 0
+      fi
+
+      if [[ "$attempt" -lt "$max_attempts" ]]; then
+        echo "DMG creation with $method failed on attempt $attempt; retrying in 10 seconds." >&2
+        sleep 10
+      fi
+    done
+
+    if [[ "$method" == "diskutil" ]]; then
+      echo "DMG creation with diskutil failed; falling back to hdiutil in 10 seconds." >&2
+      sleep 10
+    fi
+  done
+
+  rm -rf "$temp_dir"
+  return "$status"
+}
+
 if [[ "$NOTARIZE" == "1" ]]; then
   if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
     echo "NOTARIZE=1 requires CODESIGN_IDENTITY='Developer ID Application: ...'." >&2
@@ -83,18 +141,7 @@ ln -s /Applications "$DMG_ROOT/Applications"
 codesign --verify --strict --verbose=2 "$DMG_ROOT/TypeText.app"
 
 rm -f "$DMG_PATH"
-if ! diskutil image create from \
-  --format UDZO \
-  "$DMG_ROOT" \
-  "$DMG_PATH"; then
-  rm -f "$DMG_PATH"
-  hdiutil create \
-    -volname "TypeText" \
-    -srcfolder "$DMG_ROOT" \
-    -ov \
-    -format UDZO \
-    "$DMG_PATH"
-fi
+create_dmg
 
 rm -rf "$DMG_ROOT"
 verify_dmg_app
