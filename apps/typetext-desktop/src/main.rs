@@ -1299,7 +1299,7 @@ impl eframe::App for TypeTextApp {
                     .stroke(style.visuals.window_stroke)
                     .inner_margin(egui::Margin::symmetric(10, 5)),
             )
-            .show_inside(ui, |ui| self.ui_header(ui, &ctx));
+            .show(ui, |ui| self.ui_header(ui, &ctx));
 
         egui::CentralPanel::default()
             .frame(
@@ -1307,7 +1307,7 @@ impl eframe::App for TypeTextApp {
                     .fill(style.visuals.panel_fill)
                     .inner_margin(egui::Margin::same(8)),
             )
-            .show_inside(ui, |ui| match self.view {
+            .show(ui, |ui| match self.view {
                 View::Choose => self.ui_choose(ui, &ctx),
                 View::Edit => self.ui_edit(ui),
                 View::Settings => self.ui_settings(ui, &ctx),
@@ -2242,7 +2242,7 @@ impl TypeTextApp {
                         response.request_focus();
                     } else if let Some(cursor_range) = state.cursor.char_range() {
                         let range = cursor_range.as_sorted_char_range();
-                        self.edit_body_selection = (range.start, range.end);
+                        self.edit_body_selection = (range.start.into(), range.end.into());
                     }
                 }
             });
