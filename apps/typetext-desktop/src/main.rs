@@ -78,6 +78,12 @@ enum EditPanel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenSelection {
+    Custom,
+    Static,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
     not(any(windows, target_os = "macos")),
     expect(
@@ -203,6 +209,7 @@ struct TypeTextApp {
     edit_body_selection: (usize, usize),
     edit_body_pending_cursor: Option<usize>,
     selected_token: usize,
+    selected_token_kind: TokenSelection,
     edit_token_active: bool,
     edit_token_name: String,
     edit_token_value: String,
@@ -736,6 +743,7 @@ impl TypeTextApp {
             edit_body_selection: (0, 0),
             edit_body_pending_cursor: None,
             selected_token: 0,
+            selected_token_kind: TokenSelection::Custom,
             edit_token_active: false,
             edit_token_name: String::new(),
             edit_token_value: String::new(),
@@ -890,6 +898,7 @@ impl TypeTextApp {
         self.edit_body_selection = (0, 0);
         self.edit_body_pending_cursor = None;
         self.edit_token_active = false;
+        self.selected_token_kind = TokenSelection::Custom;
         self.edit_token_name.clear();
         self.edit_token_value.clear();
     }
@@ -967,6 +976,7 @@ impl TypeTextApp {
             value: "Reusable value".to_string(),
         });
         self.selected_token = self.tokens.custom_tokens.len() - 1;
+        self.selected_token_kind = TokenSelection::Custom;
         self.edit_token_active = true;
         self.load_selected_editor_token();
         self.save_tokens();
@@ -1014,6 +1024,7 @@ impl TypeTextApp {
             .selected_token
             .min(self.tokens.custom_tokens.len().saturating_sub(1));
         self.edit_token_active = !self.tokens.custom_tokens.is_empty();
+        self.selected_token_kind = TokenSelection::Custom;
         self.load_selected_editor_token();
         self.save_tokens();
     }
@@ -2202,8 +2213,9 @@ impl TypeTextApp {
                 }
             }
             EditPanel::Tokens => {
-                let can_edit =
-                    self.edit_token_active && self.selected_token < self.tokens.custom_tokens.len();
+                let can_edit = self.selected_token_kind == TokenSelection::Custom
+                    && self.edit_token_active
+                    && self.selected_token < self.tokens.custom_tokens.len();
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Delete"))
                     .on_hover_text("Delete custom token")
@@ -2261,6 +2273,32 @@ impl TypeTextApp {
                             .max_height(list_rect.height())
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
+                                let static_tokens: Vec<String> = self
+                                    .tokens
+                                    .static_tokens
+                                    .iter()
+                                    .map(|token| token.name.clone())
+                                    .collect();
+                                for (index, name) in static_tokens.iter().enumerate() {
+                                    let selected = self.selected_token_kind
+                                        == TokenSelection::Static
+                                        && self.selected_token == index;
+                                    if sidebar_group_row(ui, &format!("{{{name}}}"), selected)
+                                        .clicked()
+                                    {
+                                        self.selected_token = index;
+                                        self.selected_token_kind = TokenSelection::Static;
+                                        self.edit_token_active = false;
+                                        self.edit_token_name.clear();
+                                        self.edit_token_value.clear();
+                                    }
+                                    ui.add_space(1.0);
+                                }
+                                if !static_tokens.is_empty()
+                                    && !self.tokens.custom_tokens.is_empty()
+                                {
+                                    ui.add_space(4.0);
+                                }
                                 let token_names: Vec<String> = self
                                     .tokens
                                     .custom_tokens
@@ -2268,12 +2306,15 @@ impl TypeTextApp {
                                     .map(|token| token.name.clone())
                                     .collect();
                                 for (index, name) in token_names.iter().enumerate() {
-                                    let selected =
-                                        self.edit_token_active && self.selected_token == index;
+                                    let selected = self.selected_token_kind
+                                        == TokenSelection::Custom
+                                        && self.edit_token_active
+                                        && self.selected_token == index;
                                     if sidebar_group_row(ui, &format!("{{{name}}}"), selected)
                                         .clicked()
                                     {
                                         self.selected_token = index;
+                                        self.selected_token_kind = TokenSelection::Custom;
                                         self.edit_token_active = true;
                                         self.load_selected_editor_token();
                                     }
@@ -2299,14 +2340,26 @@ impl TypeTextApp {
                         ui.set_clip_rect(editor_rect);
                         ui.set_width_range(editor_rect.width()..=editor_rect.width());
 
-                        let can_edit = self.edit_token_active
+                        let can_edit = self.selected_token_kind == TokenSelection::Custom
+                            && self.edit_token_active
                             && self.selected_token < self.tokens.custom_tokens.len();
                         ui.horizontal(|ui| {
                             section_header(ui, "Token Details", "selected token");
                         });
                         section_gap(ui);
 
-                        if can_edit {
+                        if self.selected_token_kind == TokenSelection::Static {
+                            if let Some(token) = self.tokens.static_tokens.get(self.selected_token)
+                            {
+                                ui.label(egui::RichText::new("Name").small());
+                                ui.label(
+                                    egui::RichText::new(format!("{{{}}}", token.name)).monospace(),
+                                );
+                                ui.add_space(6.0);
+                                ui.label(egui::RichText::new("Response").small());
+                                ui.label(&token.response);
+                            }
+                        } else if can_edit {
                             ui.label(egui::RichText::new("Name").small());
                             ui.text_edit_singleline(&mut self.edit_token_name);
                             ui.add_space(6.0);
