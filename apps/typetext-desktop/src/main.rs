@@ -566,6 +566,15 @@ fn compact_snippet_row(
 }
 
 fn sidebar_group_row(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Response {
+    sidebar_named_row(ui, name, selected, 0.0)
+}
+
+fn sidebar_named_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    selected: bool,
+    reserved_right_width: f32,
+) -> egui::Response {
     const SINGLE_ROW_HEIGHT: f32 = 28.0;
     const DOUBLE_ROW_HEIGHT: f32 = 42.0;
     const TEXT_HORIZONTAL_INSET: f32 = 8.0;
@@ -574,7 +583,7 @@ fn sidebar_group_row(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Res
     let row_width = ui.available_width().max(120.0);
     let font_id = egui::TextStyle::Button.resolve(ui.style());
     let text_color = ui.visuals().text_color();
-    let text_width = (row_width - TEXT_HORIZONTAL_INSET * 2.0).max(1.0);
+    let text_width = (row_width - TEXT_HORIZONTAL_INSET * 2.0 - reserved_right_width).max(1.0);
     let mut job = egui::text::LayoutJob::simple(name.to_string(), font_id, text_color, text_width);
     job.wrap.max_rows = 2;
     job.wrap.break_anywhere = false;
@@ -616,6 +625,56 @@ fn sidebar_group_row(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Res
     }
 
     response
+}
+
+fn sidebar_reorder_row(
+    ui: &mut egui::Ui,
+    title: &str,
+    selected: bool,
+    can_move_up: bool,
+    can_move_down: bool,
+    item_name: &str,
+) -> (egui::Response, bool, bool) {
+    const ARROW_BUTTON_WIDTH: f32 = 23.0;
+    const ARROW_GAP: f32 = 3.0;
+    const RIGHT_INSET: f32 = 7.0;
+
+    let reserved_width = ARROW_BUTTON_WIDTH * 2.0 + ARROW_GAP + RIGHT_INSET * 2.0;
+    let response = sidebar_named_row(
+        ui,
+        title,
+        selected,
+        if selected { reserved_width } else { 0.0 },
+    );
+    if !selected {
+        return (response, false, false);
+    }
+
+    let arrow_y = response.rect.center().y - 11.0;
+    let down_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            response.rect.right() - RIGHT_INSET - ARROW_BUTTON_WIDTH,
+            arrow_y,
+        ),
+        egui::vec2(ARROW_BUTTON_WIDTH, 22.0),
+    );
+    let up_rect = egui::Rect::from_min_size(
+        egui::pos2(down_rect.left() - ARROW_GAP - ARROW_BUTTON_WIDTH, arrow_y),
+        egui::vec2(ARROW_BUTTON_WIDTH, 22.0),
+    );
+
+    let up_clicked = ui
+        .put(up_rect, egui::Button::new("↑"))
+        .on_hover_text(format!("Move {item_name} up"))
+        .clicked()
+        && can_move_up;
+    let down_clicked = ui
+        .put(down_rect, egui::Button::new("↓"))
+        .on_hover_text(format!("Move {item_name} down"))
+        .clicked()
+        && can_move_down;
+
+    (response, up_clicked, down_clicked)
 }
 
 impl TypeTextApp {
@@ -1263,7 +1322,23 @@ impl TypeTextApp {
                                 for (index, name) in group_names.iter().enumerate() {
                                     let selected =
                                         self.edit_group_active && self.selected_group == index;
-                                    if sidebar_group_row(ui, name, selected).clicked() {
+                                    let (response, move_up, move_down) = sidebar_reorder_row(
+                                        ui,
+                                        name,
+                                        selected,
+                                        index > 0,
+                                        index + 1 < group_names.len(),
+                                        "group",
+                                    );
+                                    if move_up {
+                                        self.selected_group = index;
+                                        self.edit_group_active = true;
+                                        self.move_selected_editor_group(-1);
+                                    } else if move_down {
+                                        self.selected_group = index;
+                                        self.edit_group_active = true;
+                                        self.move_selected_editor_group(1);
+                                    } else if response.clicked() {
                                         self.selected_group = index;
                                         self.selected_snippet = 0;
                                         self.edit_group_active = true;
@@ -1360,13 +1435,7 @@ impl TypeTextApp {
                             ui.add_space(6.0);
                         }
 
-                        let current_sort = self
-                            .snippets
-                            .groups
-                            .get(self.selected_group)
-                            .map(|group| group.sort_order)
-                            .unwrap_or_default();
-                        let mut snippet_titles: Vec<(usize, String)> = self
+                        let snippet_titles: Vec<(usize, String)> = self
                             .snippets
                             .groups
                             .get(self.selected_group)
@@ -1379,23 +1448,34 @@ impl TypeTextApp {
                                     .collect()
                             })
                             .unwrap_or_default();
-                        match current_sort {
-                            SnippetSortOrder::Custom => {}
-                            SnippetSortOrder::AlphabeticalAscending => {
-                                snippet_titles.sort_by_key(|snippet| snippet.1.to_lowercase())
-                            }
-                            SnippetSortOrder::AlphabeticalDescending => snippet_titles
-                                .sort_by_key(|snippet| std::cmp::Reverse(snippet.1.to_lowercase())),
-                        }
                         egui::ScrollArea::vertical()
                             .id_salt("edit_snippets_page")
                             .max_height(ui.available_height())
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
+                                let snippet_count = snippet_titles.len();
                                 for (index, title) in &snippet_titles {
                                     let selected =
                                         self.edit_snippet_active && self.selected_snippet == *index;
-                                    if sidebar_group_row(ui, title, selected).clicked() {
+                                    let (response, move_up, move_down) = sidebar_reorder_row(
+                                        ui,
+                                        title,
+                                        selected,
+                                        *index > 0,
+                                        *index + 1 < snippet_count,
+                                        "snippet",
+                                    );
+                                    if move_up {
+                                        self.selected_snippet = *index;
+                                        self.edit_snippet_active = true;
+                                        self.load_selected_editor_snippet();
+                                        self.move_selected_editor_snippet(-1);
+                                    } else if move_down {
+                                        self.selected_snippet = *index;
+                                        self.edit_snippet_active = true;
+                                        self.load_selected_editor_snippet();
+                                        self.move_selected_editor_snippet(1);
+                                    } else if response.clicked() {
                                         self.selected_snippet = *index;
                                         self.edit_snippet_active = true;
                                         self.load_selected_editor_snippet();
@@ -2311,9 +2391,27 @@ impl TypeTextApp {
                                         == TokenSelection::Custom
                                         && self.edit_token_active
                                         && self.selected_token == index;
-                                    if sidebar_group_row(ui, &format!("{{{name}}}"), selected)
-                                        .clicked()
-                                    {
+                                    let (response, move_up, move_down) = sidebar_reorder_row(
+                                        ui,
+                                        &format!("{{{name}}}"),
+                                        selected,
+                                        index > 0,
+                                        index + 1 < token_names.len(),
+                                        "token",
+                                    );
+                                    if move_up {
+                                        self.selected_token = index;
+                                        self.selected_token_kind = TokenSelection::Custom;
+                                        self.edit_token_active = true;
+                                        self.load_selected_editor_token();
+                                        self.move_selected_editor_token(-1);
+                                    } else if move_down {
+                                        self.selected_token = index;
+                                        self.selected_token_kind = TokenSelection::Custom;
+                                        self.edit_token_active = true;
+                                        self.load_selected_editor_token();
+                                        self.move_selected_editor_token(1);
+                                    } else if response.clicked() {
                                         self.selected_token = index;
                                         self.selected_token_kind = TokenSelection::Custom;
                                         self.edit_token_active = true;
@@ -2434,68 +2532,6 @@ impl TypeTextApp {
 
         if let Some((target_group, transfer)) = requested_transfer {
             self.transfer_selected_editor_snippet(target_group, transfer);
-        }
-
-        section_gap(ui);
-
-        let current_sort = self
-            .snippets
-            .groups
-            .get(self.selected_group)
-            .map(|group| group.sort_order)
-            .unwrap_or_default();
-        let mut requested_sort = current_sort;
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Order").small());
-            egui::ComboBox::from_id_salt("snippet_sort_order")
-                .selected_text(match current_sort {
-                    SnippetSortOrder::Custom => "Custom",
-                    SnippetSortOrder::AlphabeticalAscending => "A-Z",
-                    SnippetSortOrder::AlphabeticalDescending => "Z-A",
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut requested_sort, SnippetSortOrder::Custom, "Custom");
-                    ui.selectable_value(
-                        &mut requested_sort,
-                        SnippetSortOrder::AlphabeticalAscending,
-                        "Alphabetical (A-Z)",
-                    );
-                    ui.selectable_value(
-                        &mut requested_sort,
-                        SnippetSortOrder::AlphabeticalDescending,
-                        "Alphabetical (Z-A)",
-                    );
-                });
-
-            let can_reorder = can_edit_snippet && current_sort == SnippetSortOrder::Custom;
-            let snippet_count = self
-                .snippets
-                .groups
-                .get(self.selected_group)
-                .map(|group| group.snippets.len())
-                .unwrap_or_default();
-            let can_move_earlier = can_reorder && self.selected_snippet > 0;
-            let can_move_later = can_reorder && self.selected_snippet + 1 < snippet_count;
-            if ui
-                .add_enabled(can_move_earlier, egui::Button::new("Earlier"))
-                .on_hover_text("Move selected snippet earlier in the custom order")
-                .clicked()
-            {
-                self.move_selected_editor_snippet(-1);
-            }
-            if ui
-                .add_enabled(can_move_later, egui::Button::new("Later"))
-                .on_hover_text("Move selected snippet later in the custom order")
-                .clicked()
-            {
-                self.move_selected_editor_snippet(1);
-            }
-        });
-        if requested_sort != current_sort
-            && let Some(group) = self.selected_group_mut()
-        {
-            group.sort_order = requested_sort;
-            self.save_snippets();
         }
 
         section_gap(ui);
@@ -2942,6 +2978,23 @@ impl TypeTextApp {
         }
     }
 
+    fn move_selected_editor_group(&mut self, offset: isize) {
+        let current = self.selected_group;
+        let Some(target) = current.checked_add_signed(offset) else {
+            return;
+        };
+        if target >= self.snippets.groups.len() {
+            return;
+        }
+        self.snippets.groups.swap(current, target);
+        self.selected_group = target;
+        self.selected_snippet = 0;
+        self.edit_group_active = true;
+        self.edit_snippet_active = false;
+        self.load_selected_editor_snippet();
+        self.save_snippets();
+    }
+
     fn add_editor_snippet(&mut self) {
         if self.snippets.groups.is_empty() {
             self.snippets.groups.push(SnippetGroup {
@@ -3017,6 +3070,22 @@ impl TypeTextApp {
         }
     }
 
+    fn move_selected_editor_token(&mut self, offset: isize) {
+        let current = self.selected_token;
+        let Some(target) = current.checked_add_signed(offset) else {
+            return;
+        };
+        if target >= self.tokens.custom_tokens.len() {
+            return;
+        }
+        self.tokens.custom_tokens.swap(current, target);
+        self.selected_token = target;
+        self.selected_token_kind = TokenSelection::Custom;
+        self.edit_token_active = true;
+        self.load_selected_editor_token();
+        self.save_tokens();
+    }
+
     fn move_selected_editor_snippet(&mut self, offset: isize) {
         let current = self.selected_snippet;
         let Some(target) = current.checked_add_signed(offset) else {
@@ -3029,6 +3098,7 @@ impl TypeTextApp {
             return;
         }
         group.snippets.swap(current, target);
+        group.sort_order = SnippetSortOrder::Custom;
         self.selected_snippet = target;
         self.save_snippets();
     }
