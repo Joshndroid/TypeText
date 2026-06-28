@@ -1366,11 +1366,10 @@ impl TypeTextApp {
                         let can_edit = self.edit_group_active
                             && self.selected_group < self.snippets.groups.len();
                         ui.horizontal(|ui| {
-                            section_header(ui, "Group Details", "selected group");
+                            section_header(ui, "Group Details", "");
                         });
                         section_gap(ui);
                         if can_edit {
-                            ui.label(egui::RichText::new("Name").small());
                             ui.text_edit_singleline(&mut self.edit_group_name);
                         }
                     },
@@ -2443,14 +2442,13 @@ impl TypeTextApp {
                             && self.edit_token_active
                             && self.selected_token < self.tokens.custom_tokens.len();
                         ui.horizontal(|ui| {
-                            section_header(ui, "Token Details", "selected token");
+                            section_header(ui, "Token Details", "");
                         });
                         section_gap(ui);
 
                         if self.selected_token_kind == TokenSelection::Static {
                             if let Some(token) = self.tokens.static_tokens.get(self.selected_token)
                             {
-                                ui.label(egui::RichText::new("Name").small());
                                 ui.label(
                                     egui::RichText::new(format!("{{{}}}", token.name)).monospace(),
                                 );
@@ -2459,7 +2457,6 @@ impl TypeTextApp {
                                 ui.label(&token.response);
                             }
                         } else if can_edit {
-                            ui.label(egui::RichText::new("Name").small());
                             ui.text_edit_singleline(&mut self.edit_token_name);
                             ui.add_space(6.0);
                             ui.label(egui::RichText::new("Value").small());
@@ -2497,7 +2494,7 @@ impl TypeTextApp {
         let mut requested_transfer = None;
 
         ui.horizontal(|ui| {
-            section_header(ui, "Snippet Details", "selected snippet");
+            section_header(ui, "Snippet Details", "");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_enabled_ui(can_transfer, |ui| {
                     egui::ComboBox::from_id_salt("move_snippet_to_group")
@@ -2541,7 +2538,6 @@ impl TypeTextApp {
         }
 
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Title").small());
             let token_width = 72.0;
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.ui_token_picker(ui, token_width);
