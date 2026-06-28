@@ -1335,6 +1335,7 @@ impl TypeTextApp {
                                 .unwrap_or("Group");
                             egui::ComboBox::from_id_salt("snippet_editor_group")
                                 .selected_text(selected_group_name)
+                                .width(ui.available_width())
                                 .show_ui(ui, |ui| {
                                     let group_names: Vec<String> = self
                                         .snippets
