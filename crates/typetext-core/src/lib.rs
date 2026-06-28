@@ -20,6 +20,10 @@ pub const MAX_SNIPPETS: usize = 10_000;
 pub const MAX_GROUP_NAME_CHARS: usize = 256;
 pub const MAX_SNIPPET_TITLE_CHARS: usize = 512;
 pub const MAX_SNIPPET_BODY_CHARS: usize = 1_000_000;
+pub const MAX_TOKEN_FILE_BYTES: u64 = 256 * 1024;
+pub const MAX_CUSTOM_TOKENS: usize = 1_000;
+pub const MAX_TOKEN_NAME_CHARS: usize = 128;
+pub const MAX_TOKEN_VALUE_CHARS: usize = 100_000;
 pub const SUPPORTED_SNIPPET_TOKENS: &[(&str, &str)] = &[
     ("time.today", "Current time (legacy DropText alias)"),
     ("time.now", "Current time"),
@@ -35,6 +39,28 @@ pub const SUPPORTED_SNIPPET_TOKENS: &[(&str, &str)] = &[
 pub struct SnippetFile {
     pub version: u32,
     pub groups: Vec<SnippetGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenFile {
+    pub version: u32,
+    pub static_tokens: Vec<StaticToken>,
+    pub custom_tokens: Vec<CustomToken>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StaticToken {
+    pub name: String,
+    pub response: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomToken {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +137,7 @@ pub struct PortablePaths {
     pub data_dir: PathBuf,
     pub snippets_path: PathBuf,
     pub settings_path: PathBuf,
+    pub tokens_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +167,22 @@ impl Default for SnippetFile {
                 ],
                 sort_order: SnippetSortOrder::Custom,
             }],
+        }
+    }
+}
+
+impl Default for TokenFile {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            static_tokens: SUPPORTED_SNIPPET_TOKENS
+                .iter()
+                .map(|(name, description)| StaticToken {
+                    name: (*name).to_string(),
+                    response: (*description).to_string(),
+                })
+                .collect(),
+            custom_tokens: Vec::new(),
         }
     }
 }
@@ -220,6 +263,7 @@ impl PortablePaths {
         Self {
             snippets_path: data_dir.join("snippets.json"),
             settings_path: data_dir.join("settings.json"),
+            tokens_path: data_dir.join("tokens.json"),
             data_dir,
         }
     }
@@ -257,6 +301,7 @@ fn copy_seed_data_if_missing(source: &PortablePaths, target: &PortablePaths) {
     for (source_path, target_path) in [
         (&source.snippets_path, &target.snippets_path),
         (&source.settings_path, &target.settings_path),
+        (&source.tokens_path, &target.tokens_path),
     ] {
         if source_path.exists() && !target_path.exists() {
             let _ = fs::copy(source_path, target_path);
@@ -326,6 +371,28 @@ pub fn save_settings(paths: &PortablePaths, settings: &AppSettings) -> Result<()
     save_json(paths.settings_path.as_path(), settings)
 }
 
+pub fn load_or_create_tokens(paths: &PortablePaths) -> Result<TokenFile> {
+    let existed = paths.tokens_path.exists();
+    let mut tokens = load_or_create_json(
+        &paths.tokens_path,
+        &TokenFile::default(),
+        MAX_TOKEN_FILE_BYTES,
+    )?;
+    let default_static_tokens = TokenFile::default().static_tokens;
+    let static_tokens_changed = tokens.static_tokens != default_static_tokens;
+    tokens.static_tokens = default_static_tokens;
+    validate_tokens(&tokens)?;
+    if !existed || static_tokens_changed {
+        save_tokens(paths, &tokens)?;
+    }
+    Ok(tokens)
+}
+
+pub fn save_tokens(paths: &PortablePaths, tokens: &TokenFile) -> Result<()> {
+    validate_tokens(tokens)?;
+    save_json(paths.tokens_path.as_path(), tokens)
+}
+
 pub fn import_droptext(path: impl AsRef<Path>) -> Result<SnippetFile> {
     Ok(import_droptext_with_warnings(path)?.snippets)
 }
@@ -385,10 +452,18 @@ fn parse_droptext_csv_with_warnings(raw: &str) -> Result<DropTextImport> {
 }
 
 pub fn expand_snippet_tokens(body: &str) -> String {
-    expand_snippet_tokens_at(body, Local::now().fixed_offset())
+    expand_snippet_tokens_at(body, Local::now().fixed_offset(), &[])
 }
 
-fn expand_snippet_tokens_at(body: &str, now: DateTime<FixedOffset>) -> String {
+pub fn expand_snippet_tokens_with_custom(body: &str, custom_tokens: &[CustomToken]) -> String {
+    expand_snippet_tokens_at(body, Local::now().fixed_offset(), custom_tokens)
+}
+
+fn expand_snippet_tokens_at(
+    body: &str,
+    now: DateTime<FixedOffset>,
+    custom_tokens: &[CustomToken],
+) -> String {
     let today = now.date_naive();
     let tomorrow = today.succ_opt().unwrap_or(today);
     let yesterday = today.pred_opt().unwrap_or(today);
@@ -423,6 +498,11 @@ fn expand_snippet_tokens_at(body: &str, now: DateTime<FixedOffset>) -> String {
             let token = &after_opening[..end];
             if let Some((_, value)) = replacements.iter().find(|(name, _)| *name == token) {
                 expanded.push_str(value);
+                offset += 1 + end + 1;
+                continue;
+            }
+            if let Some(custom) = custom_tokens.iter().find(|custom| custom.name == token) {
+                expanded.push_str(&custom.value);
                 offset += 1 + end + 1;
                 continue;
             }
@@ -641,6 +721,72 @@ pub fn validate_settings(settings: &AppSettings) -> Result<()> {
     }
     if settings.theme.len() > 32 || settings.accent_color.len() > 32 {
         return Err(anyhow!("A display setting is too long."));
+    }
+    Ok(())
+}
+
+pub fn validate_tokens(tokens: &TokenFile) -> Result<()> {
+    if tokens.custom_tokens.len() > MAX_CUSTOM_TOKENS {
+        return Err(anyhow!(
+            "Token data contains more than {MAX_CUSTOM_TOKENS} custom tokens."
+        ));
+    }
+
+    for static_token in &tokens.static_tokens {
+        if !SUPPORTED_SNIPPET_TOKENS
+            .iter()
+            .any(|(name, _)| *name == static_token.name)
+        {
+            return Err(anyhow!("Static token data contains an unsupported token."));
+        }
+    }
+
+    let mut seen_names = Vec::new();
+    for token in &tokens.custom_tokens {
+        validate_token_name(&token.name)?;
+        if token.value.chars().count() > MAX_TOKEN_VALUE_CHARS {
+            return Err(anyhow!(
+                "Custom token values cannot exceed {MAX_TOKEN_VALUE_CHARS} characters."
+            ));
+        }
+        if SUPPORTED_SNIPPET_TOKENS
+            .iter()
+            .any(|(name, _)| *name == token.name)
+        {
+            return Err(anyhow!(
+                "Custom token names cannot replace built-in date or time tokens."
+            ));
+        }
+        if seen_names.iter().any(|name: &String| name == &token.name) {
+            return Err(anyhow!("Custom token names must be unique."));
+        }
+        seen_names.push(token.name.clone());
+    }
+
+    Ok(())
+}
+
+pub fn validate_token_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(anyhow!("Custom token name is required."));
+    }
+    if name != name.trim() {
+        return Err(anyhow!(
+            "Custom token names cannot start or end with spaces."
+        ));
+    }
+    if name.chars().count() > MAX_TOKEN_NAME_CHARS {
+        return Err(anyhow!(
+            "Custom token names cannot exceed {MAX_TOKEN_NAME_CHARS} characters."
+        ));
+    }
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+    {
+        return Err(anyhow!(
+            "Custom token names can only use letters, numbers, dots, underscores, and hyphens."
+        ));
     }
     Ok(())
 }
@@ -1201,8 +1347,26 @@ Two="Second"
         );
 
         assert_eq!(
-            expand_snippet_tokens_at(body, now),
+            expand_snippet_tokens_at(body, now, &[]),
             "17:42|17:42|20/06/2026|21/06/2026|19/06/2026|20/06/2026 17:42|Saturday"
+        );
+    }
+
+    #[test]
+    fn expands_custom_snippet_tokens() {
+        let now = DateTime::parse_from_rfc3339("2026-06-20T17:42:31+10:00").unwrap();
+        let custom_tokens = vec![CustomToken {
+            name: "program.version".to_string(),
+            value: "2.4.1".to_string(),
+        }];
+
+        assert_eq!(
+            expand_snippet_tokens_at(
+                "Version {program.version}; date {date.today}",
+                now,
+                &custom_tokens,
+            ),
+            "Version 2.4.1; date 20/06/2026"
         );
     }
 
@@ -1214,6 +1378,7 @@ Two="Second"
             expand_snippet_tokens_at(
                 "Known: {date.today}; unknown: {person.name}; literal: {{date.today}}; café",
                 now,
+                &[],
             ),
             "Known: 20/06/2026; unknown: {person.name}; literal: {date.today}; café"
         );
@@ -1272,6 +1437,7 @@ Two="Second"
         fs::create_dir_all(&target.data_dir).unwrap();
         fs::write(&source.snippets_path, "source snippets").unwrap();
         fs::write(&source.settings_path, "source settings").unwrap();
+        fs::write(&source.tokens_path, "source tokens").unwrap();
         fs::write(&target.settings_path, "user settings").unwrap();
 
         copy_seed_data_if_missing(&source, &target);
@@ -1283,6 +1449,10 @@ Two="Second"
         assert_eq!(
             fs::read_to_string(&target.settings_path).unwrap(),
             "user settings"
+        );
+        assert_eq!(
+            fs::read_to_string(&target.tokens_path).unwrap(),
+            "source tokens"
         );
         let _ = fs::remove_dir_all(base);
     }

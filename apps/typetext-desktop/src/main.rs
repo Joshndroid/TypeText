@@ -13,11 +13,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use typetext_core::MAX_WINDOWS_INPUT_DELAY_MS;
 use typetext_core::{
-    AppSettings, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_TYPING_DELAY_MS, PortablePaths,
+    AppSettings, CustomToken, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_TYPING_DELAY_MS, PortablePaths,
     QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet, SnippetFile,
-    SnippetGroup, SnippetSortOrder, expand_snippet_tokens, export_snippets,
-    import_droptext_with_warnings, load_or_create_settings, load_or_create_snippets, save_settings,
-    save_snippets, search_snippets,
+    SnippetGroup, SnippetSortOrder, TokenFile, expand_snippet_tokens_with_custom, export_snippets,
+    import_droptext_with_warnings, load_or_create_settings, load_or_create_snippets,
+    load_or_create_tokens, save_settings, save_snippets, save_tokens, search_snippets,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -30,6 +30,7 @@ const LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/Joshndroid/TypeText/releases/latest";
 #[cfg(not(feature = "offline-portable"))]
 const TRUSTED_UPDATE_PATH_PREFIX: &str = "/Joshndroid/TypeText/";
+const MAX_TOKEN_NAME_ATTEMPTS: usize = 10_000;
 
 fn main() -> eframe::Result {
     if let Err(error) = platform::install_app_mutex() {
@@ -67,6 +68,13 @@ enum View {
     Choose,
     Edit,
     Settings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditPanel {
+    Groups,
+    Snippets,
+    Tokens,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,9 +186,11 @@ struct TypeTextApp {
     paths: PortablePaths,
     snippets: SnippetFile,
     settings: AppSettings,
+    tokens: TokenFile,
     results: Vec<SearchResult>,
     search: String,
     view: View,
+    edit_panel: EditPanel,
     chooser_group: Option<usize>,
     selected_result: usize,
     selected_group: usize,
@@ -192,6 +202,10 @@ struct TypeTextApp {
     edit_body: String,
     edit_body_selection: (usize, usize),
     edit_body_pending_cursor: Option<usize>,
+    selected_token: usize,
+    edit_token_active: bool,
+    edit_token_name: String,
+    edit_token_value: String,
     status: String,
     error_message: Option<String>,
     warning_message: Option<String>,
@@ -417,6 +431,22 @@ fn title_from_body(body: &str) -> Option<String> {
     Some(title)
 }
 
+fn unique_custom_token_name(tokens: &[CustomToken]) -> String {
+    let base = "custom.token";
+    if !tokens.iter().any(|token| token.name == base) {
+        return base.to_string();
+    }
+
+    for number in 2..=MAX_TOKEN_NAME_ATTEMPTS {
+        let candidate = format!("{base}.{number}");
+        if !tokens.iter().any(|token| token.name == candidate) {
+            return candidate;
+        }
+    }
+
+    format!("{base}.{}", tokens.len() + 1)
+}
+
 fn nav_button(ui: &mut egui::Ui, selected: bool, label: &str) -> bool {
     ui.add(egui::Button::selectable(selected, label).min_size(egui::vec2(68.0, 22.0)))
         .clicked()
@@ -622,6 +652,15 @@ impl TypeTextApp {
                 )),
             ),
         };
+        let (tokens, tokens_load_error) = match load_or_create_tokens(&paths) {
+            Ok(tokens) => (tokens, None),
+            Err(error) => (
+                TokenFile::default(),
+                Some(format!(
+                    "Stored tokens were rejected; safe defaults are active: {error}"
+                )),
+            ),
+        };
         if OFFLINE_PORTABLE {
             settings.open_on_startup = false;
             settings.check_for_updates = false;
@@ -655,11 +694,16 @@ impl TypeTextApp {
                 None,
             ),
         };
-        let error_message = [snippets_load_error, settings_load_error, hotkey_error]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let error_message = [
+            snippets_load_error,
+            settings_load_error,
+            tokens_load_error,
+            hotkey_error,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n");
         let error_message = (!error_message.is_empty()).then_some(error_message);
         let icon_rgba = app_icon_data().map(|icon| (icon.rgba, icon.width, icon.height));
         let (tray_handle, tray_error) =
@@ -675,9 +719,11 @@ impl TypeTextApp {
             paths,
             snippets,
             settings,
+            tokens,
             results,
             search: String::new(),
             view: View::Choose,
+            edit_panel: EditPanel::Snippets,
             chooser_group: None,
             selected_result: 0,
             selected_group: 0,
@@ -689,6 +735,10 @@ impl TypeTextApp {
             edit_body: String::new(),
             edit_body_selection: (0, 0),
             edit_body_pending_cursor: None,
+            selected_token: 0,
+            edit_token_active: false,
+            edit_token_name: String::new(),
+            edit_token_value: String::new(),
             status,
             error_message,
             warning_message: None,
@@ -775,7 +825,8 @@ impl TypeTextApp {
 
         self.hide_to_background(ctx);
         std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
-        let expanded_body = expand_snippet_tokens(&insertion.body);
+        let expanded_body =
+            expand_snippet_tokens_with_custom(&insertion.body, &self.tokens.custom_tokens);
 
         match platform::type_text(
             &expanded_body,
@@ -838,6 +889,9 @@ impl TypeTextApp {
         self.edit_body.clear();
         self.edit_body_selection = (0, 0);
         self.edit_body_pending_cursor = None;
+        self.edit_token_active = false;
+        self.edit_token_name.clear();
+        self.edit_token_value.clear();
     }
 
     fn bring_window_to_front(&self, ctx: &egui::Context) {
@@ -885,6 +939,83 @@ impl TypeTextApp {
             }
             Err(error) => self.show_error(error.to_string()),
         }
+    }
+
+    fn save_tokens(&mut self) {
+        match save_tokens(&self.paths, &self.tokens) {
+            Ok(()) => {
+                self.status = "Tokens saved".to_string();
+            }
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+
+    fn load_selected_editor_token(&mut self) {
+        if let Some(token) = self.tokens.custom_tokens.get(self.selected_token) {
+            self.edit_token_name = token.name.clone();
+            self.edit_token_value = token.value.clone();
+        } else {
+            self.edit_token_name.clear();
+            self.edit_token_value.clear();
+        }
+    }
+
+    fn add_editor_token(&mut self) {
+        let name = unique_custom_token_name(&self.tokens.custom_tokens);
+        self.tokens.custom_tokens.push(CustomToken {
+            name,
+            value: "Reusable value".to_string(),
+        });
+        self.selected_token = self.tokens.custom_tokens.len() - 1;
+        self.edit_token_active = true;
+        self.load_selected_editor_token();
+        self.save_tokens();
+    }
+
+    fn save_selected_editor_token(&mut self) {
+        if !self.edit_token_active || self.selected_token >= self.tokens.custom_tokens.len() {
+            return;
+        }
+
+        let name = self.edit_token_name.trim().to_string();
+        let value = self.edit_token_value.clone();
+        let duplicate = self
+            .tokens
+            .custom_tokens
+            .iter()
+            .enumerate()
+            .any(|(index, token)| index != self.selected_token && token.name == name);
+        if duplicate {
+            self.show_error("Custom token names must be unique.");
+            return;
+        }
+
+        let mut tokens = self.tokens.clone();
+        if let Some(token) = tokens.custom_tokens.get_mut(self.selected_token) {
+            token.name = name;
+            token.value = value;
+        }
+        match save_tokens(&self.paths, &tokens) {
+            Ok(()) => {
+                self.tokens = tokens;
+                self.status = "Tokens saved".to_string();
+            }
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+
+    fn delete_selected_editor_token(&mut self) {
+        if !self.edit_token_active || self.selected_token >= self.tokens.custom_tokens.len() {
+            return;
+        }
+
+        self.tokens.custom_tokens.remove(self.selected_token);
+        self.selected_token = self
+            .selected_token
+            .min(self.tokens.custom_tokens.len().saturating_sub(1));
+        self.edit_token_active = !self.tokens.custom_tokens.is_empty();
+        self.load_selected_editor_token();
+        self.save_tokens();
     }
 
     fn import_droptext_snippets(&mut self) {
@@ -1086,6 +1217,199 @@ impl TypeTextApp {
         );
     }
 
+    fn ui_edit_groups(&mut self, ui: &mut egui::Ui, edit_rect: egui::Rect) {
+        let list_width = (edit_rect.width() * 0.34)
+            .clamp(220.0, 320.0)
+            .min(edit_rect.width() * 0.45);
+        ui.set_clip_rect(edit_rect);
+        ui.set_width_range(edit_rect.width()..=edit_rect.width());
+        ui.set_height_range(edit_rect.height()..=edit_rect.height());
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(edit_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Min)),
+            |ui| {
+                let (list_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(list_width, edit_rect.height()),
+                    egui::Sense::hover(),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(list_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                    |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("edit_groups_page")
+                            .max_height(ui.available_height())
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                let group_names: Vec<String> = self
+                                    .snippets
+                                    .groups
+                                    .iter()
+                                    .map(|group| group.name.clone())
+                                    .collect();
+                                for (index, name) in group_names.iter().enumerate() {
+                                    let selected =
+                                        self.edit_group_active && self.selected_group == index;
+                                    if sidebar_group_row(ui, name, selected).clicked() {
+                                        self.selected_group = index;
+                                        self.selected_snippet = 0;
+                                        self.edit_group_active = true;
+                                        self.edit_snippet_active = false;
+                                        self.load_selected_editor_snippet();
+                                    }
+                                    ui.add_space(1.0);
+                                }
+                            });
+                    },
+                );
+
+                ui.separator();
+
+                let editor_width = ui.available_width();
+                let (editor_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(editor_width, edit_rect.height()),
+                    egui::Sense::hover(),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(editor_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                    |ui| {
+                        let can_edit = self.edit_group_active
+                            && self.selected_group < self.snippets.groups.len();
+                        ui.horizontal(|ui| {
+                            section_header(ui, "Group Details", "selected group");
+                        });
+                        section_gap(ui);
+                        if can_edit {
+                            ui.label(egui::RichText::new("Name").small());
+                            ui.text_edit_singleline(&mut self.edit_group_name);
+                        }
+                    },
+                );
+            },
+        );
+    }
+
+    fn ui_edit_snippets(&mut self, ui: &mut egui::Ui, edit_rect: egui::Rect) {
+        let list_width = (edit_rect.width() * 0.34)
+            .clamp(220.0, 340.0)
+            .min(edit_rect.width() * 0.45);
+        ui.set_clip_rect(edit_rect);
+        ui.set_width_range(edit_rect.width()..=edit_rect.width());
+        ui.set_height_range(edit_rect.height()..=edit_rect.height());
+
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(edit_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Min)),
+            |ui| {
+                let (list_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(list_width, edit_rect.height()),
+                    egui::Sense::hover(),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(list_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                    |ui| {
+                        if !self.snippets.groups.is_empty() {
+                            let selected_group_name = self
+                                .snippets
+                                .groups
+                                .get(self.selected_group)
+                                .map(|group| group.name.as_str())
+                                .unwrap_or("Group");
+                            egui::ComboBox::from_id_salt("snippet_editor_group")
+                                .selected_text(selected_group_name)
+                                .show_ui(ui, |ui| {
+                                    let group_names: Vec<String> = self
+                                        .snippets
+                                        .groups
+                                        .iter()
+                                        .map(|group| group.name.clone())
+                                        .collect();
+                                    for (index, name) in group_names.iter().enumerate() {
+                                        if ui
+                                            .selectable_label(self.selected_group == index, name)
+                                            .clicked()
+                                        {
+                                            self.selected_group = index;
+                                            self.selected_snippet = 0;
+                                            self.edit_group_active = true;
+                                            self.edit_snippet_active = false;
+                                            self.load_selected_editor_snippet();
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                            ui.add_space(6.0);
+                        }
+
+                        let current_sort = self
+                            .snippets
+                            .groups
+                            .get(self.selected_group)
+                            .map(|group| group.sort_order)
+                            .unwrap_or_default();
+                        let mut snippet_titles: Vec<(usize, String)> = self
+                            .snippets
+                            .groups
+                            .get(self.selected_group)
+                            .map(|group| {
+                                group
+                                    .snippets
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, snippet)| (index, snippet.title.clone()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        match current_sort {
+                            SnippetSortOrder::Custom => {}
+                            SnippetSortOrder::AlphabeticalAscending => {
+                                snippet_titles.sort_by_key(|snippet| snippet.1.to_lowercase())
+                            }
+                            SnippetSortOrder::AlphabeticalDescending => snippet_titles
+                                .sort_by_key(|snippet| std::cmp::Reverse(snippet.1.to_lowercase())),
+                        }
+                        egui::ScrollArea::vertical()
+                            .id_salt("edit_snippets_page")
+                            .max_height(ui.available_height())
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                for (index, title) in &snippet_titles {
+                                    let selected =
+                                        self.edit_snippet_active && self.selected_snippet == *index;
+                                    if ui.selectable_label(selected, title).clicked() {
+                                        self.selected_snippet = *index;
+                                        self.edit_snippet_active = true;
+                                        self.load_selected_editor_snippet();
+                                    }
+                                }
+                            });
+                    },
+                );
+
+                ui.separator();
+
+                let editor_width = ui.available_width();
+                let (editor_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(editor_width, edit_rect.height()),
+                    egui::Sense::hover(),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(editor_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                    |ui| self.ui_edit_snippet_details(ui),
+                );
+            },
+        );
+    }
+
     fn remove_result_from_chain(&mut self, index: usize) {
         let Some(result) = self.results.get(index) else {
             return;
@@ -1132,7 +1456,8 @@ impl TypeTextApp {
 
         self.hide_to_background(ctx);
         std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
-        let expanded_body = expand_snippet_tokens(&insertion.body);
+        let expanded_body =
+            expand_snippet_tokens_with_custom(&insertion.body, &self.tokens.custom_tokens);
 
         match platform::type_text_current_focus(
             &expanded_body,
@@ -1802,37 +2127,165 @@ impl TypeTextApp {
     }
 
     fn ui_edit(&mut self, ui: &mut egui::Ui) {
-        const MIN_LIST_HEIGHT: f32 = 64.0;
-        const MAX_SNIPPET_LIST_HEIGHT: f32 = 120.0;
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.edit_panel, EditPanel::Groups, "Groups");
+            ui.selectable_value(&mut self.edit_panel, EditPanel::Snippets, "Snippets");
+            ui.selectable_value(&mut self.edit_panel, EditPanel::Tokens, "Tokens");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.ui_edit_actions(ui);
+            });
+        });
+        section_gap(ui);
 
         let edit_size = ui.available_size();
-        let sidebar_width = edit_size
-            .x
-            .mul_add(0.24, 0.0)
-            .clamp(230.0, 310.0)
-            .min(edit_size.x * 0.36);
-
         let (edit_rect, _) = ui.allocate_exact_size(edit_size, egui::Sense::hover());
         ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(edit_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+            |ui| match self.edit_panel {
+                EditPanel::Groups => self.ui_edit_groups(ui, edit_rect),
+                EditPanel::Snippets => self.ui_edit_snippets(ui, edit_rect),
+                EditPanel::Tokens => self.ui_edit_tokens(ui, edit_rect),
+            },
+        );
+    }
+
+    fn ui_edit_actions(&mut self, ui: &mut egui::Ui) {
+        match self.edit_panel {
+            EditPanel::Groups => {
+                let can_edit =
+                    self.edit_group_active && self.selected_group < self.snippets.groups.len();
+                if ui
+                    .add_enabled(can_edit, egui::Button::new("Delete"))
+                    .on_hover_text("Delete selected group")
+                    .clicked()
+                {
+                    self.delete_selected_editor_group();
+                }
+                if ui
+                    .add_enabled(can_edit, egui::Button::new("Save"))
+                    .on_hover_text("Save selected group")
+                    .clicked()
+                {
+                    self.save_selected_editor_group();
+                }
+                if ui.button("Add").on_hover_text("Add group").clicked() {
+                    self.add_editor_group();
+                }
+            }
+            EditPanel::Snippets => {
+                let can_edit = self.edit_snippet_active
+                    && self
+                        .snippets
+                        .groups
+                        .get(self.selected_group)
+                        .and_then(|group| group.snippets.get(self.selected_snippet))
+                        .is_some();
+                if ui
+                    .add_enabled(can_edit, egui::Button::new("Delete"))
+                    .on_hover_text("Delete selected snippet")
+                    .clicked()
+                {
+                    self.delete_selected_editor_snippet();
+                }
+                if ui
+                    .add_enabled(can_edit, egui::Button::new("Save"))
+                    .on_hover_text("Save selected snippet")
+                    .clicked()
+                {
+                    self.save_selected_editor_snippet();
+                }
+                if ui.button("Add").on_hover_text("Add snippet").clicked() {
+                    self.add_editor_snippet();
+                }
+            }
+            EditPanel::Tokens => {
+                let can_edit =
+                    self.edit_token_active && self.selected_token < self.tokens.custom_tokens.len();
+                if ui
+                    .add_enabled(can_edit, egui::Button::new("Delete"))
+                    .on_hover_text("Delete custom token")
+                    .clicked()
+                {
+                    self.delete_selected_editor_token();
+                }
+                if ui
+                    .add_enabled(can_edit, egui::Button::new("Save"))
+                    .on_hover_text("Save custom token")
+                    .clicked()
+                {
+                    self.save_selected_editor_token();
+                }
+                if ui.button("Add").on_hover_text("Add custom token").clicked() {
+                    self.add_editor_token();
+                }
+            }
+        }
+    }
+
+    fn ui_edit_tokens(&mut self, ui: &mut egui::Ui, tokens_rect: egui::Rect) {
+        ui.set_clip_rect(tokens_rect);
+        ui.set_width_range(tokens_rect.width()..=tokens_rect.width());
+        ui.set_height_range(tokens_rect.height()..=tokens_rect.height());
+
+        let content_top = ui.cursor().top();
+        let content_height = (tokens_rect.bottom() - content_top).max(0.0);
+        let list_width = (tokens_rect.width() * 0.34)
+            .clamp(220.0, 320.0)
+            .min(tokens_rect.width() * 0.45);
+        let (content_rect, _) = ui.allocate_exact_size(
+            egui::vec2(tokens_rect.width(), content_height),
+            egui::Sense::hover(),
+        );
+
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(content_rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Min)),
             |ui| {
-                let (sidebar_rect, _) = ui.allocate_exact_size(
-                    egui::vec2(sidebar_width, edit_rect.height()),
+                let (list_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(list_width, content_rect.height()),
                     egui::Sense::hover(),
                 );
                 ui.scope_builder(
                     egui::UiBuilder::new()
-                        .max_rect(sidebar_rect)
+                        .max_rect(list_rect)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
-                    |ui| self.ui_edit_groups_sidebar(ui, sidebar_rect, sidebar_width),
+                    |ui| {
+                        ui.set_clip_rect(list_rect);
+                        ui.set_width_range(list_rect.width()..=list_rect.width());
+                        egui::ScrollArea::vertical()
+                            .id_salt("edit_tokens_list")
+                            .max_height(list_rect.height())
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                let token_names: Vec<String> = self
+                                    .tokens
+                                    .custom_tokens
+                                    .iter()
+                                    .map(|token| token.name.clone())
+                                    .collect();
+                                for (index, name) in token_names.iter().enumerate() {
+                                    let selected =
+                                        self.edit_token_active && self.selected_token == index;
+                                    if ui
+                                        .selectable_label(selected, format!("{{{name}}}"))
+                                        .clicked()
+                                    {
+                                        self.selected_token = index;
+                                        self.edit_token_active = true;
+                                        self.load_selected_editor_token();
+                                    }
+                                }
+                            });
+                    },
                 );
 
                 ui.separator();
 
                 let editor_width = ui.available_width();
-                let editor_height = edit_rect.height();
+                let editor_height = content_rect.height();
                 let (editor_rect, _) = ui.allocate_exact_size(
                     egui::vec2(editor_width, editor_height),
                     egui::Sense::hover(),
@@ -1841,122 +2294,249 @@ impl TypeTextApp {
                     egui::UiBuilder::new()
                         .max_rect(editor_rect)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
-                    |ui| self.ui_edit_snippet_editor(ui, MIN_LIST_HEIGHT, MAX_SNIPPET_LIST_HEIGHT),
+                    |ui| {
+                        ui.set_clip_rect(editor_rect);
+                        ui.set_width_range(editor_rect.width()..=editor_rect.width());
+
+                        let can_edit = self.edit_token_active
+                            && self.selected_token < self.tokens.custom_tokens.len();
+                        ui.horizontal(|ui| {
+                            section_header(ui, "Token Details", "selected token");
+                        });
+                        section_gap(ui);
+
+                        if can_edit {
+                            ui.label(egui::RichText::new("Name").small());
+                            ui.text_edit_singleline(&mut self.edit_token_name);
+                            ui.add_space(6.0);
+                            ui.label(egui::RichText::new("Value").small());
+                            let value_height = (ui.available_height() - 4.0).max(120.0);
+                            ui.add_sized(
+                                [ui.available_width(), value_height],
+                                egui::TextEdit::multiline(&mut self.edit_token_value)
+                                    .lock_focus(true),
+                            );
+                        }
+                    },
                 );
             },
         );
     }
 
-    fn ui_edit_groups_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        sidebar_rect: egui::Rect,
-        sidebar_width: f32,
-    ) {
-        ui.set_clip_rect(sidebar_rect);
-        ui.set_width_range(sidebar_width..=sidebar_width);
-        ui.set_height_range(sidebar_rect.height()..=sidebar_rect.height());
-
-        ui.horizontal(|ui| {
-            section_header(ui, "Groups", format!("{}", self.snippets.groups.len()));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Add").on_hover_text("Add group").clicked() {
-                    self.add_editor_group();
-                }
-            });
-        });
-
-        section_gap(ui);
-        if self.edit_group_active {
-            framed_section(ui, "Group Details", "selected group", |ui| {
-                ui.label(egui::RichText::new("Name").small());
-                ui.text_edit_singleline(&mut self.edit_group_name);
-                ui.add_space(3.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() {
-                        let name = self.edit_group_name.trim().to_string();
-                        if name.is_empty() {
-                            self.show_error("Group name is required");
-                        } else if let Some(group) = self.selected_group_mut() {
-                            group.name = name;
-                            self.save_snippets();
-                        }
-                    }
-
-                    if ui.button("Delete").clicked()
-                        && self.selected_group < self.snippets.groups.len()
-                    {
-                        self.snippets.groups.remove(self.selected_group);
-                        self.selected_group = self.selected_group.saturating_sub(1);
-                        self.selected_snippet = 0;
-                        self.edit_group_active = false;
-                        self.edit_snippet_active = false;
-                        self.load_selected_editor_snippet();
-                        self.save_snippets();
-                    }
-                });
-            });
-            section_gap(ui);
-        }
-
-        let list_top = ui.cursor().top();
-        let list_height = (sidebar_rect.bottom() - list_top).max(0.0);
-        let list_rect = egui::Rect::from_min_size(
-            egui::pos2(sidebar_rect.left(), list_top),
-            egui::vec2(sidebar_width, list_height),
-        );
-        ui.painter().rect_filled(
-            list_rect,
-            6.0,
-            ui.visuals().widgets.noninteractive.weak_bg_fill,
-        );
-        ui.painter().rect_stroke(
-            list_rect,
-            6.0,
-            ui.visuals().widgets.noninteractive.bg_stroke,
-            egui::StrokeKind::Inside,
-        );
-
-        let group_names: Vec<String> = self
+    fn ui_edit_snippet_details(&mut self, ui: &mut egui::Ui) {
+        ui.set_width(ui.available_width());
+        let can_edit_snippet = self.edit_snippet_active
+            && self
+                .snippets
+                .groups
+                .get(self.selected_group)
+                .and_then(|group| group.snippets.get(self.selected_snippet))
+                .is_some();
+        let transfer_targets: Vec<(usize, String)> = self
             .snippets
             .groups
             .iter()
-            .map(|group| group.name.clone())
+            .enumerate()
+            .filter(|(index, _)| *index != self.selected_group)
+            .map(|(index, group)| (index, group.name.clone()))
             .collect();
+        let can_transfer = can_edit_snippet && !transfer_targets.is_empty();
+        let mut requested_transfer = None;
 
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(list_rect.shrink2(egui::vec2(5.0, 3.0)))
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-            |ui| {
-                let content_rect = list_rect.shrink2(egui::vec2(5.0, 3.0));
-                ui.set_clip_rect(content_rect);
-                ui.set_width_range(content_rect.width()..=content_rect.width());
-                ui.set_min_height(content_rect.height());
-                egui::ScrollArea::vertical()
-                    .id_salt("edit_groups")
-                    .max_height(content_rect.height())
-                    .min_scrolled_height(content_rect.height())
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for (index, name) in group_names.iter().enumerate() {
-                            let selected = self.edit_group_active && self.selected_group == index;
-                            if sidebar_group_row(ui, name, selected).clicked() {
-                                self.selected_group = index;
-                                self.selected_snippet = 0;
-                                self.edit_group_active = true;
-                                self.edit_snippet_active = false;
-                                self.load_selected_editor_snippet();
-                                self.edit_title.clear();
-                                self.edit_body.clear();
+        ui.horizontal(|ui| {
+            section_header(ui, "Snippet Details", "selected snippet");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_enabled_ui(can_transfer, |ui| {
+                    egui::ComboBox::from_id_salt("move_snippet_to_group")
+                        .selected_text("Move")
+                        .show_ui(ui, |ui| {
+                            for (index, name) in &transfer_targets {
+                                if ui.selectable_label(false, name).clicked() {
+                                    requested_transfer = Some((*index, SnippetTransfer::Move));
+                                    ui.close();
+                                }
                             }
-                            ui.add_space(1.0);
-                        }
-                    });
-            },
+                        });
+                })
+                .response
+                .on_hover_text("Move selected snippet to another group");
+                ui.add_enabled_ui(can_transfer, |ui| {
+                    egui::ComboBox::from_id_salt("copy_snippet_to_group")
+                        .selected_text("Copy")
+                        .show_ui(ui, |ui| {
+                            for (index, name) in &transfer_targets {
+                                if ui.selectable_label(false, name).clicked() {
+                                    requested_transfer = Some((*index, SnippetTransfer::Copy));
+                                    ui.close();
+                                }
+                            }
+                        });
+                })
+                .response
+                .on_hover_text("Copy selected snippet to another group");
+            });
+        });
+
+        if let Some((target_group, transfer)) = requested_transfer {
+            self.transfer_selected_editor_snippet(target_group, transfer);
+        }
+
+        section_gap(ui);
+
+        let current_sort = self
+            .snippets
+            .groups
+            .get(self.selected_group)
+            .map(|group| group.sort_order)
+            .unwrap_or_default();
+        let mut requested_sort = current_sort;
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Order").small());
+            egui::ComboBox::from_id_salt("snippet_sort_order")
+                .selected_text(match current_sort {
+                    SnippetSortOrder::Custom => "Custom",
+                    SnippetSortOrder::AlphabeticalAscending => "A-Z",
+                    SnippetSortOrder::AlphabeticalDescending => "Z-A",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut requested_sort, SnippetSortOrder::Custom, "Custom");
+                    ui.selectable_value(
+                        &mut requested_sort,
+                        SnippetSortOrder::AlphabeticalAscending,
+                        "Alphabetical (A-Z)",
+                    );
+                    ui.selectable_value(
+                        &mut requested_sort,
+                        SnippetSortOrder::AlphabeticalDescending,
+                        "Alphabetical (Z-A)",
+                    );
+                });
+
+            let can_reorder = can_edit_snippet && current_sort == SnippetSortOrder::Custom;
+            let snippet_count = self
+                .snippets
+                .groups
+                .get(self.selected_group)
+                .map(|group| group.snippets.len())
+                .unwrap_or_default();
+            let can_move_earlier = can_reorder && self.selected_snippet > 0;
+            let can_move_later = can_reorder && self.selected_snippet + 1 < snippet_count;
+            if ui
+                .add_enabled(can_move_earlier, egui::Button::new("Earlier"))
+                .on_hover_text("Move selected snippet earlier in the custom order")
+                .clicked()
+            {
+                self.move_selected_editor_snippet(-1);
+            }
+            if ui
+                .add_enabled(can_move_later, egui::Button::new("Later"))
+                .on_hover_text("Move selected snippet later in the custom order")
+                .clicked()
+            {
+                self.move_selected_editor_snippet(1);
+            }
+        });
+        if requested_sort != current_sort
+            && let Some(group) = self.selected_group_mut()
+        {
+            group.sort_order = requested_sort;
+            self.save_snippets();
+        }
+
+        section_gap(ui);
+
+        if !can_edit_snippet {
+            return;
+        }
+
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Title").small());
+            let token_width = 72.0;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.ui_token_picker(ui, token_width);
+                ui.add_sized(
+                    [ui.available_width(), 24.0],
+                    egui::TextEdit::singleline(&mut self.edit_title),
+                );
+            });
+        });
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Body").small());
+        let body_height = (ui.available_height() - 2.0).max(108.0);
+        let response = ui.add_sized(
+            [ui.available_width(), body_height],
+            egui::TextEdit::multiline(&mut self.edit_body).id_salt("edit_snippet_body"),
         );
+        self.track_edit_body_cursor(ui, &response);
     }
 
+    fn ui_token_picker(&mut self, ui: &mut egui::Ui, token_width: f32) {
+        egui::ComboBox::from_id_salt("snippet_token_picker")
+            .selected_text("Tokens")
+            .width(token_width)
+            .show_ui(ui, |ui| {
+                ui.label(egui::RichText::new("Static").small().strong());
+                for (token_name, description) in SUPPORTED_SNIPPET_TOKENS {
+                    let token = format!("{{{token_name}}}");
+                    if ui
+                        .selectable_label(false, format!("{token}  -  {description}"))
+                        .clicked()
+                    {
+                        self.insert_token_into_edit_body(&token);
+                        ui.close();
+                    }
+                }
+                if !self.tokens.custom_tokens.is_empty() {
+                    ui.separator();
+                    ui.label(egui::RichText::new("Custom").small().strong());
+                    let custom_tokens: Vec<String> = self
+                        .tokens
+                        .custom_tokens
+                        .iter()
+                        .map(|custom| custom.name.clone())
+                        .collect();
+                    for custom_name in &custom_tokens {
+                        let token = format!("{{{custom_name}}}");
+                        if ui
+                            .selectable_label(false, format!("{token}  -  custom"))
+                            .clicked()
+                        {
+                            self.insert_token_into_edit_body(&token);
+                            ui.close();
+                        }
+                    }
+                }
+            });
+    }
+
+    fn insert_token_into_edit_body(&mut self, token: &str) {
+        let (start, end) = self.edit_body_selection;
+        let cursor = insert_at_char_range(&mut self.edit_body, start, end, token);
+        self.edit_body_selection = (cursor, cursor);
+        self.edit_body_pending_cursor = Some(cursor);
+    }
+
+    fn track_edit_body_cursor(&mut self, ui: &mut egui::Ui, response: &egui::Response) {
+        if let Some(mut state) =
+            egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
+        {
+            if let Some(cursor) = self.edit_body_pending_cursor.take() {
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(cursor),
+                    )));
+                self.edit_body_selection = (cursor, cursor);
+                state.store(ui.ctx(), response.id);
+                response.request_focus();
+            } else if let Some(cursor_range) = state.cursor.char_range() {
+                let range = cursor_range.as_sorted_char_range();
+                self.edit_body_selection = (range.start.into(), range.end.into());
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     fn ui_edit_snippet_editor(
         &mut self,
         ui: &mut egui::Ui,
@@ -2193,6 +2773,7 @@ impl TypeTextApp {
                             .selected_text("Tokens")
                             .width(token_width)
                             .show_ui(ui, |ui| {
+                                ui.label(egui::RichText::new("Static").small().strong());
                                 for (token_name, description) in SUPPORTED_SNIPPET_TOKENS {
                                     let token = format!("{{{token_name}}}");
                                     if ui
@@ -2212,6 +2793,28 @@ impl TypeTextApp {
                                         self.edit_body_selection = (cursor, cursor);
                                         self.edit_body_pending_cursor = Some(cursor);
                                         ui.close();
+                                    }
+                                }
+                                if !self.tokens.custom_tokens.is_empty() {
+                                    ui.separator();
+                                    ui.label(egui::RichText::new("Custom").small().strong());
+                                    for custom in &self.tokens.custom_tokens {
+                                        let token = format!("{{{}}}", custom.name);
+                                        if ui
+                                            .selectable_label(false, format!("{token}  -  custom"))
+                                            .clicked()
+                                        {
+                                            let (start, end) = self.edit_body_selection;
+                                            let cursor = insert_at_char_range(
+                                                &mut self.edit_body,
+                                                start,
+                                                end,
+                                                &token,
+                                            );
+                                            self.edit_body_selection = (cursor, cursor);
+                                            self.edit_body_pending_cursor = Some(cursor);
+                                            ui.close();
+                                        }
                                     }
                                 }
                             });
@@ -2260,6 +2863,28 @@ impl TypeTextApp {
         self.edit_snippet_active = false;
         self.load_selected_editor_snippet();
         self.save_snippets();
+    }
+
+    fn save_selected_editor_group(&mut self) {
+        let name = self.edit_group_name.trim().to_string();
+        if name.is_empty() {
+            self.show_error("Group name is required");
+        } else if let Some(group) = self.selected_group_mut() {
+            group.name = name;
+            self.save_snippets();
+        }
+    }
+
+    fn delete_selected_editor_group(&mut self) {
+        if self.selected_group < self.snippets.groups.len() {
+            self.snippets.groups.remove(self.selected_group);
+            self.selected_group = self.selected_group.saturating_sub(1);
+            self.selected_snippet = 0;
+            self.edit_group_active = false;
+            self.edit_snippet_active = false;
+            self.load_selected_editor_snippet();
+            self.save_snippets();
+        }
     }
 
     fn add_editor_snippet(&mut self) {
@@ -3115,6 +3740,7 @@ mod tests {
         PortablePaths {
             snippets_path: data_dir.join("snippets.json"),
             settings_path: data_dir.join("settings.json"),
+            tokens_path: data_dir.join("tokens.json"),
             data_dir,
         }
     }

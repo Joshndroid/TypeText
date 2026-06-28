@@ -27,6 +27,7 @@ $OfflineExeDest = Join-Path $OfflineDistDir "TypeText.exe"
 $SnippetsSource = Join-Path $RootDir "examples\snippets.json"
 $SettingsSource = Join-Path $RootDir "examples\settings.json"
 $OfflineSettingsSource = Join-Path $RootDir "examples\settings.offline.json"
+$TokensSource = Join-Path $RootDir "examples\tokens.json"
 
 function Invoke-TypeTextCargo {
     param(
@@ -84,6 +85,9 @@ if ($Variant -in @("All", "Standard")) {
     }
     if (Test-Path $SettingsSource) {
         Copy-Item $SettingsSource (Join-Path $DataDir "settings.json")
+    }
+    if (Test-Path $TokensSource) {
+        Copy-Item $TokensSource (Join-Path $DataDir "tokens.json")
     }
     if (Test-Path $ZipPath) {
         Remove-Item $ZipPath -Force
@@ -164,6 +168,9 @@ if ($Variant -in @("All", "Offline")) {
     }
     if (Test-Path $OfflineSettingsSource) {
         Copy-Item $OfflineSettingsSource (Join-Path $OfflineDataDir "settings.json")
+    }
+    if (Test-Path $TokensSource) {
+        Copy-Item $TokensSource (Join-Path $OfflineDataDir "tokens.json")
     }
     if (Test-Path $OfflineZipPath) {
         Remove-Item $OfflineZipPath -Force

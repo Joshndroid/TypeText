@@ -107,6 +107,15 @@ typed unchanged.
 In the snippet editor, use the Tokens menu next to the title field to insert a
 token at the body cursor or replace selected body text.
 
+Static date and time token descriptions are stored in tokens.json under
+staticTokens. Custom reusable values are stored in the same file under
+customTokens.
+
+To add a custom token, open Edit > Tokens, click Add, then set a name and
+value. For example, set program.version to 2.4.1, then use
+{program.version} in any snippet. When the version changes, update it once in
+Tokens and every snippet will use the new value the next time it is typed.
+
 To type a supported token literally, double the braces. For example:
 {{date.today}} types {date.today}
 
@@ -171,7 +180,8 @@ Settings > Snippet Data:
 - Clear All removes all snippets.
 
 Settings > Storage:
-- Shows the folder where TypeText stores snippets.json and settings.json.
+- Shows the folder where TypeText stores snippets.json, settings.json, and
+  tokens.json.
 - Open Data opens that folder.
 
 Installed builds use normal per-user data folders.

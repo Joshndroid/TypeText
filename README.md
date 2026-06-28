@@ -12,6 +12,7 @@ system APIs rather than a browser engine or web-based application runtime.
 - Searchable snippet chooser with group filtering
 - Snippet chaining for inserting multiple text chunks together
 - Dynamic local date and time tokens in snippet text
+- Custom snippet tokens stored in `tokens.json`
 - Configurable queued-snippet behavior: add duplicates or remove queued entries
 - Configurable paragraph separators between queued snippets
 - Built-in group and snippet editor
@@ -61,6 +62,7 @@ examples/
   snippets.json
   settings.json
   settings.offline.json
+  tokens.json
 
 quickstart.txt          user-facing setup and usage handout
 ```
@@ -74,6 +76,7 @@ TypeText.exe
 data/
   snippets.json
   settings.json
+  tokens.json
 ```
 
 The Windows offline-portable build requires this adjacent `data` directory to
@@ -159,6 +162,11 @@ menu next to the title field to insert a token at the body cursor.
 
 Unknown tokens are typed unchanged. To type a supported token literally, double
 the braces: `{{date.today}}` types `{date.today}`.
+
+Custom tokens are stored in `tokens.json` beside snippets and settings. Use
+Edit > Tokens to add central values such as `{program.version}` or
+`{company.name}`. Updating one custom token changes every snippet that uses it
+the next time TypeText types the snippet.
 
 ## Build And Run
 
