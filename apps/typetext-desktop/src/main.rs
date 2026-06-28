@@ -46,7 +46,8 @@ fn main() -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_TITLE)
         .with_inner_size([780.0, 520.0])
-        .with_min_inner_size([560.0, 380.0]);
+        .with_min_inner_size([560.0, 380.0])
+        .with_decorations(false);
     if let Some(icon) = icon {
         viewport = viewport.with_icon(icon);
     }
@@ -2051,7 +2052,7 @@ impl TypeTextApp {
     }
 
     fn ui_header(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.horizontal_centered(|ui| {
+        let header = ui.horizontal_centered(|ui| {
             ui.label(
                 egui::RichText::new("TypeText")
                     .strong()
@@ -2069,9 +2070,7 @@ impl TypeTextApp {
                     .color(ui.visuals().weak_text_color()),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Hide").clicked() {
-                    self.request_hide_to_background(ctx);
-                }
+                self.ui_window_controls(ui, ctx);
                 if nav_button(ui, self.view == View::Settings, "Settings") {
                     self.switch_view(View::Settings);
                 }
@@ -2089,6 +2088,24 @@ impl TypeTextApp {
                 }
             });
         });
+
+        if header.response.drag_started() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+    }
+
+    fn ui_window_controls(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if ui.button("Exit").clicked() {
+            self.allow_quit = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if ui.button("Max").clicked() {
+            let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        }
+        if ui.button("Min").clicked() {
+            self.request_hide_to_background(ctx);
+        }
     }
 
     fn ui_choose(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
