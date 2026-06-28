@@ -2086,6 +2086,17 @@ impl TypeTextApp {
                         self.open_update_download();
                     }
                 }
+                let drag_rect = ui.available_rect_before_wrap();
+                if drag_rect.is_positive() {
+                    let drag_response = ui.interact(
+                        drag_rect,
+                        ui.id().with("header_drag_gap"),
+                        egui::Sense::drag(),
+                    );
+                    if drag_response.drag_started() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                }
             });
         });
 
