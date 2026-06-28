@@ -33,8 +33,8 @@ const TRUSTED_UPDATE_PATH_PREFIX: &str = "/Joshndroid/TypeText/";
 const MAX_TOKEN_NAME_ATTEMPTS: usize = 10_000;
 const HEADER_CONTROL_HEIGHT: f32 = 24.0;
 const EDIT_HEADER_COMBO_WIDTH: f32 = 190.0;
-const EDIT_HEADER_ACTIONS_WIDTH: f32 = 156.0;
 const SNIPPET_TRANSFER_COMBO_WIDTH: f32 = 68.0;
+const DETAIL_HEADER_SEPARATOR_OFFSET: f32 = 9.0;
 
 fn main() -> eframe::Result {
     if let Err(error) = platform::install_app_mutex() {
@@ -461,6 +461,18 @@ fn unique_custom_token_name(tokens: &[CustomToken]) -> String {
 fn nav_button(ui: &mut egui::Ui, selected: bool, label: &str) -> bool {
     ui.add(egui::Button::selectable(selected, label).min_size(egui::vec2(68.0, 22.0)))
         .clicked()
+}
+
+fn group_editor_list_width(width: f32) -> f32 {
+    (width * 0.34).clamp(220.0, 320.0).min(width * 0.45)
+}
+
+fn snippet_editor_list_width(width: f32) -> f32 {
+    (width * 0.34).clamp(220.0, 340.0).min(width * 0.45)
+}
+
+fn token_editor_list_width(width: f32) -> f32 {
+    (width * 0.34).clamp(220.0, 320.0).min(width * 0.45)
 }
 
 fn section_header(ui: &mut egui::Ui, title: &str, meta: impl Into<String>) {
@@ -1335,9 +1347,7 @@ impl TypeTextApp {
     }
 
     fn ui_edit_groups(&mut self, ui: &mut egui::Ui, edit_rect: egui::Rect) {
-        let list_width = (edit_rect.width() * 0.34)
-            .clamp(220.0, 320.0)
-            .min(edit_rect.width() * 0.45);
+        let list_width = group_editor_list_width(edit_rect.width());
         ui.set_clip_rect(edit_rect);
         ui.set_width_range(edit_rect.width()..=edit_rect.width());
         ui.set_height_range(edit_rect.height()..=edit_rect.height());
@@ -1424,9 +1434,7 @@ impl TypeTextApp {
     }
 
     fn ui_edit_snippets(&mut self, ui: &mut egui::Ui, edit_rect: egui::Rect) {
-        let list_width = (edit_rect.width() * 0.34)
-            .clamp(220.0, 340.0)
-            .min(edit_rect.width() * 0.45);
+        let list_width = snippet_editor_list_width(edit_rect.width());
         ui.set_clip_rect(edit_rect);
         ui.set_width_range(edit_rect.width()..=edit_rect.width());
         ui.set_height_range(edit_rect.height()..=edit_rect.height());
@@ -2230,19 +2238,23 @@ impl TypeTextApp {
     }
 
     fn ui_edit(&mut self, ui: &mut egui::Ui) {
+        let editor_width = ui.available_width();
         ui.horizontal(|ui| {
+            let row_left = ui.cursor().left();
             ui.selectable_value(&mut self.edit_panel, EditPanel::Groups, "Groups");
             ui.selectable_value(&mut self.edit_panel, EditPanel::Snippets, "Snippets");
             ui.selectable_value(&mut self.edit_panel, EditPanel::Tokens, "Tokens");
             if self.edit_panel == EditPanel::Snippets && !self.snippets.groups.is_empty() {
-                let center_space =
-                    ui.available_width() - EDIT_HEADER_ACTIONS_WIDTH - EDIT_HEADER_COMBO_WIDTH;
-                ui.add_space((center_space * 0.5).max(0.0));
+                let target_left = row_left
+                    + snippet_editor_list_width(editor_width)
+                    + DETAIL_HEADER_SEPARATOR_OFFSET;
+                ui.add_space((target_left - ui.cursor().left()).max(0.0));
                 self.ui_snippet_group_selector(ui, EDIT_HEADER_COMBO_WIDTH);
             } else if self.edit_panel == EditPanel::Tokens {
-                let center_space =
-                    ui.available_width() - EDIT_HEADER_ACTIONS_WIDTH - EDIT_HEADER_COMBO_WIDTH;
-                ui.add_space((center_space * 0.5).max(0.0));
+                let target_left = row_left
+                    + token_editor_list_width(editor_width)
+                    + DETAIL_HEADER_SEPARATOR_OFFSET;
+                ui.add_space((target_left - ui.cursor().left()).max(0.0));
                 self.ui_token_kind_selector(ui, EDIT_HEADER_COMBO_WIDTH);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2429,9 +2441,7 @@ impl TypeTextApp {
 
         let content_top = ui.cursor().top();
         let content_height = (tokens_rect.bottom() - content_top).max(0.0);
-        let list_width = (tokens_rect.width() * 0.34)
-            .clamp(220.0, 320.0)
-            .min(tokens_rect.width() * 0.45);
+        let list_width = token_editor_list_width(tokens_rect.width());
         let (content_rect, _) = ui.allocate_exact_size(
             egui::vec2(tokens_rect.width(), content_height),
             egui::Sense::hover(),
