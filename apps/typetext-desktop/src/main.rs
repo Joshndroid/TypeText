@@ -32,8 +32,7 @@ const LATEST_RELEASE_API_URL: &str =
 const TRUSTED_UPDATE_PATH_PREFIX: &str = "/Joshndroid/TypeText/";
 const MAX_TOKEN_NAME_ATTEMPTS: usize = 10_000;
 const HEADER_CONTROL_HEIGHT: f32 = 24.0;
-const SNIPPET_GROUP_COMBO_WIDTH: f32 = 260.0;
-const TOKEN_KIND_COMBO_WIDTH: f32 = 260.0;
+const EDIT_HEADER_COMBO_WIDTH: f32 = 190.0;
 const EDIT_HEADER_ACTIONS_WIDTH: f32 = 156.0;
 const SNIPPET_TRANSFER_COMBO_WIDTH: f32 = 68.0;
 
@@ -2222,14 +2221,14 @@ impl TypeTextApp {
             ui.selectable_value(&mut self.edit_panel, EditPanel::Tokens, "Tokens");
             if self.edit_panel == EditPanel::Snippets && !self.snippets.groups.is_empty() {
                 let center_space =
-                    ui.available_width() - EDIT_HEADER_ACTIONS_WIDTH - SNIPPET_GROUP_COMBO_WIDTH;
+                    ui.available_width() - EDIT_HEADER_ACTIONS_WIDTH - EDIT_HEADER_COMBO_WIDTH;
                 ui.add_space((center_space * 0.5).max(0.0));
-                self.ui_snippet_group_selector(ui, SNIPPET_GROUP_COMBO_WIDTH);
+                self.ui_snippet_group_selector(ui, EDIT_HEADER_COMBO_WIDTH);
             } else if self.edit_panel == EditPanel::Tokens {
                 let center_space =
-                    ui.available_width() - EDIT_HEADER_ACTIONS_WIDTH - TOKEN_KIND_COMBO_WIDTH;
+                    ui.available_width() - EDIT_HEADER_ACTIONS_WIDTH - EDIT_HEADER_COMBO_WIDTH;
                 ui.add_space((center_space * 0.5).max(0.0));
-                self.ui_token_kind_selector(ui, TOKEN_KIND_COMBO_WIDTH);
+                self.ui_token_kind_selector(ui, EDIT_HEADER_COMBO_WIDTH);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.ui_edit_actions(ui);
@@ -2578,6 +2577,11 @@ impl TypeTextApp {
         ui.horizontal(|ui| {
             section_header(ui, "Snippet Details", "");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_enabled_ui(can_edit_snippet, |ui| {
+                    self.ui_token_picker(ui, SNIPPET_TRANSFER_COMBO_WIDTH);
+                })
+                .response
+                .on_hover_text("Insert token into snippet body");
                 snippet_transfer_combo(
                     ui,
                     "move_snippet_to_group",
@@ -2611,16 +2615,10 @@ impl TypeTextApp {
             return;
         }
 
-        ui.horizontal(|ui| {
-            let token_width = 72.0;
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.ui_token_picker(ui, token_width);
-                ui.add_sized(
-                    [ui.available_width(), 24.0],
-                    egui::TextEdit::singleline(&mut self.edit_title),
-                );
-            });
-        });
+        ui.add_sized(
+            [ui.available_width(), 24.0],
+            egui::TextEdit::singleline(&mut self.edit_title),
+        );
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Body").small());
         let body_height = (ui.available_height() - 2.0).max(108.0);
@@ -2632,6 +2630,7 @@ impl TypeTextApp {
     }
 
     fn ui_token_picker(&mut self, ui: &mut egui::Ui, token_width: f32) {
+        ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
         egui::ComboBox::from_id_salt("snippet_token_picker")
             .selected_text("Tokens")
             .width(token_width)
