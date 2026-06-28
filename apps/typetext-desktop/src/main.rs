@@ -32,6 +32,9 @@ const LATEST_RELEASE_API_URL: &str =
 const TRUSTED_UPDATE_PATH_PREFIX: &str = "/Joshndroid/TypeText/";
 const MAX_TOKEN_NAME_ATTEMPTS: usize = 10_000;
 const HEADER_CONTROL_HEIGHT: f32 = 24.0;
+const SNIPPET_GROUP_COMBO_WIDTH: f32 = 260.0;
+const TOKEN_KIND_COMBO_WIDTH: f32 = 260.0;
+const EDIT_HEADER_ACTIONS_WIDTH: f32 = 156.0;
 const SNIPPET_TRANSFER_COMBO_WIDTH: f32 = 68.0;
 
 fn main() -> eframe::Result {
@@ -1428,40 +1431,6 @@ impl TypeTextApp {
                         .max_rect(list_rect)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                     |ui| {
-                        if !self.snippets.groups.is_empty() {
-                            let selected_group_name = self
-                                .snippets
-                                .groups
-                                .get(self.selected_group)
-                                .map(|group| group.name.as_str())
-                                .unwrap_or("Group");
-                            egui::ComboBox::from_id_salt("snippet_editor_group")
-                                .selected_text(selected_group_name)
-                                .width(ui.available_width())
-                                .show_ui(ui, |ui| {
-                                    let group_names: Vec<String> = self
-                                        .snippets
-                                        .groups
-                                        .iter()
-                                        .map(|group| group.name.clone())
-                                        .collect();
-                                    for (index, name) in group_names.iter().enumerate() {
-                                        if ui
-                                            .selectable_label(self.selected_group == index, name)
-                                            .clicked()
-                                        {
-                                            self.selected_group = index;
-                                            self.selected_snippet = 0;
-                                            self.edit_group_active = true;
-                                            self.edit_snippet_active = false;
-                                            self.load_selected_editor_snippet();
-                                            ui.close();
-                                        }
-                                    }
-                                });
-                            ui.add_space(6.0);
-                        }
-
                         let snippet_titles: Vec<(usize, String)> = self
                             .snippets
                             .groups
@@ -2251,6 +2220,17 @@ impl TypeTextApp {
             ui.selectable_value(&mut self.edit_panel, EditPanel::Groups, "Groups");
             ui.selectable_value(&mut self.edit_panel, EditPanel::Snippets, "Snippets");
             ui.selectable_value(&mut self.edit_panel, EditPanel::Tokens, "Tokens");
+            if self.edit_panel == EditPanel::Snippets && !self.snippets.groups.is_empty() {
+                let center_space =
+                    ui.available_width() - EDIT_HEADER_ACTIONS_WIDTH - SNIPPET_GROUP_COMBO_WIDTH;
+                ui.add_space((center_space * 0.5).max(0.0));
+                self.ui_snippet_group_selector(ui, SNIPPET_GROUP_COMBO_WIDTH);
+            } else if self.edit_panel == EditPanel::Tokens {
+                let center_space =
+                    ui.available_width() - EDIT_HEADER_ACTIONS_WIDTH - TOKEN_KIND_COMBO_WIDTH;
+                ui.add_space((center_space * 0.5).max(0.0));
+                self.ui_token_kind_selector(ui, TOKEN_KIND_COMBO_WIDTH);
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.ui_edit_actions(ui);
             });
@@ -2269,6 +2249,89 @@ impl TypeTextApp {
                 EditPanel::Tokens => self.ui_edit_tokens(ui, edit_rect),
             },
         );
+    }
+
+    fn ui_snippet_group_selector(&mut self, ui: &mut egui::Ui, width: f32) {
+        let selected_group_name = self
+            .snippets
+            .groups
+            .get(self.selected_group)
+            .map(|group| group.name.as_str())
+            .unwrap_or("Group");
+        ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
+        egui::ComboBox::from_id_salt("snippet_editor_group")
+            .selected_text(selected_group_name)
+            .width(width)
+            .show_ui(ui, |ui| {
+                let group_names: Vec<String> = self
+                    .snippets
+                    .groups
+                    .iter()
+                    .map(|group| group.name.clone())
+                    .collect();
+                for (index, name) in group_names.iter().enumerate() {
+                    if ui
+                        .selectable_label(self.selected_group == index, name)
+                        .clicked()
+                    {
+                        self.selected_group = index;
+                        self.selected_snippet = 0;
+                        self.edit_group_active = true;
+                        self.edit_snippet_active = false;
+                        self.load_selected_editor_snippet();
+                        ui.close();
+                    }
+                }
+            });
+    }
+
+    fn select_editor_token_kind(&mut self, kind: TokenSelection) {
+        self.selected_token_kind = kind;
+        self.selected_token = 0;
+        match kind {
+            TokenSelection::Static => {
+                self.edit_token_active = false;
+                self.edit_token_name.clear();
+                self.edit_token_value.clear();
+            }
+            TokenSelection::Custom => {
+                self.edit_token_active = !self.tokens.custom_tokens.is_empty();
+                self.load_selected_editor_token();
+            }
+        }
+    }
+
+    fn ui_token_kind_selector(&mut self, ui: &mut egui::Ui, width: f32) {
+        let selected_text = match self.selected_token_kind {
+            TokenSelection::Static => "Static Tokens",
+            TokenSelection::Custom => "Custom Tokens",
+        };
+        ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
+        egui::ComboBox::from_id_salt("token_editor_kind")
+            .selected_text(selected_text)
+            .width(width)
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(
+                        self.selected_token_kind == TokenSelection::Custom,
+                        "Custom Tokens",
+                    )
+                    .clicked()
+                {
+                    self.select_editor_token_kind(TokenSelection::Custom);
+                    ui.close();
+                }
+                if ui
+                    .selectable_label(
+                        self.selected_token_kind == TokenSelection::Static,
+                        "Static Tokens",
+                    )
+                    .clicked()
+                {
+                    self.select_editor_token_kind(TokenSelection::Static);
+                    ui.close();
+                }
+            });
     }
 
     fn ui_edit_actions(&mut self, ui: &mut egui::Ui) {
@@ -2380,71 +2443,62 @@ impl TypeTextApp {
                             .id_salt("edit_tokens_list")
                             .max_height(list_rect.height())
                             .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                let static_tokens: Vec<String> = self
-                                    .tokens
-                                    .static_tokens
-                                    .iter()
-                                    .map(|token| token.name.clone())
-                                    .collect();
-                                for (index, name) in static_tokens.iter().enumerate() {
-                                    let selected = self.selected_token_kind
-                                        == TokenSelection::Static
-                                        && self.selected_token == index;
-                                    if sidebar_group_row(ui, &format!("{{{name}}}"), selected)
-                                        .clicked()
-                                    {
-                                        self.selected_token = index;
-                                        self.selected_token_kind = TokenSelection::Static;
-                                        self.edit_token_active = false;
-                                        self.edit_token_name.clear();
-                                        self.edit_token_value.clear();
+                            .show(ui, |ui| match self.selected_token_kind {
+                                TokenSelection::Static => {
+                                    let static_tokens: Vec<String> = self
+                                        .tokens
+                                        .static_tokens
+                                        .iter()
+                                        .map(|token| token.name.clone())
+                                        .collect();
+                                    for (index, name) in static_tokens.iter().enumerate() {
+                                        let selected = self.selected_token == index;
+                                        if sidebar_group_row(ui, &format!("{{{name}}}"), selected)
+                                            .clicked()
+                                        {
+                                            self.selected_token = index;
+                                            self.edit_token_active = false;
+                                            self.edit_token_name.clear();
+                                            self.edit_token_value.clear();
+                                        }
+                                        ui.add_space(1.0);
                                     }
-                                    ui.add_space(1.0);
                                 }
-                                if !static_tokens.is_empty()
-                                    && !self.tokens.custom_tokens.is_empty()
-                                {
-                                    ui.add_space(4.0);
-                                }
-                                let token_names: Vec<String> = self
-                                    .tokens
-                                    .custom_tokens
-                                    .iter()
-                                    .map(|token| token.name.clone())
-                                    .collect();
-                                for (index, name) in token_names.iter().enumerate() {
-                                    let selected = self.selected_token_kind
-                                        == TokenSelection::Custom
-                                        && self.edit_token_active
-                                        && self.selected_token == index;
-                                    let (response, move_up, move_down) = sidebar_reorder_row(
-                                        ui,
-                                        &format!("{{{name}}}"),
-                                        selected,
-                                        index > 0,
-                                        index + 1 < token_names.len(),
-                                        "token",
-                                    );
-                                    if move_up {
-                                        self.selected_token = index;
-                                        self.selected_token_kind = TokenSelection::Custom;
-                                        self.edit_token_active = true;
-                                        self.load_selected_editor_token();
-                                        self.move_selected_editor_token(-1);
-                                    } else if move_down {
-                                        self.selected_token = index;
-                                        self.selected_token_kind = TokenSelection::Custom;
-                                        self.edit_token_active = true;
-                                        self.load_selected_editor_token();
-                                        self.move_selected_editor_token(1);
-                                    } else if response.clicked() {
-                                        self.selected_token = index;
-                                        self.selected_token_kind = TokenSelection::Custom;
-                                        self.edit_token_active = true;
-                                        self.load_selected_editor_token();
+                                TokenSelection::Custom => {
+                                    let token_names: Vec<String> = self
+                                        .tokens
+                                        .custom_tokens
+                                        .iter()
+                                        .map(|token| token.name.clone())
+                                        .collect();
+                                    for (index, name) in token_names.iter().enumerate() {
+                                        let selected =
+                                            self.edit_token_active && self.selected_token == index;
+                                        let (response, move_up, move_down) = sidebar_reorder_row(
+                                            ui,
+                                            &format!("{{{name}}}"),
+                                            selected,
+                                            index > 0,
+                                            index + 1 < token_names.len(),
+                                            "token",
+                                        );
+                                        if move_up {
+                                            self.selected_token = index;
+                                            self.edit_token_active = true;
+                                            self.load_selected_editor_token();
+                                            self.move_selected_editor_token(-1);
+                                        } else if move_down {
+                                            self.selected_token = index;
+                                            self.edit_token_active = true;
+                                            self.load_selected_editor_token();
+                                            self.move_selected_editor_token(1);
+                                        } else if response.clicked() {
+                                            self.selected_token = index;
+                                            self.edit_token_active = true;
+                                            self.load_selected_editor_token();
+                                        }
+                                        ui.add_space(1.0);
                                     }
-                                    ui.add_space(1.0);
                                 }
                             });
                     },
