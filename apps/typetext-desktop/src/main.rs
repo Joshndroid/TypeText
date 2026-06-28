@@ -1383,11 +1383,12 @@ impl TypeTextApp {
                                 for (index, title) in &snippet_titles {
                                     let selected =
                                         self.edit_snippet_active && self.selected_snippet == *index;
-                                    if ui.selectable_label(selected, title).clicked() {
+                                    if sidebar_group_row(ui, title, selected).clicked() {
                                         self.selected_snippet = *index;
                                         self.edit_snippet_active = true;
                                         self.load_selected_editor_snippet();
                                     }
+                                    ui.add_space(1.0);
                                 }
                             });
                     },
@@ -2269,14 +2270,14 @@ impl TypeTextApp {
                                 for (index, name) in token_names.iter().enumerate() {
                                     let selected =
                                         self.edit_token_active && self.selected_token == index;
-                                    if ui
-                                        .selectable_label(selected, format!("{{{name}}}"))
+                                    if sidebar_group_row(ui, &format!("{{{name}}}"), selected)
                                         .clicked()
                                     {
                                         self.selected_token = index;
                                         self.edit_token_active = true;
                                         self.load_selected_editor_token();
                                     }
+                                    ui.add_space(1.0);
                                 }
                             });
                     },
