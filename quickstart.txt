@@ -219,8 +219,8 @@ Windows or other applications. It still uses the native Windows features needed
 for hotkeys, verified target focus, and text insertion.
 
 
-10. Troubleshooting
-------------------
+10. Troubleshooting And FAQ
+---------------------------
 
 TypeText opens but does not type:
 - macOS: confirm Accessibility permission is enabled.
@@ -228,10 +228,26 @@ TypeText opens but does not type:
 - Make sure you click the target text field after queuing snippets.
 - Some secure password fields may block synthetic typing.
 
+TypeText types into the wrong app:
+- Queue the snippet first, then click the exact target text field.
+- Increase Delay before typing if the previous app is being restored too slowly.
+- Avoid clicking another window after choosing the snippet.
+
 Hotkey does not work:
 - Try a different hotkey in Settings.
 - Click Save Settings after changing it.
 - Make sure TypeText is still running in the tray/menu bar.
+- Another app may already be using the same hotkey.
+
+Settings changed but did not stick:
+- Most Settings changes are staged.
+- If you see "Unsaved changes - click Save Settings", click Save Settings.
+- For hotkey changes, always click Save Settings after capture or manual edit.
+
+TypeText disappeared:
+- Min hides TypeText to the background.
+- Open it again with the hotkey or tray/menu bar icon.
+- Exit fully quits TypeText.
 
 Typing is too slow on Windows:
 - Reduce Windows character delay slightly.
@@ -242,6 +258,47 @@ Typing misses characters on Windows:
 - Increase Windows character delay.
 - Increase Windows separator delay.
 - Use Reset to Default if needed.
+
+Letters type but spaces are missing on Windows:
+- Increase Windows separator delay first.
+- Separator delay affects spaces, punctuation, tabs, and newlines.
+- Try 50-75ms, test in the target app, then adjust up or down.
+- If letters are typing correctly, you usually do not need to increase
+  Windows character delay.
+
+Punctuation, tabs, or newlines are missing on Windows:
+- Increase Windows separator delay.
+- Separator delay covers spaces, punctuation, tabs, and newlines.
+
+Text starts typing before the target app is ready:
+- Increase Delay before typing.
+- This gives TypeText more time to hide and restore focus to the target app.
+
+Custom tokens do not update existing snippets:
+- This is expected. Snippets store token names such as {company.name}.
+- The custom token value is expanded only when TypeText types the snippet.
+- Update the custom token once in Edit > Tokens > Custom Tokens.
+
+The Tokens list is showing the wrong kind of token:
+- In Edit > Tokens, use the header dropdown to switch between Custom Tokens and
+  Static Tokens.
+
+The Snippets list is showing the wrong group:
+- In Edit > Snippets, use the header dropdown to choose the active group.
+
+Open on Startup is missing:
+- It is not included in the Windows offline portable build.
+- Use the installer or standard portable build if you need startup registration.
+
+Import or export fails in offline portable:
+- Keep TypeText.exe and its data folder on local writable storage.
+- Offline portable refuses UNC paths, mapped network drives, and remote import
+  or export locations.
+
+Where are my files stored?
+- Installed builds use the normal per-user app data folder.
+- Portable Windows builds use the data folder beside TypeText.exe.
+- Settings > Storage shows the active folder.
 
 
 11. Recommended First Setup
