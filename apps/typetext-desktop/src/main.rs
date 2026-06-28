@@ -31,6 +31,8 @@ const LATEST_RELEASE_API_URL: &str =
 #[cfg(not(feature = "offline-portable"))]
 const TRUSTED_UPDATE_PATH_PREFIX: &str = "/Joshndroid/TypeText/";
 const MAX_TOKEN_NAME_ATTEMPTS: usize = 10_000;
+const HEADER_CONTROL_HEIGHT: f32 = 24.0;
+const SNIPPET_TRANSFER_COMBO_WIDTH: f32 = 68.0;
 
 fn main() -> eframe::Result {
     if let Err(error) = platform::install_app_mutex() {
@@ -480,6 +482,32 @@ fn section_header(ui: &mut egui::Ui, title: &str, meta: impl Into<String>) {
 
 fn section_gap(ui: &mut egui::Ui) {
     ui.add_space(6.0);
+}
+
+fn snippet_transfer_combo(
+    ui: &mut egui::Ui,
+    id_salt: &'static str,
+    label: &str,
+    transfer: SnippetTransfer,
+    can_transfer: bool,
+    transfer_targets: &[(usize, String)],
+    requested_transfer: &mut Option<(usize, SnippetTransfer)>,
+) -> egui::Response {
+    ui.add_enabled_ui(can_transfer, |ui| {
+        ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
+        egui::ComboBox::from_id_salt(id_salt)
+            .selected_text(label)
+            .width(SNIPPET_TRANSFER_COMBO_WIDTH)
+            .show_ui(ui, |ui| {
+                for (index, name) in transfer_targets {
+                    if ui.selectable_label(false, name).clicked() {
+                        *requested_transfer = Some((*index, transfer));
+                        ui.close();
+                    }
+                }
+            });
+    })
+    .response
 }
 
 fn framed_section(
@@ -2496,33 +2524,25 @@ impl TypeTextApp {
         ui.horizontal(|ui| {
             section_header(ui, "Snippet Details", "");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_enabled_ui(can_transfer, |ui| {
-                    egui::ComboBox::from_id_salt("move_snippet_to_group")
-                        .selected_text("Move")
-                        .show_ui(ui, |ui| {
-                            for (index, name) in &transfer_targets {
-                                if ui.selectable_label(false, name).clicked() {
-                                    requested_transfer = Some((*index, SnippetTransfer::Move));
-                                    ui.close();
-                                }
-                            }
-                        });
-                })
-                .response
+                snippet_transfer_combo(
+                    ui,
+                    "move_snippet_to_group",
+                    "Move",
+                    SnippetTransfer::Move,
+                    can_transfer,
+                    &transfer_targets,
+                    &mut requested_transfer,
+                )
                 .on_hover_text("Move selected snippet to another group");
-                ui.add_enabled_ui(can_transfer, |ui| {
-                    egui::ComboBox::from_id_salt("copy_snippet_to_group")
-                        .selected_text("Copy")
-                        .show_ui(ui, |ui| {
-                            for (index, name) in &transfer_targets {
-                                if ui.selectable_label(false, name).clicked() {
-                                    requested_transfer = Some((*index, SnippetTransfer::Copy));
-                                    ui.close();
-                                }
-                            }
-                        });
-                })
-                .response
+                snippet_transfer_combo(
+                    ui,
+                    "copy_snippet_to_group",
+                    "Copy",
+                    SnippetTransfer::Copy,
+                    can_transfer,
+                    &transfer_targets,
+                    &mut requested_transfer,
+                )
                 .on_hover_text("Copy selected snippet to another group");
             });
         });
@@ -2658,33 +2678,25 @@ impl TypeTextApp {
                 let can_transfer = can_edit_snippet && !transfer_targets.is_empty();
                 let mut requested_transfer = None;
 
-                ui.add_enabled_ui(can_transfer, |ui| {
-                    egui::ComboBox::from_id_salt("move_snippet_to_group")
-                        .selected_text("Move")
-                        .show_ui(ui, |ui| {
-                            for (index, name) in &transfer_targets {
-                                if ui.selectable_label(false, name).clicked() {
-                                    requested_transfer = Some((*index, SnippetTransfer::Move));
-                                    ui.close();
-                                }
-                            }
-                        });
-                })
-                .response
+                snippet_transfer_combo(
+                    ui,
+                    "move_snippet_to_group",
+                    "Move",
+                    SnippetTransfer::Move,
+                    can_transfer,
+                    &transfer_targets,
+                    &mut requested_transfer,
+                )
                 .on_hover_text("Move selected snippet to another group");
-                ui.add_enabled_ui(can_transfer, |ui| {
-                    egui::ComboBox::from_id_salt("copy_snippet_to_group")
-                        .selected_text("Copy")
-                        .show_ui(ui, |ui| {
-                            for (index, name) in &transfer_targets {
-                                if ui.selectable_label(false, name).clicked() {
-                                    requested_transfer = Some((*index, SnippetTransfer::Copy));
-                                    ui.close();
-                                }
-                            }
-                        });
-                })
-                .response
+                snippet_transfer_combo(
+                    ui,
+                    "copy_snippet_to_group",
+                    "Copy",
+                    SnippetTransfer::Copy,
+                    can_transfer,
+                    &transfer_targets,
+                    &mut requested_transfer,
+                )
                 .on_hover_text("Copy selected snippet to another group");
                 if ui
                     .add_enabled(can_edit_snippet, egui::Button::new("Delete"))
