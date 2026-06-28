@@ -486,6 +486,23 @@ fn section_gap(ui: &mut egui::Ui) {
     ui.add_space(6.0);
 }
 
+fn detail_header(ui: &mut egui::Ui, title: &str, add_actions: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(HEADER_CONTROL_HEIGHT);
+        ui.scope_builder(
+            egui::UiBuilder::new().layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| {
+                ui.set_min_height(HEADER_CONTROL_HEIGHT);
+                section_header(ui, title, "");
+            },
+        );
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            add_actions,
+        );
+    });
+}
+
 fn snippet_transfer_combo(
     ui: &mut egui::Ui,
     id_salt: &'static str,
@@ -1395,9 +1412,7 @@ impl TypeTextApp {
                     |ui| {
                         let can_edit = self.edit_group_active
                             && self.selected_group < self.snippets.groups.len();
-                        ui.horizontal(|ui| {
-                            section_header(ui, "Group Details", "");
-                        });
+                        detail_header(ui, "Group Details", |_| {});
                         section_gap(ui);
                         if can_edit {
                             ui.text_edit_singleline(&mut self.edit_group_name);
@@ -2522,9 +2537,7 @@ impl TypeTextApp {
                         let can_edit = self.selected_token_kind == TokenSelection::Custom
                             && self.edit_token_active
                             && self.selected_token < self.tokens.custom_tokens.len();
-                        ui.horizontal(|ui| {
-                            section_header(ui, "Token Details", "");
-                        });
+                        detail_header(ui, "Token Details", |_| {});
                         section_gap(ui);
 
                         if self.selected_token_kind == TokenSelection::Static {
@@ -2574,35 +2587,32 @@ impl TypeTextApp {
         let can_transfer = can_edit_snippet && !transfer_targets.is_empty();
         let mut requested_transfer = None;
 
-        ui.horizontal(|ui| {
-            section_header(ui, "Snippet Details", "");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_enabled_ui(can_edit_snippet, |ui| {
-                    self.ui_token_picker(ui, SNIPPET_TRANSFER_COMBO_WIDTH);
-                })
-                .response
-                .on_hover_text("Insert token into snippet body");
-                snippet_transfer_combo(
-                    ui,
-                    "move_snippet_to_group",
-                    "Move",
-                    SnippetTransfer::Move,
-                    can_transfer,
-                    &transfer_targets,
-                    &mut requested_transfer,
-                )
-                .on_hover_text("Move selected snippet to another group");
-                snippet_transfer_combo(
-                    ui,
-                    "copy_snippet_to_group",
-                    "Copy",
-                    SnippetTransfer::Copy,
-                    can_transfer,
-                    &transfer_targets,
-                    &mut requested_transfer,
-                )
-                .on_hover_text("Copy selected snippet to another group");
-            });
+        detail_header(ui, "Snippet Details", |ui| {
+            ui.add_enabled_ui(can_edit_snippet, |ui| {
+                self.ui_token_picker(ui, SNIPPET_TRANSFER_COMBO_WIDTH);
+            })
+            .response
+            .on_hover_text("Insert token into snippet body");
+            snippet_transfer_combo(
+                ui,
+                "move_snippet_to_group",
+                "Move",
+                SnippetTransfer::Move,
+                can_transfer,
+                &transfer_targets,
+                &mut requested_transfer,
+            )
+            .on_hover_text("Move selected snippet to another group");
+            snippet_transfer_combo(
+                ui,
+                "copy_snippet_to_group",
+                "Copy",
+                SnippetTransfer::Copy,
+                can_transfer,
+                &transfer_targets,
+                &mut requested_transfer,
+            )
+            .on_hover_text("Copy selected snippet to another group");
         });
 
         if let Some((target_group, transfer)) = requested_transfer {
