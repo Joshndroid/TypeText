@@ -47,6 +47,11 @@ click Save Settings.
 
 TypeText can also be opened from the tray/menu bar icon.
 
+The app window uses its own top-right controls:
+- Min hides TypeText to the background.
+- Max toggles the window between normal and maximized size.
+- Exit quits TypeText.
+
 
 3. Adding Snippets
 ------------------
@@ -59,14 +64,23 @@ Groups:
 - Group details only appear after you click or add a group.
 
 Snippets:
-- Select a group, then click Add in the Snippets area to create a snippet.
+- Open Snippets, choose the active group from the header dropdown, then click
+  Add to create a snippet.
 - Click an existing snippet to edit it.
 - The snippet editor only appears after you click or add a snippet.
 - Click Save after changing a snippet.
 - Use Copy to duplicate the selected snippet into another group.
 - Use Move to transfer the selected snippet completely into another group.
+- Use Tokens in the Snippet Details header to insert a token at the body cursor
+  or replace selected body text.
 - Choose Custom, A-Z, or Z-A from Order for each group.
 - In Custom order, select a snippet and use Earlier or Later to arrange it.
+
+Tokens:
+- Open Tokens and use the header dropdown to switch the sidebar between Custom
+  Tokens and Static Tokens.
+- Static tokens show built-in date and time token responses.
+- Custom tokens can be added, edited, saved, deleted, and reordered.
 
 
 4. Typing Snippets
@@ -104,15 +118,16 @@ Tokens work in imported and manually created snippets. Queued snippets share
 one timestamp, and the saved snippet text is not changed. Unknown tokens are
 typed unchanged.
 
-In the snippet editor, use the Tokens menu next to the title field to insert a
-token at the body cursor or replace selected body text.
+In the snippet editor, use the Tokens menu in the Snippet Details header to
+insert a token at the body cursor or replace selected body text.
 
 Static date and time token descriptions are stored in tokens.json under
 staticTokens. Custom reusable values are stored in the same file under
 customTokens.
 
-To add a custom token, open Edit > Tokens, click Add, then set a name and
-value. For example, set program.version to 2.4.1, then use
+To add a custom token, open Edit > Tokens, choose Custom Tokens from the header
+dropdown, click Add, then set a name and value. For example, set
+program.version to 2.4.1, then use
 {program.version} in any snippet. When the version changes, update it once in
 Tokens and every snippet will use the new value the next time it is typed.
 

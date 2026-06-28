@@ -15,7 +15,8 @@ system APIs rather than a browser engine or web-based application runtime.
 - Custom snippet tokens stored in `tokens.json`
 - Configurable queued-snippet behavior: add duplicates or remove queued entries
 - Configurable paragraph separators between queued snippets
-- Built-in group and snippet editor
+- Built-in group, snippet, and token editor
+- Borderless app window with in-app Min, Max, and Exit controls
 - DropText INI/CSV import and TypeText JSON export
 - Simple JSON snippet/settings storage
 - Configurable delay before typing and close-after-insert behavior
@@ -148,7 +149,7 @@ API keys, or other secrets in TypeText.
 TypeText expands supported tokens immediately before typing. Dates and times use
 the computer's local time zone, and a queued snippet chain shares one timestamp.
 Stored snippet text is not modified. In the snippet editor, use the **Tokens**
-menu next to the title field to insert a token at the body cursor.
+menu in the Snippet Details header to insert a token at the body cursor.
 
 | Token | Output format | Example |
 |---|---|---|
@@ -165,8 +166,20 @@ the braces: `{{date.today}}` types `{date.today}`.
 
 Custom tokens are stored in `tokens.json` beside snippets and settings. Use
 Edit > Tokens to add central values such as `{program.version}` or
-`{company.name}`. Updating one custom token changes every snippet that uses it
-the next time TypeText types the snippet.
+`{company.name}`. The Tokens editor header lets you switch the sidebar between
+custom tokens and static date/time tokens. Updating one custom token changes
+every snippet that uses it the next time TypeText types the snippet.
+
+## Editor Controls
+
+The Edit tab has separate Groups, Snippets, and Tokens views. In the Snippets
+view, the header dropdown selects the active snippet group, and Snippet Details
+provides Copy, Move, and Tokens menus. In the Tokens view, the header dropdown
+switches the sidebar between Custom Tokens and Static Tokens.
+
+The app uses an in-app window header instead of the operating system title bar.
+Use **Min** to hide TypeText to the background, **Max** to toggle maximize, and
+**Exit** to quit the app.
 
 ## Build And Run
 
