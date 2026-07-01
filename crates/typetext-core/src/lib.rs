@@ -113,6 +113,8 @@ pub struct AppSettings {
     pub empty_lines_between_snippets: u32,
     #[serde(default, alias = "startWithWindows")]
     pub open_on_startup: bool,
+    #[serde(default)]
+    pub open_minimized: bool,
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default = "default_accent_color")]
@@ -198,6 +200,7 @@ impl Default for AppSettings {
             start_snippets_on_new_line: default_start_snippets_on_new_line(),
             empty_lines_between_snippets: default_empty_lines_between_snippets(),
             open_on_startup: false,
+            open_minimized: false,
             theme: default_theme(),
             accent_color: default_accent_color(),
             queued_snippet_click_action: default_queued_snippet_click_action(),

@@ -242,6 +242,7 @@ struct TypeTextApp {
     allow_quit: bool,
     show_background_notice: bool,
     background_notice_seen: bool,
+    open_minimized_pending: bool,
 }
 
 fn parse_hex_color(value: &str) -> Option<egui::Color32> {
@@ -840,6 +841,7 @@ impl TypeTextApp {
                 }
                 Err(_) => (None, None),
             };
+        let open_minimized_pending = settings.open_minimized;
 
         let mut app = Self {
             paths,
@@ -890,6 +892,7 @@ impl TypeTextApp {
             allow_quit: false,
             show_background_notice: false,
             background_notice_seen: false,
+            open_minimized_pending,
         };
         if let Some(error) = tray_error {
             app.show_error(error);
@@ -1702,6 +1705,11 @@ fn insert_at_char_range(text: &mut String, start: usize, end: usize, insertion: 
 
 impl eframe::App for TypeTextApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.open_minimized_pending {
+            self.open_minimized_pending = false;
+            self.background_notice_seen = true;
+            self.hide_to_background(ctx);
+        }
         self.handle_window_lifecycle(ctx);
         self.handle_tray_commands(ctx);
         self.handle_hotkey_capture(ctx);
@@ -3329,17 +3337,23 @@ impl TypeTextApp {
                     });
                 });
 
-                if !OFFLINE_PORTABLE {
-                    section_gap(ui);
-                    framed_section(ui, "Startup", "launch behavior", |ui| {
+                section_gap(ui);
+                framed_section(ui, "Startup", "launch behavior", |ui| {
+                    if !OFFLINE_PORTABLE {
                         if ui
                             .checkbox(&mut self.settings.open_on_startup, "Open on Startup")
                             .changed()
                         {
                             self.mark_settings_dirty();
                         }
-                    });
-                }
+                    }
+                    if ui
+                        .checkbox(&mut self.settings.open_minimized, "Open Minimized")
+                        .changed()
+                    {
+                        self.mark_settings_dirty();
+                    }
+                });
 
                 section_gap(ui);
                 framed_section(ui, "Typing", "insertion behavior", |ui| {

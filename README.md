@@ -22,6 +22,7 @@ system APIs rather than a browser engine or web-based application runtime.
 - Configurable delay before typing and close-after-insert behavior
 - Windows-only character and separator typing delays
 - Open-on-startup setting for macOS and Windows
+- Open-minimized launch setting
 - Light, dark, and system theme support with configurable accent color
 - Staged settings changes with a visible Save Settings reminder
 - Daily GitHub release update checks with platform-specific download links
