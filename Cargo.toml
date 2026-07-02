@@ -8,7 +8,7 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "AGPL-3.0-only"
-version = "2.0.0"
+version = "2.1.0"
 
 [patch.crates-io]
 # Keep egui-winit's Windows/macOS clipboard backend without pulling Linux Smithay/Wayland into Cargo.lock.
