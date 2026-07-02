@@ -1243,20 +1243,16 @@ impl TypeTextApp {
             return;
         }
 
-        let now = current_unix_time();
         if !force
             && self
                 .settings
                 .last_update_check_unix
                 .is_some_and(|checked_at| {
-                    now.saturating_sub(checked_at) < UPDATE_CHECK_INTERVAL_SECONDS
+                    current_unix_time().saturating_sub(checked_at) < UPDATE_CHECK_INTERVAL_SECONDS
                 })
         {
             return;
         }
-
-        self.settings.last_update_check_unix = Some(now);
-        let _ = save_settings(&self.paths, &self.settings);
 
         let (tx, rx) = mpsc::channel();
         self.update_rx = rx;
@@ -1284,10 +1280,12 @@ impl TypeTextApp {
             self.update_check_in_progress = false;
             match message {
                 UpdateCheckMessage::Available(update) => {
+                    self.record_successful_update_check();
                     self.status = format!("Update available: {}", update.version);
                     self.update_info = Some(update);
                 }
                 UpdateCheckMessage::Current { notify } => {
+                    self.record_successful_update_check();
                     if notify {
                         self.status = "TypeText is up to date".to_string();
                     }
@@ -1301,6 +1299,12 @@ impl TypeTextApp {
                 }
             }
         }
+    }
+
+    #[cfg(not(feature = "offline-portable"))]
+    fn record_successful_update_check(&mut self) {
+        self.settings.last_update_check_unix = Some(current_unix_time());
+        let _ = save_settings(&self.paths, &self.settings);
     }
 
     #[cfg(not(feature = "offline-portable"))]

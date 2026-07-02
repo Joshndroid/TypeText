@@ -860,7 +860,7 @@ mod macos_platform {
     use std::ffi::CStr;
     use std::ffi::c_char;
     use std::ffi::c_void;
-    use std::fs::{File, OpenOptions};
+    use std::fs::{self, File, OpenOptions};
     use std::io::Write;
     use std::os::fd::AsRawFd;
     use std::path::PathBuf;
@@ -1029,7 +1029,7 @@ mod macos_platform {
             fn flock(fd: i32, operation: i32) -> i32;
         }
 
-        let lock_path = std::env::temp_dir().join("typetext.lock");
+        let lock_path = macos_app_lock_path()?;
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -1044,6 +1044,19 @@ mod macos_platform {
             .set(lock)
             .map_err(|_| anyhow!("TypeText app lock was already initialized"))?;
         Ok(())
+    }
+
+    fn macos_app_lock_path() -> Result<PathBuf> {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| anyhow!("Could not locate the user home directory"))?;
+        let lock_dir = home
+            .join("Library")
+            .join("Application Support")
+            .join("TypeText");
+        fs::create_dir_all(&lock_dir)
+            .with_context(|| format!("Could not create app lock folder {}", lock_dir.display()))?;
+        Ok(lock_dir.join("typetext.lock"))
     }
 
     pub fn reregister_hotkey(hotkey: String, _tx: Sender<()>) -> Result<()> {

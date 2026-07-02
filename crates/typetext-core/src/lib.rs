@@ -892,7 +892,14 @@ where
             )
         });
     }
+    sync_parent_dir(parent);
     Ok(())
+}
+
+fn sync_parent_dir(parent: &Path) {
+    if let Ok(directory) = fs::File::open(parent) {
+        let _ = directory.sync_all();
+    }
 }
 
 fn platform_data_dir() -> Option<PathBuf> {

@@ -80,7 +80,7 @@ fi
 cd "$ROOT_DIR"
 echo "Version: $VERSION"
 echo "Target: $MACOS_TARGET"
-"$CARGO_BIN" build --release --target "$MACOS_TARGET" -p typetext-desktop
+"$CARGO_BIN" build --release --target "$MACOS_TARGET" -p typetext-desktop --locked
 
 APP_DIR="$ROOT_DIR/dist/TypeText.app"
 ZIP_PATH="$ROOT_DIR/dist/TypeText-macOS.zip"
