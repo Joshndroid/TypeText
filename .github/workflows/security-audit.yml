@@ -37,4 +37,4 @@ jobs:
         run: cargo install cargo-audit --version 0.22.2 --locked
 
       - name: Audit Cargo.lock
-        run: cargo audit --target-os windows --target-os macos
+        run: cargo audit
