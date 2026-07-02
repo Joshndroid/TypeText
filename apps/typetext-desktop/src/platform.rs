@@ -115,6 +115,7 @@ mod windows_platform {
         HOT_KEY_MODIFIERS, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
         KEYEVENTF_UNICODE, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, RegisterHotKey, SendInput,
         UnregisterHotKey, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RETURN, VK_RWIN, VK_SHIFT,
+        VK_SPACE, VK_TAB,
     };
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -305,6 +306,18 @@ mod windows_platform {
 
             if character == '\n' {
                 send_virtual_key(VK_RETURN)?;
+                thread::sleep(separator_interval);
+                continue;
+            }
+
+            if character == ' ' {
+                send_virtual_key(VK_SPACE)?;
+                thread::sleep(separator_interval);
+                continue;
+            }
+
+            if character == '\t' {
+                send_virtual_key(VK_TAB)?;
                 thread::sleep(separator_interval);
                 continue;
             }
