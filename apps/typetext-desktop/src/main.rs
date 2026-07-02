@@ -3339,13 +3339,12 @@ impl TypeTextApp {
 
                 section_gap(ui);
                 framed_section(ui, "Startup", "launch behavior", |ui| {
-                    if !OFFLINE_PORTABLE {
-                        if ui
+                    if !OFFLINE_PORTABLE
+                        && ui
                             .checkbox(&mut self.settings.open_on_startup, "Open on Startup")
                             .changed()
-                        {
-                            self.mark_settings_dirty();
-                        }
+                    {
+                        self.mark_settings_dirty();
                     }
                     if ui
                         .checkbox(&mut self.settings.open_minimized, "Open Minimized")
