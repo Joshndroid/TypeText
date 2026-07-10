@@ -36,7 +36,8 @@ fn main() {
         "TypeText desktop application"
     };
     let manifest_path = out_dir.join("typetext.manifest");
-    let manifest = MANIFEST_TEMPLATE.replace("@VERSION@", &format!("{major}.{minor}.{patch}.{build}"));
+    let manifest =
+        MANIFEST_TEMPLATE.replace("@VERSION@", &format!("{major}.{minor}.{patch}.{build}"));
     fs::write(&manifest_path, manifest).expect("Could not write generated application manifest");
     let manifest_path = manifest_path.display().to_string().replace('\\', "/");
 
