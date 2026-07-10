@@ -2374,7 +2374,7 @@ dependencies = [
 
 [[package]]
 name = "typetext-core"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2384,7 +2384,7 @@ dependencies = [
 
 [[package]]
 name = "typetext-desktop"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "eframe",
