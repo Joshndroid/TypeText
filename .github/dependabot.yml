@@ -8,6 +8,12 @@ updates:
       rust-dependencies:
         patterns:
           - "*"
+    ignore:
+      # wgpu must match the major version used internally by eframe; a lone
+      # wgpu bump silently disables all graphics backends (app fails to open).
+      # Bump wgpu manually whenever eframe is upgraded.
+      - dependency-name: "wgpu"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

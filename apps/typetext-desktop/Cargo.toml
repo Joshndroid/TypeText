@@ -17,7 +17,12 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 typetext-core = { path = "../../crates/typetext-core" }
 url = "2.5.8"
-wgpu = { version = "30.0.0", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "wgsl"] }
+# Must stay on the same major version as eframe's internal wgpu: this
+# dependency only exists to enable backend features (dx12/metal/wgsl) on the
+# wgpu instance eframe uses. A version mismatch silently produces a second,
+# unused wgpu and leaves eframe's copy with NO graphics backends (app won't
+# open). Only bump together with eframe.
+wgpu = { version = "29.0.4", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "wgsl"] }
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 tray-icon = { version = "0.24.1", default-features = false }
