@@ -18,3 +18,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # dtolnay/rust-toolchain has no releases/tags (refs are moving branches
+      # like "stable"), which dependabot cannot version — it aborts the whole
+      # update run with unknown_error. The SHA pin is maintained manually.
+      - dependency-name: "dtolnay/rust-toolchain"
