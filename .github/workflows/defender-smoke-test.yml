@@ -54,7 +54,66 @@ jobs:
             throw "The fresh runner already reports a Defender detection."
           }
 
-          Update-MpSignature -ErrorAction Stop
+          # Update-MpSignature is flaky on hosted runners (intermittent RPC
+          # failures). Make sure the services it depends on are running, retry
+          # with backoff, and fail with full diagnostics if it never succeeds.
+          foreach ($serviceName in @("WinDefend", "BITS", "wuauserv")) {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($null -eq $service) {
+              Write-Warning "Service $serviceName not found on this runner."
+              continue
+            }
+            if ($service.Status -ne "Running") {
+              Write-Host "Starting service $serviceName (currently $($service.Status))..."
+              try {
+                Start-Service -Name $serviceName -ErrorAction Stop
+                $service.WaitForStatus("Running", [TimeSpan]::FromSeconds(60))
+                Write-Host "Service $serviceName is running."
+              } catch {
+                Write-Warning "Could not start ${serviceName}: $_"
+              }
+            } else {
+              Write-Host "Service $serviceName is running."
+            }
+          }
+
+          $maxAttempts = 5
+          $delaySeconds = 10
+          $updated = $false
+          foreach ($attempt in 1..$maxAttempts) {
+            try {
+              Update-MpSignature -ErrorAction Stop
+              $updated = $true
+              break
+            } catch {
+              Write-Warning "Update-MpSignature attempt $attempt of $maxAttempts failed: $_"
+              if ($attempt -lt $maxAttempts) {
+                Write-Host "Retrying in $delaySeconds seconds..."
+                Start-Sleep -Seconds $delaySeconds
+                $delaySeconds *= 2
+              }
+            }
+          }
+
+          if (-not $updated) {
+            Write-Host "::group::Defender diagnostics"
+            Write-Host "--- Get-MpComputerStatus ---"
+            Get-MpComputerStatus | Format-List | Out-String | Write-Host
+            Write-Host "--- Service states ---"
+            Get-Service -Name WinDefend, WdNisSvc, BITS, wuauserv -ErrorAction SilentlyContinue |
+              Format-Table Name, Status, StartType -AutoSize | Out-String | Write-Host
+            Write-Host "--- Recent Defender operational events ---"
+            Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents 30 -ErrorAction SilentlyContinue |
+              Format-Table TimeCreated, Id, LevelDisplayName, Message -Wrap | Out-String | Write-Host
+            Write-Host "--- Recent System log errors ---"
+            Get-WinEvent -FilterHashtable @{ LogName = "System"; Level = 1, 2, 3; StartTime = (Get-Date).AddHours(-1) } -MaxEvents 30 -ErrorAction SilentlyContinue |
+              Format-Table TimeCreated, ProviderName, Id, LevelDisplayName, Message -Wrap | Out-String | Write-Host
+            Write-Host "::endgroup::"
+            throw "Update-MpSignature failed after $maxAttempts attempts; see diagnostics above."
+          }
+
+          $status = Get-MpComputerStatus -ErrorAction Stop
+          Write-Host "Signatures updated to $($status.AntivirusSignatureVersion) ($($status.AntivirusSignatureLastUpdated))."
 
       - name: Test offline feature configuration
         shell: pwsh
