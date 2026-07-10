@@ -65,6 +65,54 @@ jobs:
       - name: Run Clippy
         run: cargo clippy -p typetext-core --all-targets --all-features -- -D warnings
 
+  defender-preflight:
+    name: Defender preflight check
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify Microsoft Defender is usable on hosted runners
+        shell: pwsh
+        run: |
+          # Cheap canary that runs BEFORE the expensive build jobs: if the
+          # current runner image ships with Defender disabled, fail in ~1
+          # minute instead of after 15 minutes of builds.
+          foreach ($serviceName in @("WinDefend", "BITS", "wuauserv")) {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($null -eq $service) {
+              Write-Warning "Service $serviceName not found on this runner."
+              continue
+            }
+            if ($service.Status -ne "Running") {
+              Write-Host "Starting service $serviceName (currently $($service.Status))..."
+              try {
+                Start-Service -Name $serviceName -ErrorAction Stop
+                $service.WaitForStatus("Running", [TimeSpan]::FromSeconds(60))
+                Write-Host "Service $serviceName is running."
+              } catch {
+                Write-Warning "Could not start ${serviceName}: $_"
+              }
+            } else {
+              Write-Host "Service $serviceName is running."
+            }
+          }
+
+          $status = $null
+          foreach ($attempt in 1..6) {
+            $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+            if ($status -and $status.AMServiceEnabled -and $status.AntivirusEnabled -and $status.AMRunningMode -eq "Normal") {
+              break
+            }
+            Write-Host "Defender not ready yet (attempt $attempt of 6); waiting 10 seconds..."
+            Start-Sleep -Seconds 10
+          }
+
+          if (-not $status -or -not $status.AMServiceEnabled -or -not $status.AntivirusEnabled -or $status.AMRunningMode -ne "Normal") {
+            if ($status) { $status | Format-List | Out-String | Write-Host }
+            throw "Microsoft Defender is not usable on this runner image; re-run the workflow to get a different runner."
+          }
+
+          $status | Select-Object AMRunningMode, AMServiceEnabled, AntivirusEnabled, AMEngineVersion, AntivirusSignatureVersion | Format-List
+
   macos:
     name: macOS app
     runs-on: macos-latest
@@ -177,7 +225,7 @@ jobs:
   windows-portable:
     name: Windows portable
     runs-on: windows-latest
-    needs: verify
+    needs: [verify, defender-preflight]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -207,7 +255,7 @@ jobs:
   windows-offline-portable:
     name: Windows offline portable
     runs-on: windows-latest
-    needs: verify
+    needs: [verify, defender-preflight]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -236,7 +284,7 @@ jobs:
   windows-installer:
     name: Windows installer
     runs-on: windows-latest
-    needs: verify
+    needs: [verify, defender-preflight]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -281,7 +329,41 @@ jobs:
       - name: Verify Microsoft Defender and update signatures
         shell: pwsh
         run: |
-          $status = Get-MpComputerStatus -ErrorAction Stop
+          # Defender is not always fully enabled on hosted runner images, so
+          # try to start the services it needs BEFORE checking its state.
+          foreach ($serviceName in @("WinDefend", "BITS", "wuauserv")) {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($null -eq $service) {
+              Write-Warning "Service $serviceName not found on this runner."
+              continue
+            }
+            if ($service.Status -ne "Running") {
+              Write-Host "Starting service $serviceName (currently $($service.Status))..."
+              try {
+                Start-Service -Name $serviceName -ErrorAction Stop
+                $service.WaitForStatus("Running", [TimeSpan]::FromSeconds(60))
+                Write-Host "Service $serviceName is running."
+              } catch {
+                Write-Warning "Could not start ${serviceName}: $_"
+              }
+            } else {
+              Write-Host "Service $serviceName is running."
+            }
+          }
+
+          $status = $null
+          foreach ($attempt in 1..6) {
+            $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+            if ($status -and $status.AMServiceEnabled -and $status.AntivirusEnabled -and $status.AMRunningMode -eq "Normal") {
+              break
+            }
+            Write-Host "Defender not ready yet (attempt $attempt of 6); waiting 10 seconds..."
+            Start-Sleep -Seconds 10
+          }
+
+          if (-not $status) {
+            throw "Get-MpComputerStatus returned nothing; Defender is unavailable on this runner."
+          }
 
           $status | Select-Object `
             AMRunningMode, `
@@ -304,13 +386,38 @@ jobs:
             throw "Microsoft Defender is not active (mode: $($status.AMRunningMode))."
           }
 
-          $existingDetections = @(Get-MpThreatDetection -ErrorAction Stop)
+          $existingDetections = @(Get-MpThreatDetection -ErrorAction SilentlyContinue)
           if ($existingDetections.Count -gt 0) {
             $existingDetections | Format-List
             throw "The fresh runner already reports a Defender detection."
           }
 
-          Update-MpSignature -ErrorAction Stop
+          # Update-MpSignature is flaky on hosted runners (intermittent RPC
+          # failures); retry with backoff before giving up.
+          $maxAttempts = 5
+          $delaySeconds = 10
+          $updated = $false
+          foreach ($attempt in 1..$maxAttempts) {
+            try {
+              Update-MpSignature -ErrorAction Stop
+              $updated = $true
+              break
+            } catch {
+              Write-Warning "Update-MpSignature attempt $attempt of $maxAttempts failed: $_"
+              if ($attempt -lt $maxAttempts) {
+                Write-Host "Retrying in $delaySeconds seconds..."
+                Start-Sleep -Seconds $delaySeconds
+                $delaySeconds *= 2
+              }
+            }
+          }
+
+          if (-not $updated) {
+            throw "Update-MpSignature failed after $maxAttempts attempts."
+          }
+
+          $status = Get-MpComputerStatus -ErrorAction Stop
+          Write-Host "Signatures updated to $($status.AntivirusSignatureVersion) ($($status.AntivirusSignatureLastUpdated))."
 
       - name: Prepare Windows artifacts for scanning
         shell: pwsh

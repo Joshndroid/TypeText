@@ -25,7 +25,43 @@ jobs:
       - name: Verify Microsoft Defender and update signatures
         shell: pwsh
         run: |
-          $status = Get-MpComputerStatus -ErrorAction Stop
+          # Defender is not always fully enabled on hosted runner images, so
+          # try to start the services it needs BEFORE checking its state.
+          foreach ($serviceName in @("WinDefend", "BITS", "wuauserv")) {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($null -eq $service) {
+              Write-Warning "Service $serviceName not found on this runner."
+              continue
+            }
+            if ($service.Status -ne "Running") {
+              Write-Host "Starting service $serviceName (currently $($service.Status))..."
+              try {
+                Start-Service -Name $serviceName -ErrorAction Stop
+                $service.WaitForStatus("Running", [TimeSpan]::FromSeconds(60))
+                Write-Host "Service $serviceName is running."
+              } catch {
+                Write-Warning "Could not start ${serviceName}: $_"
+              }
+            } else {
+              Write-Host "Service $serviceName is running."
+            }
+          }
+
+          # Give the antimalware engine a moment to settle after a cold start,
+          # then verify Defender is actually usable on this runner.
+          $status = $null
+          foreach ($attempt in 1..6) {
+            $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+            if ($status -and $status.AMServiceEnabled -and $status.AntivirusEnabled -and $status.AMRunningMode -eq "Normal") {
+              break
+            }
+            Write-Host "Defender not ready yet (attempt $attempt of 6); waiting 10 seconds..."
+            Start-Sleep -Seconds 10
+          }
+
+          if (-not $status) {
+            throw "Get-MpComputerStatus returned nothing; Defender is unavailable on this runner."
+          }
 
           $status | Select-Object `
             AMRunningMode, `
@@ -48,35 +84,15 @@ jobs:
             throw "Microsoft Defender is not active (mode: $($status.AMRunningMode))."
           }
 
-          $existingDetections = @(Get-MpThreatDetection -ErrorAction Stop)
+          $existingDetections = @(Get-MpThreatDetection -ErrorAction SilentlyContinue)
           if ($existingDetections.Count -gt 0) {
             $existingDetections | Format-List
             throw "The fresh runner already reports a Defender detection."
           }
 
           # Update-MpSignature is flaky on hosted runners (intermittent RPC
-          # failures). Make sure the services it depends on are running, retry
-          # with backoff, and fail with full diagnostics if it never succeeds.
-          foreach ($serviceName in @("WinDefend", "BITS", "wuauserv")) {
-            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-            if ($null -eq $service) {
-              Write-Warning "Service $serviceName not found on this runner."
-              continue
-            }
-            if ($service.Status -ne "Running") {
-              Write-Host "Starting service $serviceName (currently $($service.Status))..."
-              try {
-                Start-Service -Name $serviceName -ErrorAction Stop
-                $service.WaitForStatus("Running", [TimeSpan]::FromSeconds(60))
-                Write-Host "Service $serviceName is running."
-              } catch {
-                Write-Warning "Could not start ${serviceName}: $_"
-              }
-            } else {
-              Write-Host "Service $serviceName is running."
-            }
-          }
-
+          # failures); retry with backoff and fail with diagnostics if it
+          # never succeeds.
           $maxAttempts = 5
           $delaySeconds = 10
           $updated = $false
