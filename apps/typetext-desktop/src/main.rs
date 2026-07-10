@@ -465,6 +465,12 @@ fn nav_button(ui: &mut egui::Ui, selected: bool, label: &str) -> bool {
         .clicked()
 }
 
+fn start_window_drag_on_response(response: &egui::Response, ctx: &egui::Context) {
+    if response.drag_started() {
+        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+}
+
 fn group_editor_list_width(width: f32) -> f32 {
     (width * 0.34).clamp(220.0, 320.0).min(width * 0.45)
 }
@@ -2065,22 +2071,40 @@ impl TypeTextApp {
 
     fn ui_header(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let header = ui.horizontal_centered(|ui| {
-            ui.label(
-                egui::RichText::new("TypeText")
-                    .strong()
-                    .size(15.0)
-                    .color(ui.visuals().text_color()),
+            let title_response = ui.add(
+                egui::Label::new(
+                    egui::RichText::new("TypeText")
+                        .strong()
+                        .size(15.0)
+                        .color(ui.visuals().text_color()),
+                )
+                .selectable(false)
+                .sense(egui::Sense::drag()),
             );
-            ui.label(
-                egui::RichText::new(APP_VERSION)
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
+            start_window_drag_on_response(&title_response, ctx);
+
+            let version_response = ui.add(
+                egui::Label::new(
+                    egui::RichText::new(APP_VERSION)
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                )
+                .selectable(false)
+                .sense(egui::Sense::drag()),
             );
-            ui.label(
-                egui::RichText::new(&self.status)
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
+            start_window_drag_on_response(&version_response, ctx);
+
+            let status_response = ui.add(
+                egui::Label::new(
+                    egui::RichText::new(&self.status)
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                )
+                .selectable(false)
+                .sense(egui::Sense::drag()),
             );
+            start_window_drag_on_response(&status_response, ctx);
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.ui_window_controls(ui, ctx);
                 if nav_button(ui, self.view == View::Settings, "Settings") {
@@ -2105,16 +2129,12 @@ impl TypeTextApp {
                         ui.id().with("header_drag_gap"),
                         egui::Sense::drag(),
                     );
-                    if drag_response.drag_started() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                    }
+                    start_window_drag_on_response(&drag_response, ctx);
                 }
             });
         });
 
-        if header.response.drag_started() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-        }
+        start_window_drag_on_response(&header.response, ctx);
     }
 
     fn ui_window_controls(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
