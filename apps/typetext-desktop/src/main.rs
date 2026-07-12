@@ -2264,66 +2264,79 @@ impl TypeTextApp {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    section_header(
-                        ui,
-                        "Queue",
-                        format!("{} snippets", self.snippet_chain.len()),
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(42.0, HEADER_CONTROL_HEIGHT),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| section_header(ui, "Queue", ""),
                     );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_enabled(!self.snippet_chain.is_empty(), egui::Button::new("Clear"))
-                            .clicked()
-                        {
-                            self.snippet_chain.clear();
-                            self.insert_when_focus_lost = false;
-                            self.status = "Chain cleared".to_string();
-                        }
-                        if ui
-                            .add_enabled(
-                                !self.snippet_chain.is_empty(),
-                                egui::Button::new("Undo Last"),
-                            )
-                            .clicked()
-                        {
-                            self.snippet_chain.pop();
-                            self.insert_when_focus_lost = !self.snippet_chain.is_empty();
-                            self.status = if self.snippet_chain.is_empty() {
-                                "Chain cleared".to_string()
-                            } else {
-                                format!(
-                                    "Queued {} snippets - click the target text field",
-                                    self.snippet_chain.len()
+
+                    let actions_width = 124.0;
+                    let queue_width = (ui.available_width() - actions_width).max(0.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(queue_width, HEADER_CONTROL_HEIGHT),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            egui::ScrollArea::horizontal()
+                                .id_salt("choose_queue")
+                                .scroll_bar_visibility(
+                                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
                                 )
-                            };
-                        }
-                    });
+                                .auto_shrink([false, true])
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        if self.snippet_chain.is_empty() {
+                                            ui.label(
+                                                egui::RichText::new("Click a snippet to add it")
+                                                    .small()
+                                                    .color(ui.visuals().weak_text_color()),
+                                            );
+                                        } else {
+                                            for (index, result) in
+                                                self.snippet_chain.iter().enumerate()
+                                            {
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "{}. {}",
+                                                        index + 1,
+                                                        result.title
+                                                    ))
+                                                    .small()
+                                                    .color(ui.visuals().weak_text_color()),
+                                                );
+                                            }
+                                        }
+                                    });
+                                });
+                        },
+                    );
+
+                    if ui
+                        .add_enabled(
+                            !self.snippet_chain.is_empty(),
+                            egui::Button::new("Undo Last"),
+                        )
+                        .clicked()
+                    {
+                        self.snippet_chain.pop();
+                        self.insert_when_focus_lost = !self.snippet_chain.is_empty();
+                        self.status = if self.snippet_chain.is_empty() {
+                            "Chain cleared".to_string()
+                        } else {
+                            format!(
+                                "Queued {} snippets - click the target text field",
+                                self.snippet_chain.len()
+                            )
+                        };
+                    }
+                    if ui
+                        .add_enabled(!self.snippet_chain.is_empty(), egui::Button::new("Clear"))
+                        .clicked()
+                    {
+                        self.snippet_chain.clear();
+                        self.insert_when_focus_lost = false;
+                        self.status = "Chain cleared".to_string();
+                    }
                 });
-                ui.add_space(2.0);
-                egui::ScrollArea::horizontal()
-                    .id_salt("choose_queue")
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if self.snippet_chain.is_empty() {
-                                ui.label(
-                                    egui::RichText::new("Click a snippet to add it")
-                                        .small()
-                                        .color(ui.visuals().weak_text_color()),
-                                );
-                            } else {
-                                for (index, result) in self.snippet_chain.iter().enumerate() {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{}. {}",
-                                            index + 1,
-                                            result.title
-                                        ))
-                                        .small()
-                                        .color(ui.visuals().weak_text_color()),
-                                    );
-                                }
-                            }
-                        });
-                    });
             });
 
         section_gap(ui);
