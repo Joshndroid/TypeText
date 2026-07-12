@@ -3450,17 +3450,7 @@ impl TypeTextApp {
 
     fn ui_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Settings")
-                    .strong()
-                    .size(12.5)
-                    .color(ui.visuals().text_color()),
-            );
-            ui.label(
-                egui::RichText::new("preferences and app data")
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
-            );
+            section_header(ui, "Settings", "preferences and app data");
             if self.settings_dirty {
                 ui.label(
                     egui::RichText::new("Unsaved changes - click Save Settings")
@@ -3470,7 +3460,7 @@ impl TypeTextApp {
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Save Settings").clicked() {
+                if ui.small_button("Save Settings").clicked() {
                     self.save_settings(ctx);
                 }
             });
