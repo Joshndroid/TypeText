@@ -45,7 +45,7 @@ fn main() -> eframe::Result {
     let icon = app_icon_data();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_TITLE)
-        .with_inner_size([780.0, 520.0])
+        .with_inner_size([780.0, 570.0])
         .with_min_inner_size([560.0, 380.0])
         .with_decorations(false);
     if let Some(icon) = icon {
@@ -2214,53 +2214,76 @@ impl TypeTextApp {
             });
         });
 
-        if !self.snippet_chain.is_empty() {
-            section_gap(ui);
-            egui::Frame::new()
-                .fill(ui.visuals().faint_bg_color)
-                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-                .corner_radius(6.0)
-                .inner_margin(egui::Margin::symmetric(10, 8))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal_wrapped(|ui| {
-                        section_header(
-                            ui,
-                            "Queue",
-                            format!("{} snippets", self.snippet_chain.len()),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Clear").clicked() {
-                                self.snippet_chain.clear();
-                                self.insert_when_focus_lost = false;
-                                self.status = "Chain cleared".to_string();
-                            }
-                            if ui.button("Undo Last").clicked() {
-                                self.snippet_chain.pop();
-                                self.insert_when_focus_lost = !self.snippet_chain.is_empty();
-                                self.status = if self.snippet_chain.is_empty() {
-                                    "Chain cleared".to_string()
-                                } else {
-                                    format!(
-                                        "Queued {} snippets - click the target text field",
-                                        self.snippet_chain.len()
-                                    )
-                                };
-                            }
-                        });
-                    });
-                    ui.add_space(2.0);
-                    ui.horizontal_wrapped(|ui| {
-                        for (index, result) in self.snippet_chain.iter().enumerate() {
-                            ui.label(
-                                egui::RichText::new(format!("{}. {}", index + 1, result.title))
-                                    .small()
-                                    .color(ui.visuals().weak_text_color()),
-                            );
+        section_gap(ui);
+        egui::Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    section_header(
+                        ui,
+                        "Queue",
+                        format!("{} snippets", self.snippet_chain.len()),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(!self.snippet_chain.is_empty(), egui::Button::new("Clear"))
+                            .clicked()
+                        {
+                            self.snippet_chain.clear();
+                            self.insert_when_focus_lost = false;
+                            self.status = "Chain cleared".to_string();
+                        }
+                        if ui
+                            .add_enabled(
+                                !self.snippet_chain.is_empty(),
+                                egui::Button::new("Undo Last"),
+                            )
+                            .clicked()
+                        {
+                            self.snippet_chain.pop();
+                            self.insert_when_focus_lost = !self.snippet_chain.is_empty();
+                            self.status = if self.snippet_chain.is_empty() {
+                                "Chain cleared".to_string()
+                            } else {
+                                format!(
+                                    "Queued {} snippets - click the target text field",
+                                    self.snippet_chain.len()
+                                )
+                            };
                         }
                     });
                 });
-        }
+                ui.add_space(2.0);
+                egui::ScrollArea::horizontal()
+                    .id_salt("choose_queue")
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if self.snippet_chain.is_empty() {
+                                ui.label(
+                                    egui::RichText::new("Click a snippet to add it")
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                            } else {
+                                for (index, result) in self.snippet_chain.iter().enumerate() {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{}. {}",
+                                            index + 1,
+                                            result.title
+                                        ))
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                    );
+                                }
+                            }
+                        });
+                    });
+            });
 
         section_gap(ui);
         if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
