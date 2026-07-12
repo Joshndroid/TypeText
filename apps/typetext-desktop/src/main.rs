@@ -1498,24 +1498,52 @@ impl TypeTextApp {
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                     |ui| {
                         let query = self.edit_search.trim().to_lowercase();
-                        let snippet_titles: Vec<(usize, String)> = self
-                            .snippets
-                            .groups
-                            .get(self.selected_group)
-                            .map(|group| {
-                                group
-                                    .snippets
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(_, snippet)| {
-                                        query.is_empty()
-                                            || snippet.title.to_lowercase().contains(&query)
-                                            || snippet.body.to_lowercase().contains(&query)
-                                    })
-                                    .map(|(index, snippet)| (index, snippet.title.clone()))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
+                        let searching_all_groups = !query.is_empty();
+                        let snippet_titles: Vec<(usize, usize, String)> = if searching_all_groups {
+                            self.snippets
+                                .groups
+                                .iter()
+                                .enumerate()
+                                .flat_map(|(group_index, group)| {
+                                    let group_name = group.name.clone();
+                                    let group_matches = group_name.to_lowercase().contains(&query);
+                                    let query = query.clone();
+                                    group.snippets.iter().enumerate().filter_map(
+                                        move |(snippet_index, snippet)| {
+                                            (group_matches
+                                                || snippet.title.to_lowercase().contains(&query)
+                                                || snippet.body.to_lowercase().contains(&query))
+                                            .then(|| {
+                                                (
+                                                    group_index,
+                                                    snippet_index,
+                                                    format!("{}  ·  {}", snippet.title, group_name),
+                                                )
+                                            })
+                                        },
+                                    )
+                                })
+                                .collect()
+                        } else {
+                            self.snippets
+                                .groups
+                                .get(self.selected_group)
+                                .map(|group| {
+                                    group
+                                        .snippets
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(snippet_index, snippet)| {
+                                            (
+                                                self.selected_group,
+                                                snippet_index,
+                                                snippet.title.clone(),
+                                            )
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        };
                         egui::ScrollArea::vertical()
                             .id_salt("edit_snippets_page")
                             .max_height(ui.available_height())
@@ -1527,29 +1555,32 @@ impl TypeTextApp {
                                     .get(self.selected_group)
                                     .map(|group| group.snippets.len())
                                     .unwrap_or_default();
-                                for (index, title) in &snippet_titles {
-                                    let selected =
-                                        self.edit_snippet_active && self.selected_snippet == *index;
+                                for (group_index, snippet_index, title) in &snippet_titles {
+                                    let selected = self.edit_snippet_active
+                                        && self.selected_group == *group_index
+                                        && self.selected_snippet == *snippet_index;
                                     let (response, move_up, move_down) = sidebar_reorder_row(
                                         ui,
                                         title,
                                         selected,
-                                        *index > 0,
-                                        *index + 1 < snippet_count,
+                                        !searching_all_groups && *snippet_index > 0,
+                                        !searching_all_groups && *snippet_index + 1 < snippet_count,
                                         "snippet",
                                     );
                                     if move_up {
-                                        self.selected_snippet = *index;
+                                        self.selected_snippet = *snippet_index;
                                         self.edit_snippet_active = true;
                                         self.load_selected_editor_snippet();
                                         self.move_selected_editor_snippet(-1);
                                     } else if move_down {
-                                        self.selected_snippet = *index;
+                                        self.selected_snippet = *snippet_index;
                                         self.edit_snippet_active = true;
                                         self.load_selected_editor_snippet();
                                         self.move_selected_editor_snippet(1);
                                     } else if response.clicked() {
-                                        self.selected_snippet = *index;
+                                        self.selected_group = *group_index;
+                                        self.selected_snippet = *snippet_index;
+                                        self.edit_group_active = true;
                                         self.edit_snippet_active = true;
                                         self.load_selected_editor_snippet();
                                     }
