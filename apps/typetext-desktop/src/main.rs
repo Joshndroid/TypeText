@@ -13,11 +13,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use typetext_core::MAX_WINDOWS_INPUT_DELAY_MS;
 use typetext_core::{
-    AppSettings, CustomToken, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_TYPING_DELAY_MS, PortablePaths,
-    QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet, SnippetFile,
-    SnippetGroup, SnippetSortOrder, TokenFile, expand_snippet_tokens_with_custom, export_snippets,
-    import_droptext_with_warnings, load_or_create_settings, load_or_create_snippets,
-    load_or_create_tokens, save_settings, save_snippets, save_tokens, search_snippets,
+    AppSettings, CustomToken, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_SNIPPET_TITLE_CHARS,
+    MAX_TYPING_DELAY_MS, PortablePaths, QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS,
+    SearchResult, Snippet, SnippetFile, SnippetGroup, SnippetSortOrder, TokenFile,
+    expand_snippet_tokens_with_custom, export_snippets, import_droptext_with_warnings,
+    load_or_create_settings, load_or_create_snippets, load_or_create_tokens, save_settings,
+    save_snippets, save_tokens, search_snippets,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -111,6 +112,27 @@ struct ChainInsertion {
 enum SnippetTransfer {
     Copy,
     Move,
+}
+
+fn duplicate_snippet_title(title: &str, group: &SnippetGroup) -> String {
+    for copy_number in 1usize.. {
+        let suffix = if copy_number == 1 {
+            " Copy".to_string()
+        } else {
+            format!(" Copy {copy_number}")
+        };
+        let base_length = MAX_SNIPPET_TITLE_CHARS.saturating_sub(suffix.chars().count());
+        let base: String = title.chars().take(base_length).collect();
+        let candidate = format!("{base}{suffix}");
+        if !group
+            .snippets
+            .iter()
+            .any(|snippet| snippet.title == candidate)
+        {
+            return candidate;
+        }
+    }
+    unreachable!("a unique duplicate title is always available")
 }
 
 fn transfer_snippet(
@@ -2729,6 +2751,7 @@ impl TypeTextApp {
             .collect();
         let can_transfer = can_edit_snippet && !transfer_targets.is_empty();
         let mut requested_transfer = None;
+        let mut requested_duplicate = false;
 
         detail_header(ui, "Snippet Details", |ui| {
             ui.add_enabled_ui(can_edit_snippet, |ui| {
@@ -2756,10 +2779,20 @@ impl TypeTextApp {
                 &mut requested_transfer,
             )
             .on_hover_text("Copy selected snippet to another group");
+            if ui
+                .add_enabled(can_edit_snippet, egui::Button::new("Duplicate"))
+                .on_hover_text("Duplicate selected snippet in this group")
+                .clicked()
+            {
+                requested_duplicate = true;
+            }
         });
 
         if let Some((target_group, transfer)) = requested_transfer {
             self.transfer_selected_editor_snippet(target_group, transfer);
+        }
+        if requested_duplicate {
+            self.duplicate_selected_editor_snippet();
         }
 
         section_gap(ui);
@@ -3282,6 +3315,42 @@ impl TypeTextApp {
             self.load_selected_editor_snippet();
             self.save_snippets();
         }
+    }
+
+    fn duplicate_selected_editor_snippet(&mut self) {
+        let body = self.edit_body.clone();
+        let title = self.edit_title.trim().to_string();
+        let title = if title.is_empty() {
+            title_from_body(&body)
+        } else {
+            Some(title)
+        };
+        let Some(title) = title else {
+            self.show_error("Snippet title or body is required");
+            return;
+        };
+
+        let selected_snippet = self.selected_snippet;
+        let Some(group) = self.snippets.groups.get_mut(self.selected_group) else {
+            return;
+        };
+        let Some(source) = group.snippets.get_mut(selected_snippet) else {
+            return;
+        };
+        source.title = title.clone();
+        source.body = body.clone();
+
+        let duplicate_title = duplicate_snippet_title(&title, group);
+        group.snippets.push(Snippet {
+            title: duplicate_title,
+            body,
+        });
+        self.selected_snippet = group.snippets.len() - 1;
+        self.edit_group_active = true;
+        self.edit_snippet_active = true;
+        self.load_selected_editor_snippet();
+        self.save_snippets();
+        self.status = "Duplicated snippet in current group".to_string();
     }
 
     fn move_selected_editor_token(&mut self, offset: isize) {
@@ -4154,6 +4223,21 @@ mod tests {
         assert_eq!(snippets.groups[1].snippets.len(), 1);
         assert_eq!(snippets.groups[1].snippets[0].title, "Greeting");
         assert_eq!(snippets.groups[1].snippets[0].body, "Hello");
+    }
+
+    #[test]
+    fn duplicate_titles_are_unique_within_the_group() {
+        let mut group = transfer_test_snippets().groups.remove(0);
+
+        assert_eq!(duplicate_snippet_title("Greeting", &group), "Greeting Copy");
+        group.snippets.push(Snippet {
+            title: "Greeting Copy".to_string(),
+            body: "Hello".to_string(),
+        });
+        assert_eq!(
+            duplicate_snippet_title("Greeting", &group),
+            "Greeting Copy 2"
+        );
     }
 
     #[test]
