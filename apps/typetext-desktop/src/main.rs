@@ -2321,6 +2321,14 @@ impl TypeTextApp {
     }
 
     fn ui_edit(&mut self, ui: &mut egui::Ui) {
+        let edit_heading = match self.edit_panel {
+            EditPanel::Groups => "Edit Group",
+            EditPanel::Snippets => "Edit Snippet",
+            EditPanel::Tokens => "Edit Token",
+        };
+        section_header(ui, edit_heading, "");
+        section_gap(ui);
+
         let editor_width = ui.available_width();
         ui.horizontal(|ui| {
             let row_left = ui.cursor().left();
