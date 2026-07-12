@@ -200,6 +200,7 @@ struct TypeTextApp {
     tokens: TokenFile,
     results: Vec<SearchResult>,
     search: String,
+    edit_search: String,
     view: View,
     edit_panel: EditPanel,
     chooser_group: Option<usize>,
@@ -856,6 +857,7 @@ impl TypeTextApp {
             tokens,
             results,
             search: String::new(),
+            edit_search: String::new(),
             view: View::Choose,
             edit_panel: EditPanel::Snippets,
             chooser_group: None,
@@ -1384,33 +1386,39 @@ impl TypeTextApp {
                             .max_height(ui.available_height())
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                let group_names: Vec<String> = self
+                                let query = self.edit_search.trim().to_lowercase();
+                                let group_names: Vec<(usize, String)> = self
                                     .snippets
                                     .groups
                                     .iter()
-                                    .map(|group| group.name.clone())
+                                    .enumerate()
+                                    .filter(|(_, group)| {
+                                        query.is_empty()
+                                            || group.name.to_lowercase().contains(&query)
+                                    })
+                                    .map(|(index, group)| (index, group.name.clone()))
                                     .collect();
-                                for (index, name) in group_names.iter().enumerate() {
+                                for (index, name) in &group_names {
                                     let selected =
-                                        self.edit_group_active && self.selected_group == index;
+                                        self.edit_group_active && self.selected_group == *index;
                                     let (response, move_up, move_down) = sidebar_reorder_row(
                                         ui,
                                         name,
                                         selected,
-                                        index > 0,
-                                        index + 1 < group_names.len(),
+                                        *index > 0,
+                                        *index + 1 < self.snippets.groups.len(),
                                         "group",
                                     );
                                     if move_up {
-                                        self.selected_group = index;
+                                        self.selected_group = *index;
                                         self.edit_group_active = true;
                                         self.move_selected_editor_group(-1);
                                     } else if move_down {
-                                        self.selected_group = index;
+                                        self.selected_group = *index;
                                         self.edit_group_active = true;
                                         self.move_selected_editor_group(1);
                                     } else if response.clicked() {
-                                        self.selected_group = index;
+                                        self.selected_group = *index;
                                         self.selected_snippet = 0;
                                         self.edit_group_active = true;
                                         self.edit_snippet_active = false;
@@ -1467,6 +1475,7 @@ impl TypeTextApp {
                         .max_rect(list_rect)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                     |ui| {
+                        let query = self.edit_search.trim().to_lowercase();
                         let snippet_titles: Vec<(usize, String)> = self
                             .snippets
                             .groups
@@ -1476,6 +1485,11 @@ impl TypeTextApp {
                                     .snippets
                                     .iter()
                                     .enumerate()
+                                    .filter(|(_, snippet)| {
+                                        query.is_empty()
+                                            || snippet.title.to_lowercase().contains(&query)
+                                            || snippet.body.to_lowercase().contains(&query)
+                                    })
                                     .map(|(index, snippet)| (index, snippet.title.clone()))
                                     .collect()
                             })
@@ -1485,7 +1499,12 @@ impl TypeTextApp {
                             .max_height(ui.available_height())
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                let snippet_count = snippet_titles.len();
+                                let snippet_count = self
+                                    .snippets
+                                    .groups
+                                    .get(self.selected_group)
+                                    .map(|group| group.snippets.len())
+                                    .unwrap_or_default();
                                 for (index, title) in &snippet_titles {
                                     let selected =
                                         self.edit_snippet_active && self.selected_snippet == *index;
@@ -2329,6 +2348,15 @@ impl TypeTextApp {
         section_header(ui, edit_heading, "");
         section_gap(ui);
 
+        framed_section(ui, "Search", "filter items", |ui| {
+            ui.add_sized(
+                [ui.available_width(), 24.0],
+                egui::TextEdit::singleline(&mut self.edit_search)
+                    .hint_text("Search groups, snippets, or tokens"),
+            );
+        });
+        section_gap(ui);
+
         let editor_width = ui.available_width();
         ui.horizontal(|ui| {
             let row_left = ui.cursor().left();
@@ -2560,18 +2588,25 @@ impl TypeTextApp {
                             .auto_shrink([false, false])
                             .show(ui, |ui| match self.selected_token_kind {
                                 TokenSelection::Static => {
-                                    let static_tokens: Vec<String> = self
+                                    let query = self.edit_search.trim().to_lowercase();
+                                    let static_tokens: Vec<(usize, String)> = self
                                         .tokens
                                         .static_tokens
                                         .iter()
-                                        .map(|token| token.name.clone())
+                                        .enumerate()
+                                        .filter(|(_, token)| {
+                                            query.is_empty()
+                                                || token.name.to_lowercase().contains(&query)
+                                                || token.response.to_lowercase().contains(&query)
+                                        })
+                                        .map(|(index, token)| (index, token.name.clone()))
                                         .collect();
-                                    for (index, name) in static_tokens.iter().enumerate() {
-                                        let selected = self.selected_token == index;
+                                    for (index, name) in &static_tokens {
+                                        let selected = self.selected_token == *index;
                                         if sidebar_group_row(ui, &format!("{{{name}}}"), selected)
                                             .clicked()
                                         {
-                                            self.selected_token = index;
+                                            self.selected_token = *index;
                                             self.edit_token_active = false;
                                             self.edit_token_name.clear();
                                             self.edit_token_value.clear();
@@ -2580,35 +2615,42 @@ impl TypeTextApp {
                                     }
                                 }
                                 TokenSelection::Custom => {
-                                    let token_names: Vec<String> = self
+                                    let query = self.edit_search.trim().to_lowercase();
+                                    let token_names: Vec<(usize, String)> = self
                                         .tokens
                                         .custom_tokens
                                         .iter()
-                                        .map(|token| token.name.clone())
+                                        .enumerate()
+                                        .filter(|(_, token)| {
+                                            query.is_empty()
+                                                || token.name.to_lowercase().contains(&query)
+                                                || token.value.to_lowercase().contains(&query)
+                                        })
+                                        .map(|(index, token)| (index, token.name.clone()))
                                         .collect();
-                                    for (index, name) in token_names.iter().enumerate() {
+                                    for (index, name) in &token_names {
                                         let selected =
-                                            self.edit_token_active && self.selected_token == index;
+                                            self.edit_token_active && self.selected_token == *index;
                                         let (response, move_up, move_down) = sidebar_reorder_row(
                                             ui,
                                             &format!("{{{name}}}"),
                                             selected,
-                                            index > 0,
-                                            index + 1 < token_names.len(),
+                                            *index > 0,
+                                            *index + 1 < self.tokens.custom_tokens.len(),
                                             "token",
                                         );
                                         if move_up {
-                                            self.selected_token = index;
+                                            self.selected_token = *index;
                                             self.edit_token_active = true;
                                             self.load_selected_editor_token();
                                             self.move_selected_editor_token(-1);
                                         } else if move_down {
-                                            self.selected_token = index;
+                                            self.selected_token = *index;
                                             self.edit_token_active = true;
                                             self.load_selected_editor_token();
                                             self.move_selected_editor_token(1);
                                         } else if response.clicked() {
-                                            self.selected_token = index;
+                                            self.selected_token = *index;
                                             self.edit_token_active = true;
                                             self.load_selected_editor_token();
                                         }
