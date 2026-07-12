@@ -1507,21 +1507,29 @@ impl TypeTextApp {
                                 .flat_map(|(group_index, group)| {
                                     let group_name = group.name.clone();
                                     let group_matches = group_name.to_lowercase().contains(&query);
-                                    let query = query.clone();
-                                    group.snippets.iter().enumerate().filter_map(
-                                        move |(snippet_index, snippet)| {
-                                            (group_matches
-                                                || snippet.title.to_lowercase().contains(&query)
-                                                || snippet.body.to_lowercase().contains(&query))
-                                            .then(|| {
-                                                (
-                                                    group_index,
-                                                    snippet_index,
-                                                    format!("{}  ·  {}", snippet.title, group_name),
-                                                )
-                                            })
-                                        },
-                                    )
+                                    let filter_query = query.clone();
+                                    group
+                                        .snippets
+                                        .iter()
+                                        .enumerate()
+                                        .filter(move |(_, snippet)| {
+                                            group_matches
+                                                || snippet
+                                                    .title
+                                                    .to_lowercase()
+                                                    .contains(&filter_query)
+                                                || snippet
+                                                    .body
+                                                    .to_lowercase()
+                                                    .contains(&filter_query)
+                                        })
+                                        .map(move |(snippet_index, snippet)| {
+                                            (
+                                                group_index,
+                                                snippet_index,
+                                                format!("{}  ·  {}", snippet.title, group_name),
+                                            )
+                                        })
                                 })
                                 .collect()
                         } else {
