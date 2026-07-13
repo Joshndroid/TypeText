@@ -1,6 +1,6 @@
 # macOS Notes
 
-TypeText uses the Rust desktop window with a Carbon global hotkey, then AppleScript/System Events for typing selected snippets into the previously focused app.
+TypeText uses the Rust desktop window with Carbon global hotkeys, then AppleScript/System Events for typing selected or favourite snippets into the previously focused app. Favourite hotkeys are runtime registrations and do not add startup persistence.
 
 ## Permissions
 

@@ -13,12 +13,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use typetext_core::MAX_WINDOWS_INPUT_DELAY_MS;
 use typetext_core::{
-    AppSettings, CustomToken, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_SNIPPET_TITLE_CHARS,
-    MAX_TYPING_DELAY_MS, PortablePaths, QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS,
-    SearchResult, Snippet, SnippetFile, SnippetGroup, SnippetSortOrder, TokenFile,
-    expand_snippet_tokens_with_custom, export_snippets, import_droptext_with_warnings,
+    AppSettings, CustomToken, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_FAVOURITES,
+    MAX_SNIPPET_TITLE_CHARS, MAX_TYPING_DELAY_MS, PortablePaths, QueuedSnippetClickAction,
+    SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet, SnippetFile, SnippetGroup, SnippetSortOrder,
+    TokenFile, expand_snippet_tokens_with_custom, export_snippets, import_droptext_with_warnings,
     load_or_create_settings, load_or_create_snippets, load_or_create_tokens, save_settings,
-    save_snippets, save_tokens, search_snippets,
+    save_snippets, save_tokens, search_snippets, validate_settings,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -108,6 +108,28 @@ struct ChainInsertion {
     body: String,
 }
 
+fn configured_hotkey_bindings(settings: &AppSettings) -> Vec<platform::HotkeyBinding> {
+    let mut bindings = Vec::new();
+    if !settings.hotkey.trim().is_empty() {
+        bindings.push(platform::HotkeyBinding {
+            action: platform::HotkeyAction::OpenChooser,
+            hotkey: settings.hotkey.trim().to_string(),
+        });
+    }
+    bindings.extend(
+        settings
+            .favourite_hotkeys
+            .iter()
+            .enumerate()
+            .filter(|(_, hotkey)| !hotkey.trim().is_empty())
+            .map(|(index, hotkey)| platform::HotkeyBinding {
+                action: platform::HotkeyAction::InsertFavourite((index + 1) as u8),
+                hotkey: hotkey.trim().to_string(),
+            }),
+    );
+    bindings
+}
+
 #[derive(Clone, Copy)]
 enum SnippetTransfer {
     Copy,
@@ -146,7 +168,7 @@ fn transfer_snippet(
         return None;
     }
 
-    let snippet = snippets
+    let mut snippet = snippets
         .groups
         .get(source_group)?
         .snippets
@@ -157,6 +179,9 @@ fn transfer_snippet(
         snippets.groups[source_group]
             .snippets
             .remove(source_snippet);
+    }
+    if matches!(transfer, SnippetTransfer::Copy) {
+        snippet.favourite_slot = None;
     }
 
     let target = &mut snippets.groups[target_group].snippets;
@@ -246,14 +271,15 @@ struct TypeTextApp {
     warning_message: Option<String>,
     confirm_clear_all: bool,
     confirm_import: bool,
-    capturing_hotkey: bool,
+    pending_favourite_slot: Option<u8>,
+    capturing_hotkey: Option<platform::HotkeyAction>,
     settings_dirty: bool,
     applied_startup_enabled: bool,
     snippet_chain: Vec<SearchResult>,
     insert_when_focus_lost: bool,
-    registered_hotkey: Option<String>,
-    hotkey_tx: Sender<()>,
-    hotkey_rx: Receiver<()>,
+    registered_hotkeys: Vec<platform::HotkeyBinding>,
+    hotkey_tx: Sender<platform::HotkeyAction>,
+    hotkey_rx: Receiver<platform::HotkeyAction>,
     tray_rx: Receiver<TrayCommand>,
     tray_handle: Option<platform::TrayHandle>,
     #[cfg(not(feature = "offline-portable"))]
@@ -529,6 +555,12 @@ fn section_gap(ui: &mut egui::Ui) {
     ui.add_space(6.0);
 }
 
+fn surrender_keyboard_focus(ui: &mut egui::Ui) {
+    if let Some(focused) = ui.memory(|memory| memory.focused()) {
+        ui.memory_mut(|memory| memory.surrender_focus(focused));
+    }
+}
+
 fn detail_header(ui: &mut egui::Ui, title: &str, add_actions: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         ui.set_min_height(HEADER_CONTROL_HEIGHT);
@@ -634,6 +666,14 @@ fn compact_snippet_row(
                             .color(text_color),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(slot) = result.favourite_slot {
+                            ui.label(
+                                egui::RichText::new(format!("#{slot}"))
+                                    .text_style(egui::TextStyle::Small)
+                                    .color(weak_color),
+                            )
+                            .on_hover_text(format!("Favourite {slot}"));
+                        }
                         ui.label(
                             egui::RichText::new(&result.group_name)
                                 .text_style(egui::TextStyle::Small)
@@ -724,19 +764,35 @@ fn sidebar_reorder_row(
     can_move_up: bool,
     can_move_down: bool,
     item_name: &str,
+    favourite_slot: Option<u8>,
 ) -> (egui::Response, bool, bool) {
     const ARROW_BUTTON_WIDTH: f32 = 23.0;
     const ARROW_GAP: f32 = 3.0;
     const RIGHT_INSET: f32 = 7.0;
 
     let reserved_width = ARROW_BUTTON_WIDTH * 2.0 + ARROW_GAP + RIGHT_INSET * 2.0;
+    let badge_width = if favourite_slot.is_some() { 28.0 } else { 0.0 };
     let response = sidebar_named_row(
         ui,
         title,
         selected,
-        if selected { reserved_width } else { 0.0 },
+        if selected {
+            reserved_width
+        } else {
+            badge_width
+        },
     );
     if !selected {
+        if let Some(slot) = favourite_slot {
+            ui.painter().text(
+                egui::pos2(response.rect.right() - 8.0, response.rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                format!("#{slot}"),
+                egui::TextStyle::Small.resolve(ui.style()),
+                ui.visuals().weak_text_color(),
+            );
+            response.clone().on_hover_text(format!("Favourite {slot}"));
+        }
         return (response, false, false);
     }
 
@@ -834,20 +890,21 @@ impl TypeTextApp {
         platform::install_reopen_handler(tray_tx.clone(), cc.egui_ctx.clone());
         #[cfg(not(feature = "offline-portable"))]
         let (_update_tx, update_rx) = mpsc::channel();
-        let (status, hotkey_error, registered_hotkey) = match platform::register_hotkey(
-            settings.hotkey.clone(),
+        let requested_hotkeys = configured_hotkey_bindings(&settings);
+        let (status, hotkey_error, registered_hotkeys) = match platform::register_hotkeys(
+            requested_hotkeys.clone(),
             tx.clone(),
             cc.egui_ctx.clone(),
         ) {
             Ok(()) => (
                 format!("Ready - {}", settings.hotkey),
                 None,
-                Some(settings.hotkey.clone()),
+                requested_hotkeys,
             ),
             Err(error) => (
                 "Ready".to_string(),
                 Some(format!("Hotkey unavailable: {error}")),
-                None,
+                Vec::new(),
             ),
         };
         let error_message = [
@@ -903,12 +960,13 @@ impl TypeTextApp {
             warning_message: None,
             confirm_clear_all: false,
             confirm_import: false,
-            capturing_hotkey: false,
+            pending_favourite_slot: None,
+            capturing_hotkey: None,
             settings_dirty: false,
             applied_startup_enabled,
             snippet_chain: Vec::new(),
             insert_when_focus_lost: false,
-            registered_hotkey,
+            registered_hotkeys,
             hotkey_tx: tx,
             hotkey_rx: rx,
             tray_rx,
@@ -1007,6 +1065,39 @@ impl TypeTextApp {
 
         if !self.settings.close_after_insert {
             self.bring_window_to_front(ctx);
+        }
+    }
+
+    fn insert_favourite(&mut self, slot: u8, ctx: &egui::Context) {
+        let favourite = self
+            .snippets
+            .groups
+            .iter()
+            .flat_map(|group| &group.snippets)
+            .find(|snippet| snippet.favourite_slot == Some(slot))
+            .cloned();
+        let Some(snippet) = favourite else {
+            self.status = format!("Favourite #{slot} is not assigned");
+            return;
+        };
+        if snippet.body.is_empty() {
+            self.status = format!("Favourite #{slot} is empty");
+            return;
+        }
+
+        std::thread::sleep(Duration::from_millis(self.settings.typing_delay_ms));
+        let expanded_body =
+            expand_snippet_tokens_with_custom(&snippet.body, &self.tokens.custom_tokens);
+        match platform::type_text(
+            &expanded_body,
+            self.settings.windows_character_delay_ms,
+            self.settings.windows_separator_delay_ms,
+        ) {
+            Ok(()) => self.status = format!("Typed favourite #{slot}: {}", snippet.title),
+            Err(error) => {
+                self.show_error(error.to_string());
+                self.bring_window_to_front(ctx);
+            }
         }
     }
 
@@ -1430,6 +1521,7 @@ impl TypeTextApp {
                                         *index > 0,
                                         *index + 1 < self.snippets.groups.len(),
                                         "group",
+                                        None,
                                     );
                                     if move_up {
                                         self.selected_group = *index;
@@ -1499,59 +1591,63 @@ impl TypeTextApp {
                     |ui| {
                         let query = self.edit_search.trim().to_lowercase();
                         let searching_all_groups = !query.is_empty();
-                        let snippet_titles: Vec<(usize, usize, String)> = if searching_all_groups {
-                            self.snippets
-                                .groups
-                                .iter()
-                                .enumerate()
-                                .flat_map(|(group_index, group)| {
-                                    let group_name = group.name.clone();
-                                    let group_matches = group_name.to_lowercase().contains(&query);
-                                    let filter_query = query.clone();
-                                    group
-                                        .snippets
-                                        .iter()
-                                        .enumerate()
-                                        .filter(move |(_, snippet)| {
-                                            group_matches
-                                                || snippet
-                                                    .title
-                                                    .to_lowercase()
-                                                    .contains(&filter_query)
-                                                || snippet
-                                                    .body
-                                                    .to_lowercase()
-                                                    .contains(&filter_query)
-                                        })
-                                        .map(move |(snippet_index, snippet)| {
-                                            (
-                                                group_index,
-                                                snippet_index,
-                                                format!("{}  ·  {}", snippet.title, group_name),
-                                            )
-                                        })
-                                })
-                                .collect()
-                        } else {
-                            self.snippets
-                                .groups
-                                .get(self.selected_group)
-                                .map(|group| {
-                                    group
-                                        .snippets
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(snippet_index, snippet)| {
-                                            (
-                                                self.selected_group,
-                                                snippet_index,
-                                                snippet.title.clone(),
-                                            )
-                                        })
-                                        .collect()
-                                })
-                                .unwrap_or_default()
-                        };
+                        let snippet_titles: Vec<(usize, usize, String, Option<u8>)> =
+                            if searching_all_groups {
+                                self.snippets
+                                    .groups
+                                    .iter()
+                                    .enumerate()
+                                    .flat_map(|(group_index, group)| {
+                                        let group_name = group.name.clone();
+                                        let group_matches =
+                                            group_name.to_lowercase().contains(&query);
+                                        let filter_query = query.clone();
+                                        group
+                                            .snippets
+                                            .iter()
+                                            .enumerate()
+                                            .filter(move |(_, snippet)| {
+                                                group_matches
+                                                    || snippet
+                                                        .title
+                                                        .to_lowercase()
+                                                        .contains(&filter_query)
+                                                    || snippet
+                                                        .body
+                                                        .to_lowercase()
+                                                        .contains(&filter_query)
+                                            })
+                                            .map(move |(snippet_index, snippet)| {
+                                                (
+                                                    group_index,
+                                                    snippet_index,
+                                                    format!("{}  ·  {}", snippet.title, group_name),
+                                                    snippet.favourite_slot,
+                                                )
+                                            })
+                                    })
+                                    .collect()
+                            } else {
+                                self.snippets
+                                    .groups
+                                    .get(self.selected_group)
+                                    .map(|group| {
+                                        group
+                                            .snippets
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(snippet_index, snippet)| {
+                                                (
+                                                    self.selected_group,
+                                                    snippet_index,
+                                                    snippet.title.clone(),
+                                                    snippet.favourite_slot,
+                                                )
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default()
+                            };
                         egui::ScrollArea::vertical()
                             .id_salt("edit_snippets_page")
                             .max_height(ui.available_height())
@@ -1563,7 +1659,9 @@ impl TypeTextApp {
                                     .get(self.selected_group)
                                     .map(|group| group.snippets.len())
                                     .unwrap_or_default();
-                                for (group_index, snippet_index, title) in &snippet_titles {
+                                for (group_index, snippet_index, title, favourite_slot) in
+                                    &snippet_titles
+                                {
                                     let selected = self.edit_snippet_active
                                         && self.selected_group == *group_index
                                         && self.selected_snippet == *snippet_index;
@@ -1574,6 +1672,7 @@ impl TypeTextApp {
                                         !searching_all_groups && *snippet_index > 0,
                                         !searching_all_groups && *snippet_index + 1 < snippet_count,
                                         "snippet",
+                                        *favourite_slot,
                                     );
                                     if move_up {
                                         self.selected_snippet = *snippet_index;
@@ -1691,7 +1790,7 @@ impl TypeTextApp {
             &self.paths,
             &mut self.settings,
             &self.hotkey_tx,
-            &mut self.registered_hotkey,
+            &mut self.registered_hotkeys,
             &mut self.applied_startup_enabled,
         ) {
             Ok(()) => {
@@ -1709,26 +1808,37 @@ impl TypeTextApp {
     }
 
     fn handle_hotkey_capture(&mut self, ctx: &egui::Context) {
-        if !self.capturing_hotkey {
+        let Some(capture_target) = self.capturing_hotkey else {
             return;
-        }
+        };
 
         let captured = ctx.input(|input| {
             input.events.iter().find_map(|event| match event {
                 egui::Event::Key {
                     key,
-                    physical_key: _,
+                    physical_key,
                     pressed: true,
                     repeat: false,
                     modifiers,
-                } => hotkey_from_event(*key, *modifiers),
+                } => hotkey_from_event(physical_key.unwrap_or(*key), *modifiers),
                 _ => None,
             })
         });
 
         if let Some(hotkey) = captured {
-            self.settings.hotkey = hotkey;
-            self.capturing_hotkey = false;
+            match capture_target {
+                platform::HotkeyAction::OpenChooser => self.settings.hotkey = hotkey,
+                platform::HotkeyAction::InsertFavourite(slot) => {
+                    if let Some(target) = self
+                        .settings
+                        .favourite_hotkeys
+                        .get_mut(usize::from(slot.saturating_sub(1)))
+                    {
+                        *target = hotkey;
+                    }
+                }
+            }
+            self.capturing_hotkey = None;
             self.mark_settings_dirty();
         }
     }
@@ -1808,8 +1918,13 @@ impl eframe::App for TypeTextApp {
         #[cfg(not(feature = "offline-portable"))]
         self.schedule_update_check(false);
 
-        while self.hotkey_rx.try_recv().is_ok() {
-            self.show_window(ctx, View::Choose);
+        while let Ok(action) = self.hotkey_rx.try_recv() {
+            match action {
+                platform::HotkeyAction::OpenChooser => self.show_window(ctx, View::Choose),
+                platform::HotkeyAction::InsertFavourite(slot) => {
+                    self.insert_favourite(slot, ctx);
+                }
+            }
         }
 
         let lost_focus = ctx.input(|input| {
@@ -1850,6 +1965,7 @@ impl eframe::App for TypeTextApp {
 
         self.ui_clear_all_confirmation(&ctx);
         self.ui_import_confirmation(&ctx);
+        self.ui_favourite_confirmation(&ctx);
         self.ui_background_notice(&ctx);
         self.ui_warning_popup(&ctx);
         self.ui_error_popup(&ctx);
@@ -1857,6 +1973,59 @@ impl eframe::App for TypeTextApp {
 }
 
 impl TypeTextApp {
+    fn ui_favourite_confirmation(&mut self, ctx: &egui::Context) {
+        let Some(slot) = self.pending_favourite_slot else {
+            return;
+        };
+        let current_owner = self
+            .snippets
+            .groups
+            .iter()
+            .flat_map(|group| &group.snippets)
+            .find(|snippet| snippet.favourite_slot == Some(slot))
+            .map(|snippet| snippet.title.clone())
+            .unwrap_or_else(|| "another snippet".to_string());
+        let mut replace = false;
+        let mut cancel = false;
+        egui::Area::new(egui::Id::new("favourite_confirmation_dialog"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.set_max_width(420.0);
+                        ui.label(
+                            egui::RichText::new(format!("Replace favourite #{slot}?"))
+                                .strong()
+                                .size(15.5),
+                        );
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::Label::new(format!(
+                                "Favourite #{slot} is currently assigned to “{current_owner}”."
+                            ))
+                            .wrap(),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("Cancel").clicked() {
+                                cancel = true;
+                            }
+                            if ui.button("Replace").clicked() {
+                                replace = true;
+                            }
+                        });
+                    });
+            });
+        if replace {
+            self.pending_favourite_slot = None;
+            self.assign_selected_favourite(Some(slot));
+        } else if cancel {
+            self.pending_favourite_slot = None;
+        }
+    }
+
     fn ui_import_confirmation(&mut self, ctx: &egui::Context) {
         if !self.confirm_import {
             return;
@@ -2601,6 +2770,73 @@ impl TypeTextApp {
                 if ui.button("Add").on_hover_text("Add snippet").clicked() {
                     self.add_editor_snippet();
                 }
+                let current_slot = self
+                    .snippets
+                    .groups
+                    .get(self.selected_group)
+                    .and_then(|group| group.snippets.get(self.selected_snippet))
+                    .and_then(|snippet| snippet.favourite_slot);
+                let mut requested_slot = None;
+                ui.add_enabled_ui(can_edit, |ui| {
+                    egui::ComboBox::from_id_salt("snippet_favourite_slot")
+                        .selected_text(
+                            current_slot
+                                .map(|slot| format!("Favourite #{slot}"))
+                                .unwrap_or_else(|| "Favourite".to_string()),
+                        )
+                        .width(90.0)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(current_slot.is_none(), "Not favourite")
+                                .clicked()
+                            {
+                                requested_slot = Some(None);
+                                ui.close();
+                            }
+                            for slot in 1..=MAX_FAVOURITES as u8 {
+                                let owner = self.snippets.groups.iter().find_map(|group| {
+                                    group
+                                        .snippets
+                                        .iter()
+                                        .find(|snippet| snippet.favourite_slot == Some(slot))
+                                        .map(|snippet| snippet.title.clone())
+                                });
+                                let label = owner
+                                    .map(|title| format!("#{slot} · {title}"))
+                                    .unwrap_or_else(|| format!("#{slot}"));
+                                if ui
+                                    .selectable_label(current_slot == Some(slot), label)
+                                    .clicked()
+                                {
+                                    requested_slot = Some(Some(slot));
+                                    ui.close();
+                                }
+                            }
+                        });
+                });
+                if let Some(slot) = requested_slot {
+                    let occupied =
+                        slot.is_some_and(|slot| {
+                            self.snippets
+                                .groups
+                                .iter()
+                                .enumerate()
+                                .any(|(group_index, group)| {
+                                    group.snippets.iter().enumerate().any(
+                                        |(snippet_index, snippet)| {
+                                            snippet.favourite_slot == Some(slot)
+                                                && (self.selected_group != group_index
+                                                    || self.selected_snippet != snippet_index)
+                                        },
+                                    )
+                                })
+                        });
+                    if occupied {
+                        self.pending_favourite_slot = slot;
+                    } else {
+                        self.assign_selected_favourite(slot);
+                    }
+                }
             }
             EditPanel::Tokens => {
                 let can_edit = self.selected_token_kind == TokenSelection::Custom
@@ -2712,6 +2948,7 @@ impl TypeTextApp {
                                             *index > 0,
                                             *index + 1 < self.tokens.custom_tokens.len(),
                                             "token",
+                                            None,
                                         );
                                         if move_up {
                                             self.selected_token = *index;
@@ -3309,6 +3546,7 @@ impl TypeTextApp {
             group.snippets.push(Snippet {
                 title: "New Snippet".to_string(),
                 body: "Type your reusable text here.".to_string(),
+                favourite_slot: None,
             });
             self.selected_snippet = group.snippets.len() - 1;
             self.edit_snippet_active = true;
@@ -3349,7 +3587,11 @@ impl TypeTextApp {
         }
 
         if let Some(group) = self.selected_group_mut() {
-            group.snippets.push(Snippet { title, body });
+            group.snippets.push(Snippet {
+                title,
+                body,
+                favourite_slot: None,
+            });
             self.selected_snippet = group.snippets.len() - 1;
             self.load_selected_editor_snippet();
             self.save_snippets();
@@ -3396,6 +3638,7 @@ impl TypeTextApp {
         group.snippets.push(Snippet {
             title: duplicate_title,
             body,
+            favourite_slot: None,
         });
         self.selected_snippet = group.snippets.len() - 1;
         self.edit_group_active = true;
@@ -3403,6 +3646,29 @@ impl TypeTextApp {
         self.load_selected_editor_snippet();
         self.save_snippets();
         self.status = "Duplicated snippet in current group".to_string();
+    }
+
+    fn assign_selected_favourite(&mut self, slot: Option<u8>) {
+        if let Some(slot) = slot {
+            for snippet in self
+                .snippets
+                .groups
+                .iter_mut()
+                .flat_map(|group| &mut group.snippets)
+            {
+                if snippet.favourite_slot == Some(slot) {
+                    snippet.favourite_slot = None;
+                }
+            }
+        }
+        if let Some(snippet) = self.selected_snippet_mut() {
+            snippet.favourite_slot = slot;
+            self.save_snippets();
+            self.status = slot.map_or_else(
+                || "Removed favourite assignment".to_string(),
+                |slot| format!("Assigned favourite #{slot}"),
+            );
+        }
     }
 
     fn move_selected_editor_token(&mut self, offset: isize) {
@@ -3534,13 +3800,22 @@ impl TypeTextApp {
                         {
                             self.mark_settings_dirty();
                         }
-                        let label = if self.capturing_hotkey {
+                        let label = if self.capturing_hotkey
+                            == Some(platform::HotkeyAction::OpenChooser)
+                        {
                             "Press keys..."
                         } else {
                             "Capture Hotkey"
                         };
                         if ui.button(label).clicked() {
-                            self.capturing_hotkey = !self.capturing_hotkey;
+                            surrender_keyboard_focus(ui);
+                            self.capturing_hotkey = if self.capturing_hotkey
+                                == Some(platform::HotkeyAction::OpenChooser)
+                            {
+                                None
+                            } else {
+                                Some(platform::HotkeyAction::OpenChooser)
+                            };
                         }
                     });
                 });
@@ -3701,6 +3976,76 @@ impl TypeTextApp {
                             }
                         }
                     });
+                });
+
+                section_gap(ui);
+                framed_section(ui, "Favourites", "direct snippet hotkeys", |ui| {
+                    for slot_index in 0..MAX_FAVOURITES {
+                        let slot = (slot_index + 1) as u8;
+                        let assigned = self
+                            .snippets
+                            .groups
+                            .iter()
+                            .find_map(|group| {
+                                group
+                                    .snippets
+                                    .iter()
+                                    .find(|snippet| snippet.favourite_slot == Some(slot))
+                                    .map(|snippet| format!("{} · {}", snippet.title, group.name))
+                            })
+                            .unwrap_or_else(|| "Not assigned".to_string());
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                [24.0, HEADER_CONTROL_HEIGHT],
+                                egui::Label::new(egui::RichText::new(format!("#{slot}")).small()),
+                            );
+                            ui.add_sized(
+                                [220.0, HEADER_CONTROL_HEIGHT],
+                                egui::Label::new(
+                                    egui::RichText::new(assigned)
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                )
+                                .truncate(),
+                            );
+                            if ui
+                                .add_sized(
+                                    [180.0, HEADER_CONTROL_HEIGHT],
+                                    egui::TextEdit::singleline(
+                                        &mut self.settings.favourite_hotkeys[slot_index],
+                                    )
+                                    .hint_text("Optional hotkey"),
+                                )
+                                .changed()
+                            {
+                                self.mark_settings_dirty();
+                            }
+                            let action = platform::HotkeyAction::InsertFavourite(slot);
+                            let capture_label = if self.capturing_hotkey == Some(action) {
+                                "Press keys..."
+                            } else {
+                                "Capture"
+                            };
+                            if ui.button(capture_label).clicked() {
+                                surrender_keyboard_focus(ui);
+                                self.capturing_hotkey = if self.capturing_hotkey == Some(action) {
+                                    None
+                                } else {
+                                    Some(action)
+                                };
+                            }
+                            if ui
+                                .add_enabled(
+                                    !self.settings.favourite_hotkeys[slot_index].is_empty(),
+                                    egui::Button::new("Clear"),
+                                )
+                                .clicked()
+                            {
+                                self.settings.favourite_hotkeys[slot_index].clear();
+                                self.mark_settings_dirty();
+                            }
+                        });
+                    }
                 });
 
                 section_gap(ui);
@@ -4014,7 +4359,11 @@ fn merge_snippet_file(target: &mut SnippetFile, imported: SnippetFile) {
 
 trait SettingsEffects {
     fn set_startup_enabled(&self, enabled: bool) -> anyhow::Result<()>;
-    fn reregister_hotkey(&self, hotkey: &str, tx: Sender<()>) -> anyhow::Result<()>;
+    fn reregister_hotkeys(
+        &self,
+        bindings: Vec<platform::HotkeyBinding>,
+        tx: Sender<platform::HotkeyAction>,
+    ) -> anyhow::Result<()>;
 }
 
 struct PlatformSettingsEffects;
@@ -4024,23 +4373,27 @@ impl SettingsEffects for PlatformSettingsEffects {
         platform::set_startup_enabled(enabled)
     }
 
-    fn reregister_hotkey(&self, hotkey: &str, tx: Sender<()>) -> anyhow::Result<()> {
-        platform::reregister_hotkey(hotkey.to_string(), tx)
+    fn reregister_hotkeys(
+        &self,
+        bindings: Vec<platform::HotkeyBinding>,
+        tx: Sender<platform::HotkeyAction>,
+    ) -> anyhow::Result<()> {
+        platform::reregister_hotkeys(bindings, tx)
     }
 }
 
 fn save_settings_with_effects(
     paths: &PortablePaths,
     settings: &mut AppSettings,
-    hotkey_tx: &Sender<()>,
-    registered_hotkey: &mut Option<String>,
+    hotkey_tx: &Sender<platform::HotkeyAction>,
+    registered_hotkeys: &mut Vec<platform::HotkeyBinding>,
     applied_startup_enabled: &mut bool,
 ) -> anyhow::Result<()> {
     save_settings_with_effects_impl(
         paths,
         settings,
         hotkey_tx,
-        registered_hotkey,
+        registered_hotkeys,
         applied_startup_enabled,
         &PlatformSettingsEffects,
     )
@@ -4049,25 +4402,41 @@ fn save_settings_with_effects(
 fn save_settings_with_effects_impl(
     paths: &PortablePaths,
     settings: &mut AppSettings,
-    hotkey_tx: &Sender<()>,
-    registered_hotkey: &mut Option<String>,
+    hotkey_tx: &Sender<platform::HotkeyAction>,
+    registered_hotkeys: &mut Vec<platform::HotkeyBinding>,
     applied_startup_enabled: &mut bool,
     effects: &dyn SettingsEffects,
 ) -> anyhow::Result<()> {
     settings.theme = normalize_theme(&settings.theme);
+    validate_settings(settings)?;
     if !OFFLINE_PORTABLE && settings.open_on_startup != *applied_startup_enabled {
         effects.set_startup_enabled(settings.open_on_startup)?;
         *applied_startup_enabled = settings.open_on_startup;
     }
-    let requested_hotkey = settings.hotkey.clone();
-    if registered_hotkey.as_deref() != Some(requested_hotkey.as_str()) {
-        if let Err(error) = effects.reregister_hotkey(&requested_hotkey, hotkey_tx.clone()) {
-            if let Some(previous_hotkey) = registered_hotkey.clone() {
-                settings.hotkey = previous_hotkey;
+    let requested_hotkeys = configured_hotkey_bindings(settings);
+    if *registered_hotkeys != requested_hotkeys {
+        if let Err(error) = effects.reregister_hotkeys(requested_hotkeys.clone(), hotkey_tx.clone())
+        {
+            settings.hotkey.clear();
+            settings.favourite_hotkeys = std::array::from_fn(|_| String::new());
+            for binding in registered_hotkeys.iter() {
+                match binding.action {
+                    platform::HotkeyAction::OpenChooser => {
+                        settings.hotkey = binding.hotkey.clone();
+                    }
+                    platform::HotkeyAction::InsertFavourite(slot) => {
+                        if let Some(hotkey) = settings
+                            .favourite_hotkeys
+                            .get_mut(usize::from(slot.saturating_sub(1)))
+                        {
+                            *hotkey = binding.hotkey.clone();
+                        }
+                    }
+                }
             }
             return Err(error);
         }
-        *registered_hotkey = Some(requested_hotkey);
+        *registered_hotkeys = requested_hotkeys;
     }
     save_settings(paths, settings)?;
     Ok(())
@@ -4108,6 +4477,16 @@ fn hotkey_key_name(key: egui::Key) -> Option<&'static str> {
         egui::Key::Enter => Some("Enter"),
         egui::Key::Escape => Some("Escape"),
         egui::Key::Tab => Some("Tab"),
+        egui::Key::Num0 => Some("0"),
+        egui::Key::Num1 => Some("1"),
+        egui::Key::Num2 => Some("2"),
+        egui::Key::Num3 => Some("3"),
+        egui::Key::Num4 => Some("4"),
+        egui::Key::Num5 => Some("5"),
+        egui::Key::Num6 => Some("6"),
+        egui::Key::Num7 => Some("7"),
+        egui::Key::Num8 => Some("8"),
+        egui::Key::Num9 => Some("9"),
         egui::Key::A => Some("A"),
         egui::Key::B => Some("B"),
         egui::Key::C => Some("C"),
@@ -4173,8 +4552,18 @@ mod tests {
             Ok(())
         }
 
-        fn reregister_hotkey(&self, hotkey: &str, _tx: Sender<()>) -> anyhow::Result<()> {
-            self.hotkey_calls.borrow_mut().push(hotkey.to_string());
+        fn reregister_hotkeys(
+            &self,
+            bindings: Vec<platform::HotkeyBinding>,
+            _tx: Sender<platform::HotkeyAction>,
+        ) -> anyhow::Result<()> {
+            self.hotkey_calls.borrow_mut().push(
+                bindings
+                    .iter()
+                    .map(|binding| binding.hotkey.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
             if let Some(error) = self.hotkey_result.borrow_mut().take() {
                 Err(error)
             } else {
@@ -4242,6 +4631,7 @@ mod tests {
                     snippets: vec![Snippet {
                         title: "Greeting".to_string(),
                         body: "Hello".to_string(),
+                        favourite_slot: None,
                     }],
                     sort_order: SnippetSortOrder::Custom,
                 },
@@ -4257,6 +4647,7 @@ mod tests {
     #[test]
     fn copying_snippet_keeps_source_and_adds_target_copy() {
         let mut snippets = transfer_test_snippets();
+        snippets.groups[0].snippets[0].favourite_slot = Some(3);
 
         let target_index = transfer_snippet(&mut snippets, 0, 0, 1, SnippetTransfer::Copy).unwrap();
 
@@ -4265,6 +4656,8 @@ mod tests {
         assert_eq!(snippets.groups[1].snippets.len(), 1);
         assert_eq!(snippets.groups[1].snippets[0].title, "Greeting");
         assert_eq!(snippets.groups[1].snippets[0].body, "Hello");
+        assert_eq!(snippets.groups[0].snippets[0].favourite_slot, Some(3));
+        assert_eq!(snippets.groups[1].snippets[0].favourite_slot, None);
     }
 
     #[test]
@@ -4275,6 +4668,7 @@ mod tests {
         group.snippets.push(Snippet {
             title: "Greeting Copy".to_string(),
             body: "Hello".to_string(),
+            favourite_slot: None,
         });
         assert_eq!(
             duplicate_snippet_title("Greeting", &group),
@@ -4285,6 +4679,7 @@ mod tests {
     #[test]
     fn moving_snippet_removes_source_and_adds_target_snippet() {
         let mut snippets = transfer_test_snippets();
+        snippets.groups[0].snippets[0].favourite_slot = Some(4);
 
         let target_index = transfer_snippet(&mut snippets, 0, 0, 1, SnippetTransfer::Move).unwrap();
 
@@ -4292,6 +4687,27 @@ mod tests {
         assert!(snippets.groups[0].snippets.is_empty());
         assert_eq!(snippets.groups[1].snippets.len(), 1);
         assert_eq!(snippets.groups[1].snippets[0].title, "Greeting");
+        assert_eq!(snippets.groups[1].snippets[0].favourite_slot, Some(4));
+    }
+
+    #[test]
+    fn configured_hotkeys_include_numbered_favourites() {
+        let mut settings = AppSettings::default();
+        settings.favourite_hotkeys[0] = "Ctrl+Alt+1".to_string();
+        settings.favourite_hotkeys[9] = "Ctrl+Alt+0".to_string();
+
+        let bindings = configured_hotkey_bindings(&settings);
+
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(bindings[0].action, platform::HotkeyAction::OpenChooser);
+        assert_eq!(
+            bindings[1].action,
+            platform::HotkeyAction::InsertFavourite(1)
+        );
+        assert_eq!(
+            bindings[2].action,
+            platform::HotkeyAction::InsertFavourite(10)
+        );
     }
 
     #[test]
@@ -4330,7 +4746,7 @@ mod tests {
             open_on_startup: true,
             ..Default::default()
         };
-        let mut registered_hotkey = Some("Ctrl+Alt+Space".to_string());
+        let mut registered_hotkey = configured_hotkey_bindings(&AppSettings::default());
         let mut applied_startup_enabled = false;
 
         save_settings_with_effects_impl(
@@ -4347,7 +4763,7 @@ mod tests {
             effects.hotkey_calls.borrow().as_slice(),
             &["Ctrl+Alt+K".to_string()]
         );
-        assert_eq!(registered_hotkey, Some("Ctrl+Alt+K".to_string()));
+        assert_eq!(registered_hotkey, configured_hotkey_bindings(&settings));
         assert_eq!(
             read_settings_hotkey(paths.settings_path.clone()),
             "Ctrl+Alt+K"
@@ -4365,7 +4781,7 @@ mod tests {
             hotkey: "Ctrl+Alt+K".to_string(),
             ..Default::default()
         };
-        let mut registered_hotkey = Some("Ctrl+Alt+Space".to_string());
+        let mut registered_hotkey = configured_hotkey_bindings(&AppSettings::default());
         let mut applied_startup_enabled = false;
 
         let error = save_settings_with_effects_impl(
@@ -4380,7 +4796,10 @@ mod tests {
 
         assert_eq!(error.to_string(), "taken");
         assert_eq!(settings.hotkey, "Ctrl+Alt+Space");
-        assert_eq!(registered_hotkey, Some("Ctrl+Alt+Space".to_string()));
+        assert_eq!(
+            registered_hotkey,
+            configured_hotkey_bindings(&AppSettings::default())
+        );
         assert!(!paths.settings_path.exists());
         cleanup_paths(&paths);
     }
@@ -4394,7 +4813,7 @@ mod tests {
             open_on_startup: false,
             ..Default::default()
         };
-        let mut registered_hotkey = Some(settings.hotkey.clone());
+        let mut registered_hotkey = configured_hotkey_bindings(&settings);
         let mut applied_startup_enabled = false;
 
         save_settings_with_effects_impl(
@@ -4421,7 +4840,7 @@ mod tests {
             open_on_startup: true,
             ..Default::default()
         };
-        let mut registered_hotkey = Some(settings.hotkey.clone());
+        let mut registered_hotkey = configured_hotkey_bindings(&settings);
         let mut applied_startup_enabled = false;
 
         save_settings_with_effects_impl(
@@ -4449,7 +4868,7 @@ mod tests {
             open_on_startup: true,
             ..Default::default()
         };
-        let mut registered_hotkey = Some(settings.hotkey.clone());
+        let mut registered_hotkey = configured_hotkey_bindings(&settings);
         let mut applied_startup_enabled = false;
 
         save_settings_with_effects_impl(
@@ -4519,6 +4938,33 @@ mod tests {
         };
 
         assert_eq!(hotkey_from_event(egui::Key::Space, modifiers), expected);
+    }
+
+    #[test]
+    fn hotkey_capture_supports_number_keys_for_favourites() {
+        let modifiers = egui::Modifiers {
+            ctrl: true,
+            alt: true,
+            ..Default::default()
+        };
+
+        for (key, number) in [
+            (egui::Key::Num0, "0"),
+            (egui::Key::Num1, "1"),
+            (egui::Key::Num2, "2"),
+            (egui::Key::Num3, "3"),
+            (egui::Key::Num4, "4"),
+            (egui::Key::Num5, "5"),
+            (egui::Key::Num6, "6"),
+            (egui::Key::Num7, "7"),
+            (egui::Key::Num8, "8"),
+            (egui::Key::Num9, "9"),
+        ] {
+            assert_eq!(
+                hotkey_from_event(key, modifiers),
+                Some(format!("Ctrl+Alt+{number}"))
+            );
+        }
     }
 
     #[test]

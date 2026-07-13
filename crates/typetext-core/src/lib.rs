@@ -22,6 +22,7 @@ pub const MAX_SNIPPET_TITLE_CHARS: usize = 512;
 pub const MAX_SNIPPET_BODY_CHARS: usize = 1_000_000;
 pub const MAX_TOKEN_FILE_BYTES: u64 = 256 * 1024;
 pub const MAX_CUSTOM_TOKENS: usize = 1_000;
+pub const MAX_FAVOURITES: usize = 10;
 pub const MAX_TOKEN_NAME_CHARS: usize = 128;
 pub const MAX_TOKEN_VALUE_CHARS: usize = 100_000;
 pub const SUPPORTED_SNIPPET_TOKENS: &[(&str, &str)] = &[
@@ -92,6 +93,8 @@ pub enum SnippetSortOrder {
 pub struct Snippet {
     pub title: String,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favourite_slot: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +102,8 @@ pub struct Snippet {
 pub struct AppSettings {
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
+    #[serde(default = "default_favourite_hotkeys")]
+    pub favourite_hotkeys: [String; MAX_FAVOURITES],
     #[serde(default = "default_typing_delay_ms")]
     pub typing_delay_ms: u64,
     #[serde(default = "default_windows_character_delay_ms")]
@@ -149,6 +154,7 @@ pub struct SearchResult {
     pub group_name: String,
     pub title: String,
     pub body: String,
+    pub favourite_slot: Option<u8>,
 }
 
 impl Default for SnippetFile {
@@ -161,10 +167,12 @@ impl Default for SnippetFile {
                     Snippet {
                         title: "Follow up".to_string(),
                         body: "Hi, just following up on this. Please let me know if you need anything else.".to_string(),
+                        favourite_slot: None,
                     },
                     Snippet {
                         title: "Thanks".to_string(),
                         body: "Thanks for your help. I appreciate it.".to_string(),
+                        favourite_slot: None,
                     },
                 ],
                 sort_order: SnippetSortOrder::Custom,
@@ -193,6 +201,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             hotkey: default_hotkey(),
+            favourite_hotkeys: default_favourite_hotkeys(),
             typing_delay_ms: default_typing_delay_ms(),
             windows_character_delay_ms: default_windows_character_delay_ms(),
             windows_separator_delay_ms: default_windows_separator_delay_ms(),
@@ -600,6 +609,7 @@ fn parse_droptext_data(
         groups[group_index].snippets.push(Snippet {
             title: title.to_string(),
             body,
+            favourite_slot: None,
         });
     }
 
@@ -635,6 +645,7 @@ pub fn search_snippets(snippets: &SnippetFile, query: &str) -> Vec<SearchResult>
                             group_name: group.name.clone(),
                             title: snippet.title.clone(),
                             body: snippet.body.clone(),
+                            favourite_slot: snippet.favourite_slot,
                         })
                     } else {
                         None
@@ -663,6 +674,7 @@ pub fn validate_snippets(snippets: &SnippetFile) -> Result<()> {
     }
 
     let mut snippet_count = 0usize;
+    let mut favourite_slots = [false; MAX_FAVOURITES];
     for group in &snippets.groups {
         if group.name.trim().is_empty() {
             return Err(anyhow!("Every group needs a name."));
@@ -695,6 +707,18 @@ pub fn validate_snippets(snippets: &SnippetFile) -> Result<()> {
                     "Snippet bodies cannot exceed {MAX_SNIPPET_BODY_CHARS} characters."
                 ));
             }
+            if let Some(slot) = snippet.favourite_slot {
+                if !(1..=MAX_FAVOURITES as u8).contains(&slot) {
+                    return Err(anyhow!(
+                        "Favourite slots must be between 1 and {MAX_FAVOURITES}."
+                    ));
+                }
+                let slot_index = usize::from(slot - 1);
+                if favourite_slots[slot_index] {
+                    return Err(anyhow!("Favourite slot {slot} is assigned more than once."));
+                }
+                favourite_slots[slot_index] = true;
+            }
         }
     }
 
@@ -721,6 +745,19 @@ pub fn validate_settings(settings: &AppSettings) -> Result<()> {
     }
     if settings.hotkey.len() > 128 {
         return Err(anyhow!("The hotkey value is too long."));
+    }
+    let mut hotkeys = std::collections::HashSet::new();
+    if !settings.hotkey.trim().is_empty() {
+        hotkeys.insert(settings.hotkey.trim().to_ascii_lowercase());
+    }
+    for hotkey in &settings.favourite_hotkeys {
+        if hotkey.len() > 128 {
+            return Err(anyhow!("A favourite hotkey value is too long."));
+        }
+        let normalized = hotkey.trim().to_ascii_lowercase();
+        if !normalized.is_empty() && !hotkeys.insert(normalized) {
+            return Err(anyhow!("Hotkeys must be unique."));
+        }
     }
     if settings.theme.len() > 32 || settings.accent_color.len() > 32 {
         return Err(anyhow!("A display setting is too long."));
@@ -1134,6 +1171,10 @@ fn default_hotkey() -> String {
     "Ctrl+Alt+Space".to_string()
 }
 
+fn default_favourite_hotkeys() -> [String; MAX_FAVOURITES] {
+    std::array::from_fn(|_| String::new())
+}
+
 fn default_typing_delay_ms() -> u64 {
     DEFAULT_TYPING_DELAY_MS
 }
@@ -1242,6 +1283,48 @@ mod tests {
                 .unwrap();
 
         assert_eq!(snippets.groups[0].sort_order, SnippetSortOrder::Custom);
+    }
+
+    #[test]
+    fn existing_snippet_files_default_to_no_favourites() {
+        let snippets: SnippetFile = serde_json::from_str(
+            r#"{"version":1,"groups":[{"name":"Existing","snippets":[{"title":"One","body":"Body"}]}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(snippets.groups[0].snippets[0].favourite_slot, None);
+    }
+
+    #[test]
+    fn validates_favourite_slot_range_and_uniqueness() {
+        let mut snippets = SnippetFile::default();
+        snippets.groups[0].snippets[0].favourite_slot = Some(1);
+        snippets.groups[0].snippets[1].favourite_slot = Some(1);
+        assert!(validate_snippets(&snippets).is_err());
+
+        snippets.groups[0].snippets[1].favourite_slot = Some(11);
+        assert!(validate_snippets(&snippets).is_err());
+
+        snippets.groups[0].snippets[1].favourite_slot = Some(2);
+        assert!(validate_snippets(&snippets).is_ok());
+    }
+
+    #[test]
+    fn existing_settings_default_to_empty_favourite_hotkeys() {
+        let settings: AppSettings = serde_json::from_str(r#"{"hotkey":"Ctrl+Alt+Space"}"#).unwrap();
+
+        assert!(settings.favourite_hotkeys.iter().all(String::is_empty));
+    }
+
+    #[test]
+    fn rejects_duplicate_favourite_hotkeys() {
+        let mut settings = AppSettings::default();
+        settings.favourite_hotkeys[0] = settings.hotkey.to_ascii_lowercase();
+        assert!(validate_settings(&settings).is_err());
+
+        settings.favourite_hotkeys[0] = "Ctrl+Alt+1".to_string();
+        settings.favourite_hotkeys[1] = "ctrl+alt+1".to_string();
+        assert!(validate_settings(&settings).is_err());
     }
 
     #[test]

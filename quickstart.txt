@@ -45,6 +45,10 @@ Ctrl+Alt+Space
 You can change this in Settings > Hotkey. After capturing or editing a hotkey,
 click Save Settings.
 
+Up to ten favourite snippets can also have direct-insertion hotkeys. Configure
+these under Settings > Favourites. Favourite hotkeys work only while TypeText is
+running and must not duplicate the chooser hotkey or one another.
+
 TypeText can also be opened from the tray/menu bar icon.
 
 The app window uses its own top-right controls:
@@ -69,6 +73,9 @@ Snippets:
 - Click an existing snippet to edit it.
 - The snippet editor only appears after you click or add a snippet.
 - Click Save after changing a snippet.
+- Use Favourite beside Add to assign the selected snippet to slot 1-10, or to
+  remove its assignment. Reassigning an occupied slot asks for confirmation.
+- Favourite snippets show a muted #1-#10 marker in Edit and Choose.
 - Use Copy to duplicate the selected snippet into another group.
 - Use Move to transfer the selected snippet completely into another group.
 - Use Tokens in the Snippet Details header to insert a token at the body cursor
@@ -94,6 +101,13 @@ Open the Choose tab.
   Settings > Selection.
 - Once your snippets are queued, click the text field in the target app.
 - TypeText will hide, restore focus to the target app, and type the queued text.
+
+Favourite hotkeys:
+- Configure an optional shortcut for each numbered slot in Settings > Favourites.
+- Pressing one types that favourite directly into the previously focused app.
+- Moving or reordering a favourite retains its slot.
+- Copying or duplicating a favourite does not copy its slot.
+- Deleting the snippet frees its slot.
 
 Queue controls:
 - Undo Last removes the most recently queued snippet.
@@ -181,6 +195,7 @@ Settings include:
 - Open on Startup (not included in Windows offline portable)
 - Delay before typing
 - Queue paragraph separator behavior
+- Favourite slots 1-10 and their optional direct-insertion hotkeys
 - Theme
 - Accent color
 - Update checks (not included in Windows offline portable)
@@ -216,7 +231,8 @@ removed when the app is built, rather than simply switched off in Settings.
 This reduces its network-facing and persistence-related capabilities. It means
 TypeText initiates no update or web traffic; it does not disable networking in
 Windows or other applications. It still uses the native Windows features needed
-for hotkeys, verified target focus, and text insertion.
+for runtime hotkeys, verified target focus, and text insertion. Favourite
+hotkeys do not use the Windows Registry.
 
 
 10. Troubleshooting And FAQ
@@ -238,6 +254,8 @@ Hotkey does not work:
 - Click Save Settings after changing it.
 - Make sure TypeText is still running in the tray/menu bar.
 - Another app may already be using the same hotkey.
+- Chooser and favourite hotkeys must all be unique.
+- A favourite hotkey needs both a configured shortcut and an assigned snippet.
 
 Settings changed but did not stick:
 - Most Settings changes are staged.

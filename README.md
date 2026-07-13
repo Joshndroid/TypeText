@@ -9,6 +9,7 @@ system APIs rather than a browser engine or web-based application runtime.
 ## Features
 
 - Global hotkey to show TypeText while it runs in the background
+- Ten numbered favourite snippets with optional direct-insertion global hotkeys
 - Searchable snippet chooser with group filtering
 - Snippet chaining for inserting multiple text chunks together
 - Dynamic local date and time tokens in snippet text
@@ -36,7 +37,7 @@ system APIs rather than a browser engine or web-based application runtime.
 - Rust workspace with a shared `typetext-core` crate
 - `egui/eframe` desktop UI in `apps/typetext-desktop`
 - Windows support for:
-  - native global hotkey registration with `RegisterHotKey`
+  - native multi-hotkey registration with `RegisterHotKey`
   - native target-window restore with `SetForegroundWindow`
   - native Unicode text insertion with `SendInput`
   - configurable character and separator input delays
@@ -107,8 +108,10 @@ type. Use operating-system or full-device encryption when the storage device
 needs protection at rest.
 
 The offline build still uses the native Windows APIs required for its core job:
-registering the global hotkey, restoring the target window, and inserting
+registering runtime global hotkeys, restoring the target window, and inserting
 Unicode text. It does not include a browser engine or web application runtime.
+Favourite hotkeys do not read or write the Windows Registry; registrations
+exist only while TypeText is running.
 
 Installable builds use the normal per-user app data location:
 
@@ -116,6 +119,23 @@ Installable builds use the normal per-user app data location:
 Windows: %LOCALAPPDATA%\TypeText\data
 macOS:   ~/Library/Application Support/TypeText/data
 ```
+
+## Favourite Snippets
+
+In Edit > Snippets, select a snippet and use the Favourite menu beside Add to
+assign slot 1–10. A muted `#1`–`#10` marker identifies favourites in Edit,
+global Edit search results, and Choose. Moving or reordering a snippet retains
+its assignment; copying or duplicating it does not copy the assignment.
+
+Settings > Favourites lists the snippet assigned to every slot. Each slot can
+have an optional global hotkey. After entering or capturing shortcuts, click
+Save Settings. Pressing a favourite shortcut types that snippet directly into
+the previously focused application without opening the chooser. Shortcuts must
+be unique, and the operating system may reject shortcuts already used elsewhere.
+
+The optional snippet JSON field is `"favouriteSlot": 1` (valid values 1–10).
+Older files without this field remain compatible. Settings store the ten
+optional shortcuts in `favouriteHotkeys`; exports preserve assignments.
 
 ## Security Features
 
@@ -132,6 +152,9 @@ surface:
 - Windows inserts Unicode through native `SendInput` events and rechecks the
   target window before each character. macOS sends generated AppleScript to
   `osascript` over standard input, keeping snippet text out of process arguments.
+- Favourite hotkeys capture the foreground target when pressed and use the same
+  focus restoration, token expansion, typing delay, and target checks as normal
+  snippet insertion.
 - Update checks use GitHub over HTTPS. Links offered by the app must belong to
   `github.com/Joshndroid/TypeText/`, and TypeText never automatically downloads,
   executes, or installs an update.
@@ -387,6 +410,7 @@ System Settings > Privacy & Security > Accessibility
 ```json
 {
   "hotkey": "Ctrl+Alt+Space",
+  "favouriteHotkeys": ["", "", "", "", "", "", "", "", "", ""],
   "typingDelayMs": 80,
   "windowsCharacterDelayMs": 22,
   "windowsSeparatorDelayMs": 35,

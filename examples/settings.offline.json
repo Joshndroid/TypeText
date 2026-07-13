@@ -1,5 +1,6 @@
 {
   "hotkey": "Ctrl+Alt+Space",
+  "favouriteHotkeys": ["", "", "", "", "", "", "", "", "", ""],
   "typingDelayMs": 80,
   "windowsCharacterDelayMs": 22,
   "windowsSeparatorDelayMs": 35,
