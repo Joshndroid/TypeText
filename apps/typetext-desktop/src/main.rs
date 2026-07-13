@@ -2554,6 +2554,8 @@ impl TypeTextApp {
 
         egui::ScrollArea::vertical()
             .id_salt("choose_results")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+            .auto_shrink([false, false])
             .show(ui, |ui| {
                 for index in 0..self.results.len() {
                     let result = self.results[index].clone();
