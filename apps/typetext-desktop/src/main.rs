@@ -36,6 +36,8 @@ const HEADER_CONTROL_HEIGHT: f32 = 24.0;
 const EDIT_HEADER_COMBO_WIDTH: f32 = 190.0;
 const SNIPPET_TRANSFER_COMBO_WIDTH: f32 = 68.0;
 const DETAIL_HEADER_SEPARATOR_OFFSET: f32 = 9.0;
+const WINDOW_RESIZE_EDGE_SIZE: f32 = 7.0;
+const WINDOW_RESIZE_CORNER_SIZE: f32 = 16.0;
 
 fn main() -> eframe::Result {
     if let Err(error) = platform::install_app_mutex() {
@@ -362,6 +364,12 @@ fn apply_modern_style(ctx: &egui::Context, accent_hex: &str) {
         style.spacing.button_padding = egui::vec2(8.0, 4.0);
         style.spacing.menu_margin = egui::Margin::same(6);
         style.spacing.indent = 10.0;
+        let mut scroll_style = egui::style::ScrollStyle::floating();
+        scroll_style.floating_allocated_width = scroll_style.bar_width;
+        scroll_style.dormant_background_opacity = 0.0;
+        scroll_style.active_background_opacity = 0.0;
+        scroll_style.interact_background_opacity = 0.0;
+        style.spacing.scroll = scroll_style;
         style.text_styles.insert(
             egui::TextStyle::Heading,
             egui::FontId::new(15.5, egui::FontFamily::Proportional),
@@ -517,6 +525,126 @@ fn nav_button(ui: &mut egui::Ui, selected: bool, label: &str) -> bool {
 fn start_window_drag_on_response(response: &egui::Response, ctx: &egui::Context) {
     if response.drag_started() {
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+}
+
+fn window_resize_interaction(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    id: &'static str,
+    rect: egui::Rect,
+    direction: egui::viewport::ResizeDirection,
+    cursor: egui::CursorIcon,
+) {
+    let response = ui.interact(rect, ui.id().with(id), egui::Sense::drag());
+    if response.hovered() || response.dragged() {
+        ctx.set_cursor_icon(cursor);
+    }
+    if response.drag_started() {
+        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+    }
+}
+
+fn window_resize_handles(ui: &mut egui::Ui, ctx: &egui::Context) {
+    let maximized_or_fullscreen = ctx.input(|input| {
+        let viewport = input.viewport();
+        viewport.maximized.unwrap_or(false) || viewport.fullscreen.unwrap_or(false)
+    });
+    if maximized_or_fullscreen {
+        return;
+    }
+
+    let rect = ctx.content_rect();
+    if rect.width() <= WINDOW_RESIZE_CORNER_SIZE * 2.0
+        || rect.height() <= WINDOW_RESIZE_CORNER_SIZE * 2.0
+    {
+        return;
+    }
+
+    let left = rect.left();
+    let right = rect.right();
+    let top = rect.top();
+    let bottom = rect.bottom();
+    let edge = WINDOW_RESIZE_EDGE_SIZE;
+    let corner = WINDOW_RESIZE_CORNER_SIZE;
+
+    let handles = [
+        (
+            "north_west",
+            egui::Rect::from_min_max(
+                egui::pos2(left, top),
+                egui::pos2(left + corner, top + corner),
+            ),
+            egui::viewport::ResizeDirection::NorthWest,
+            egui::CursorIcon::ResizeNwSe,
+        ),
+        (
+            "north_east",
+            egui::Rect::from_min_max(
+                egui::pos2(right - corner, top),
+                egui::pos2(right, top + corner),
+            ),
+            egui::viewport::ResizeDirection::NorthEast,
+            egui::CursorIcon::ResizeNeSw,
+        ),
+        (
+            "south_west",
+            egui::Rect::from_min_max(
+                egui::pos2(left, bottom - corner),
+                egui::pos2(left + corner, bottom),
+            ),
+            egui::viewport::ResizeDirection::SouthWest,
+            egui::CursorIcon::ResizeNeSw,
+        ),
+        (
+            "south_east",
+            egui::Rect::from_min_max(
+                egui::pos2(right - corner, bottom - corner),
+                egui::pos2(right, bottom),
+            ),
+            egui::viewport::ResizeDirection::SouthEast,
+            egui::CursorIcon::ResizeNwSe,
+        ),
+        (
+            "north",
+            egui::Rect::from_min_max(
+                egui::pos2(left + corner, top),
+                egui::pos2(right - corner, top + edge),
+            ),
+            egui::viewport::ResizeDirection::North,
+            egui::CursorIcon::ResizeVertical,
+        ),
+        (
+            "south",
+            egui::Rect::from_min_max(
+                egui::pos2(left + corner, bottom - edge),
+                egui::pos2(right - corner, bottom),
+            ),
+            egui::viewport::ResizeDirection::South,
+            egui::CursorIcon::ResizeVertical,
+        ),
+        (
+            "west",
+            egui::Rect::from_min_max(
+                egui::pos2(left, top + corner),
+                egui::pos2(left + edge, bottom - corner),
+            ),
+            egui::viewport::ResizeDirection::West,
+            egui::CursorIcon::ResizeHorizontal,
+        ),
+        (
+            "east",
+            egui::Rect::from_min_max(
+                egui::pos2(right - edge, top + corner),
+                egui::pos2(right, bottom - corner),
+            ),
+            egui::viewport::ResizeDirection::East,
+            egui::CursorIcon::ResizeHorizontal,
+        ),
+    ];
+
+    for (id, handle_rect, direction, cursor) in handles {
+        window_resize_interaction(ui, ctx, id, handle_rect, direction, cursor);
     }
 }
 
@@ -1963,6 +2091,7 @@ impl eframe::App for TypeTextApp {
                 View::Settings => self.ui_settings(ui, &ctx),
             });
 
+        window_resize_handles(ui, &ctx);
         self.ui_clear_all_confirmation(&ctx);
         self.ui_import_confirmation(&ctx);
         self.ui_favourite_confirmation(&ctx);
@@ -2478,7 +2607,7 @@ impl TypeTextApp {
                         |ui| section_header(ui, "Queue", ""),
                     );
 
-                    let actions_width = 124.0;
+                    let actions_width = 142.0;
                     let queue_width = (ui.available_width() - actions_width).max(0.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(queue_width, HEADER_CONTROL_HEIGHT),
@@ -2519,10 +2648,13 @@ impl TypeTextApp {
                     );
 
                     if ui
-                        .add_enabled(
-                            !self.snippet_chain.is_empty(),
-                            egui::Button::new("Undo Last"),
-                        )
+                        .add_enabled_ui(!self.snippet_chain.is_empty(), |ui| {
+                            ui.add_sized(
+                                [78.0, HEADER_CONTROL_HEIGHT],
+                                egui::Button::new("Undo Last"),
+                            )
+                        })
+                        .inner
                         .clicked()
                     {
                         self.snippet_chain.pop();
@@ -2537,7 +2669,10 @@ impl TypeTextApp {
                         };
                     }
                     if ui
-                        .add_enabled(!self.snippet_chain.is_empty(), egui::Button::new("Clear"))
+                        .add_enabled_ui(!self.snippet_chain.is_empty(), |ui| {
+                            ui.add_sized([52.0, HEADER_CONTROL_HEIGHT], egui::Button::new("Clear"))
+                        })
+                        .inner
                         .clicked()
                     {
                         self.snippet_chain.clear();
@@ -2552,11 +2687,15 @@ impl TypeTextApp {
             self.insert_selected(ctx);
         }
 
+        let results_width = ui.available_width();
         egui::ScrollArea::vertical()
             .id_salt("choose_results")
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-            .auto_shrink([false, false])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .max_width(results_width)
+            .auto_shrink([true, false])
             .show(ui, |ui| {
+                ui.set_max_width(results_width);
+                ui.set_width(results_width);
                 for index in 0..self.results.len() {
                     let result = self.results[index].clone();
                     let selected = self.selected_result == index;
