@@ -145,6 +145,13 @@ mod windows_platform {
     use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HWND};
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
+    #[cfg(not(feature = "offline-portable"))]
+    use windows::Win32::Networking::WinHttp::{
+        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_FLAG_SECURE, WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_QUERY_STATUS_CODE, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen,
+        WinHttpOpenRequest, WinHttpQueryDataAvailable, WinHttpQueryHeaders, WinHttpReadData,
+        WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetTimeouts,
+    };
     use windows::Win32::Storage::FileSystem::GetDriveTypeW;
     use windows::Win32::System::LibraryLoader::{
         LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
@@ -647,23 +654,121 @@ mod windows_platform {
             .map_err(Into::into)
     }
 
+    /// Owns a WinHTTP handle and closes it when dropped, including on the
+    /// early-error paths in [`fetch_text`].
+    #[cfg(not(feature = "offline-portable"))]
+    struct WinHttpHandle(*mut std::ffi::c_void);
+
+    #[cfg(not(feature = "offline-portable"))]
+    impl Drop for WinHttpHandle {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                let _ = unsafe { WinHttpCloseHandle(self.0) };
+            }
+        }
+    }
+
+    /// Fetch a small HTTPS text resource in-process via WinHTTP.
+    ///
+    /// Deliberately does NOT shell out to PowerShell or curl: an unsigned
+    /// executable spawning a hidden interpreter that then opens a network
+    /// connection is a classic AV behavioural-detection chain, and PowerShell
+    /// may be blocked outright by AppLocker or Constrained Language Mode.
+    /// WinHTTP performs OS certificate validation and blocks HTTPS->HTTP
+    /// redirect downgrades by default.
     #[cfg(not(feature = "offline-portable"))]
     pub fn fetch_text(url: &str) -> Result<String> {
-        let output = hidden_command("powershell")
-            .env("TYPETEXT_UPDATE_URL", url)
-            .args([
-                "-NoProfile",
-                "-Command",
-                "$ProgressPreference='SilentlyContinue'; $uri=[Environment]::GetEnvironmentVariable('TYPETEXT_UPDATE_URL'); (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Headers @{'User-Agent'='TypeText'} -Uri $uri).Content",
-            ])
-            .output()
-            .context("Could not run PowerShell update check")?;
+        const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(anyhow!("Update request failed. {}", stderr.trim()))
+        let parsed = url::Url::parse(url).context("Invalid update URL")?;
+        anyhow::ensure!(parsed.scheme() == "https", "Update requests must use HTTPS");
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| anyhow!("Update URL is missing a host"))?;
+        let port = parsed.port().unwrap_or(443);
+        let mut object = parsed.path().to_string();
+        if let Some(query) = parsed.query() {
+            object.push('?');
+            object.push_str(query);
+        }
+        let host_wide = wide_null(host);
+        let object_wide = wide_null(&object);
+
+        unsafe {
+            let session = WinHttpHandle(WinHttpOpen(
+                w!("TypeText"),
+                WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                PCWSTR::null(),
+                PCWSTR::null(),
+                0,
+            ));
+            anyhow::ensure!(!session.0.is_null(), "Could not open a WinHTTP session");
+            WinHttpSetTimeouts(session.0, 10_000, 10_000, 30_000, 30_000)
+                .context("Could not set update request timeouts")?;
+
+            let connection = WinHttpHandle(WinHttpConnect(
+                session.0,
+                PCWSTR(host_wide.as_ptr()),
+                port,
+                0,
+            ));
+            anyhow::ensure!(!connection.0.is_null(), "Could not connect for the update check");
+
+            let request = WinHttpHandle(WinHttpOpenRequest(
+                connection.0,
+                w!("GET"),
+                PCWSTR(object_wide.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                std::ptr::null(),
+                WINHTTP_FLAG_SECURE,
+            ));
+            anyhow::ensure!(!request.0.is_null(), "Could not create the update request");
+
+            WinHttpSendRequest(request.0, None, None, 0, 0, 0)
+                .context("Update request failed to send")?;
+            WinHttpReceiveResponse(request.0, std::ptr::null_mut())
+                .context("Update request received no response")?;
+
+            let mut status_code = 0u32;
+            let mut status_size = size_of::<u32>() as u32;
+            WinHttpQueryHeaders(
+                request.0,
+                WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                PCWSTR::null(),
+                Some((&mut status_code as *mut u32).cast()),
+                &mut status_size,
+                std::ptr::null_mut(),
+            )
+            .context("Could not read the update response status")?;
+            anyhow::ensure!(
+                (200..300).contains(&status_code),
+                "Update request failed. HTTP status {status_code}"
+            );
+
+            let mut body: Vec<u8> = Vec::new();
+            loop {
+                let mut available = 0u32;
+                WinHttpQueryDataAvailable(request.0, &mut available)
+                    .context("Could not read the update response")?;
+                if available == 0 {
+                    break;
+                }
+                anyhow::ensure!(
+                    body.len().saturating_add(available as usize) <= MAX_RESPONSE_BYTES,
+                    "Update response exceeds the {MAX_RESPONSE_BYTES} byte safety limit"
+                );
+                let mut chunk = vec![0u8; available as usize];
+                let mut read = 0u32;
+                WinHttpReadData(request.0, chunk.as_mut_ptr().cast(), available, &mut read)
+                    .context("Could not read the update response")?;
+                if read == 0 {
+                    break;
+                }
+                body.extend_from_slice(&chunk[..read as usize]);
+            }
+
+            Ok(String::from_utf8_lossy(&body).to_string())
         }
     }
 
