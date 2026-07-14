@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("All", "Standard", "Offline")]
     [string]$Variant = "All"
 )
@@ -304,8 +304,8 @@ if ($Variant -in @("All", "Offline")) {
     $OfflineBinaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($ExeSource))
     $ForbiddenMarkers = @(
         "api.github.com/repos/Joshndroid/TypeText/releases/latest",
-        "Invoke-WebRequest",
-        "url.dll,FileProtocolHandler",
+        "Could not open a WinHTTP session",
+        "Only HTTPS links can be opened",
         "Software\Microsoft\Windows\CurrentVersion\Run"
     )
     foreach ($Marker in $ForbiddenMarkers) {

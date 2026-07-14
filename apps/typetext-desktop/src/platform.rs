@@ -644,14 +644,34 @@ mod windows_platform {
         }
     }
 
+    /// Open an HTTPS link in the default browser via `ShellExecuteW`.
+    ///
+    /// Deliberately does NOT spawn `rundll32 url.dll,FileProtocolHandler`:
+    /// rundll32 is a LOLBin that AV behavioural heuristics flag, and
+    /// `FileProtocolHandler` will execute local or UNC paths. The scheme check
+    /// keeps this from ever launching anything but a web link, even if a
+    /// future caller passes an unvalidated URL.
     #[cfg(not(feature = "offline-portable"))]
     pub fn open_url(url: &str) -> Result<()> {
-        let mut command = hidden_command("rundll32");
-        command
-            .args(["url.dll,FileProtocolHandler", url])
-            .spawn()
-            .map(|_| ())
-            .map_err(Into::into)
+        let parsed = url::Url::parse(url).context("Invalid URL")?;
+        anyhow::ensure!(parsed.scheme() == "https", "Only HTTPS links can be opened");
+
+        let url_wide = wide_null(url);
+        let result = unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                PCWSTR(url_wide.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result.0 as isize <= 32 {
+            Err(anyhow!("Windows could not open the link"))
+        } else {
+            Ok(())
+        }
     }
 
     /// Owns a WinHTTP handle and closes it when dropped, including on the
@@ -1476,8 +1496,14 @@ mod macos_platform {
         None
     }
 
+    /// Open an HTTPS link in the default browser. The scheme check keeps
+    /// `open` from ever launching local files or applications, even if a
+    /// future caller passes an unvalidated URL.
     #[cfg(not(feature = "offline-portable"))]
     pub fn open_url(url: &str) -> Result<()> {
+        let parsed = url::Url::parse(url).context("Invalid URL")?;
+        anyhow::ensure!(parsed.scheme() == "https", "Only HTTPS links can be opened");
+
         Command::new("open")
             .arg(url)
             .spawn()
@@ -2016,8 +2042,14 @@ mod fallback_platform {
         None
     }
 
+    /// Open an HTTPS link in the default browser. The scheme check keeps
+    /// `xdg-open` from ever launching local files or applications, even if a
+    /// future caller passes an unvalidated URL.
     #[cfg(not(feature = "offline-portable"))]
     pub fn open_url(url: &str) -> Result<()> {
+        let parsed = url::Url::parse(url).context("Invalid URL")?;
+        anyhow::ensure!(parsed.scheme() == "https", "Only HTTPS links can be opened");
+
         Command::new("xdg-open")
             .arg(url)
             .spawn()
