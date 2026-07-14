@@ -37,6 +37,11 @@ if ([string]::IsNullOrWhiteSpace($Iscc) -or !(Test-Path $Iscc)) {
 $DistDirForInno = $DistDir.Replace("\", "\\")
 $OutputDirForInno = $OutputDir.Replace("\", "\\")
 $IconPath = (Join-Path $RootDir "icon\TypeText.ico").Replace("\", "\\")
+$LicenseSource = Join-Path $RootDir "LICENSE"
+if (!(Test-Path $LicenseSource)) {
+    throw "Expected license file was not found: $LicenseSource"
+}
+$LicensePath = $LicenseSource.Replace("\", "\\")
 
 $InnoScript = @"
 #define MyAppName "TypeText"
@@ -62,6 +67,7 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=$IconPath
+LicenseFile=$LicensePath
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName},0
 AppMutex={#MyAppMutex}
@@ -69,6 +75,7 @@ CloseApplications=yes
 RestartApplications=no
 
 [Files]
+; LICENSE.txt arrives via the portable dist folder, which the wildcard includes.
 Source: "$DistDirForInno\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

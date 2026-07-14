@@ -104,6 +104,13 @@ if [[ -f "$ROOT_DIR/icon/TypeText.icns" ]]; then
   cp "$ROOT_DIR/icon/TypeText.icns" "$RESOURCES_DIR/TypeText.icns"
 fi
 
+if [[ ! -f "$ROOT_DIR/LICENSE" ]]; then
+  echo "Expected license file was not found: $ROOT_DIR/LICENSE" >&2
+  exit 1
+fi
+# Must happen before codesign so the bundle signature covers the license.
+cp "$ROOT_DIR/LICENSE" "$RESOURCES_DIR/LICENSE.txt"
+
 if ! file "$MACOS_DIR/TypeText" | grep -q "arm64"; then
   file "$MACOS_DIR/TypeText" >&2
   echo "Expected a macOS arm64 executable in $MACOS_DIR/TypeText." >&2
