@@ -740,7 +740,10 @@ mod windows_platform {
                 port,
                 0,
             ));
-            anyhow::ensure!(!connection.0.is_null(), "Could not connect for the update check");
+            anyhow::ensure!(
+                !connection.0.is_null(),
+                "Could not connect for the update check"
+            );
 
             let request = WinHttpHandle(WinHttpOpenRequest(
                 connection.0,
@@ -809,9 +812,8 @@ mod windows_platform {
 
     impl ComInit {
         fn new() -> Self {
-            let result = unsafe {
-                CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)
-            };
+            let result =
+                unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
             Self {
                 should_uninit: result.is_ok(),
             }
@@ -924,8 +926,8 @@ mod windows_platform {
             Err(error) => return Err(anyhow!("{failure_message}. {error}")),
         }
 
-        let item = unsafe { dialog.GetResult() }
-            .map_err(|error| anyhow!("{failure_message}. {error}"))?;
+        let item =
+            unsafe { dialog.GetResult() }.map_err(|error| anyhow!("{failure_message}. {error}"))?;
         let path = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }
             .map_err(|error| anyhow!("{failure_message}. {error}"))?;
         let text = unsafe { path.to_string() };
@@ -1167,7 +1169,6 @@ mod windows_platform {
     fn wide_null(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
     }
-
 }
 
 #[cfg(target_os = "macos")]
