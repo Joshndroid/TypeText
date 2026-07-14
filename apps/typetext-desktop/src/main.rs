@@ -40,6 +40,12 @@ const WINDOW_RESIZE_EDGE_SIZE: f32 = 7.0;
 const WINDOW_RESIZE_CORNER_SIZE: f32 = 16.0;
 
 fn main() -> eframe::Result {
+    #[cfg(windows)]
+    if let Err(error) = platform::harden_dll_search() {
+        eprintln!("TypeText could not establish a secure DLL search path: {error}");
+        return Ok(());
+    }
+
     if let Err(error) = platform::install_app_mutex() {
         eprintln!("TypeText is already running or could not acquire its app lock: {error}");
         return Ok(());

@@ -146,6 +146,9 @@ mod windows_platform {
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
     use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+    use windows::Win32::System::LibraryLoader::{
+        LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
+    };
     #[cfg(not(feature = "offline-portable"))]
     use windows::Win32::System::Registry::{
         HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS,
@@ -177,6 +180,17 @@ mod windows_platform {
     static TARGET_WINDOW: AtomicIsize = AtomicIsize::new(0);
     static TARGET_PROCESS_ID: AtomicU32 = AtomicU32::new(0);
     static HOTKEY_MANAGER: OnceLock<Sender<HotkeyCommand>> = OnceLock::new();
+
+    /// Restrict later DLL loads to Windows' trusted system directory.
+    ///
+    /// TypeText is a single-executable application and does not ship companion
+    /// DLLs. Excluding the executable directory, current directory, and PATH
+    /// prevents DLL preloading when a portable build runs from a user-writable
+    /// folder. This must run before eframe/WGPU or the tray integration starts.
+    pub fn harden_dll_search() -> Result<()> {
+        unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) }
+            .context("Could not restrict DLL loading to the Windows system directory")
+    }
 
     pub fn install_app_mutex() -> Result<()> {
         unsafe {
@@ -1994,9 +2008,10 @@ pub use macos_platform::{
 };
 #[cfg(windows)]
 pub use windows_platform::{
-    install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
-    open_snippets_export_dialog, register_hotkeys, reregister_hotkeys, set_startup_enabled,
-    startup_enabled, storage_security_warning, tray_status, type_text, type_text_current_focus,
+    harden_dll_search, install_app_mutex, install_reopen_handler, open_droptext_file_dialog,
+    open_folder, open_snippets_export_dialog, register_hotkeys, reregister_hotkeys,
+    set_startup_enabled, startup_enabled, storage_security_warning, tray_status, type_text,
+    type_text_current_focus,
 };
 
 #[cfg(all(
