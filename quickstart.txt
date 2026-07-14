@@ -228,9 +228,12 @@ before using them because snippets can type arbitrary text and Enter keys.
 The offline portable build is intentionally lean from a security perspective:
 its update, external update-link, and Windows startup-registration features are
 removed when the app is built, rather than simply switched off in Settings.
-This reduces its network-facing and persistence-related capabilities. It means
-TypeText initiates no update or web traffic; it does not disable networking in
-Windows or other applications. It still uses the native Windows features needed
+This reduces its network-facing and persistence-related capabilities. TypeText
+contains no application network or update functionality; it does not disable
+networking in Windows or other applications. Windows may independently perform
+background system, connectivity, time, update, or certificate-validation
+traffic while TypeText is running. That operating-system traffic is not
+initiated by TypeText. TypeText still uses the native Windows features needed
 for runtime hotkeys, verified target focus, and text insertion. Favourite
 hotkeys do not use the Windows Registry.
 

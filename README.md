@@ -96,9 +96,11 @@ claim that any software is risk-free.
 
 Offline portable mode also refuses to start with its data folder on a UNC or
 mapped network drive, and refuses imports from or exports to remote Windows
-storage. "Offline" means TypeText initiates no update or web traffic and keeps
-its application data on local storage; Windows and other applications retain
-their normal networking capabilities.
+storage. "Offline" means TypeText contains no application network or update
+functionality and keeps its application data on local storage. Windows may
+independently perform background system, connectivity, time, update, or
+certificate-validation traffic while TypeText is running; that operating-system
+traffic is not initiated by TypeText.
 
 Portable snippet data is readable JSON and is not encrypted. Treat the complete
 TypeText folder as private, review imported snippets before using them, and do
@@ -227,10 +229,11 @@ For Windows, choose the package that matches the environment:
 - `TypeText-Windows-x64.zip` is the full portable build. It keeps data beside
   the executable while retaining update checks and optional per-user startup
   registration.
-- `TypeText-Windows-x64-Offline-Portable.zip` is the stripped, strictly local
-  variant for controlled or disconnected environments. It keeps data beside
-  the executable and compiles out update checks, external update links, and
-  Registry-based startup registration.
+- `TypeText-Windows-x64-Offline-Portable.zip` is the stripped TypeText variant
+  for controlled or disconnected environments. It keeps data beside the
+  executable and compiles out update checks, external update links, and
+  Registry-based startup registration. Windows itself may still perform its
+  normal background networking while TypeText is running.
 
 All three are native 64-bit Windows applications. They use Windows APIs for
 global hotkeys, window activation, and Unicode input, with no bundled browser
@@ -396,7 +399,8 @@ dependency are excluded at compile time. The build also inspects the completed
 PE import table and fails if the executable links a direct networking DLL.
 Both Windows variants must also pass post-build checks for ASLR, high-entropy
 addressing, DEP/NX, a single executable `.text` section, and no embedded PDB
-path.
+path. Windows may still generate its own background system or certificate-check
+traffic while the offline executable is running.
 
 ## macOS Permissions
 
