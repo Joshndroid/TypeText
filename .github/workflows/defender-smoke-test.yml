@@ -193,6 +193,17 @@ jobs:
 
           $status = Get-MpComputerStatus -ErrorAction Stop
           $reportPath = Join-Path $PWD "dist\defender-scan-report.txt"
+          $checksumPath = Join-Path $PWD "dist\TypeText-Windows-SHA256SUMS.txt"
+          . (Join-Path $PWD "Scripts\version.ps1")
+
+          Write-TypeTextWindowsChecksumManifest `
+            -StandardArchivePath "dist\TypeText-Windows-x64.zip" `
+            -OfflineArchivePath "dist\TypeText-Windows-x64-Offline-Portable.zip" `
+            -InstallerPath "dist\TypeText-Windows-x64-Setup.exe" `
+            -StandardExecutablePath "defender-scan\expanded\standard-portable\TypeText-Windows\TypeText.exe" `
+            -OfflineExecutablePath "defender-scan\expanded\offline-portable\TypeText-Windows-Offline-Portable\TypeText.exe" `
+            -OutputPath $checksumPath
+
           @(
             "Microsoft Defender release dry run: no detections",
             "Scan time (UTC): $([DateTime]::UtcNow.ToString('O'))",
@@ -203,14 +214,7 @@ jobs:
             "SHA-256 release artifact hashes:"
           ) | Set-Content -Path $reportPath -Encoding UTF8
 
-          $releaseArtifacts = @(
-            "dist\TypeText-Windows-x64.zip",
-            "dist\TypeText-Windows-x64-Offline-Portable.zip",
-            "dist\TypeText-Windows-x64-Setup.exe"
-          )
-          Get-FileHash -Algorithm SHA256 -Path $releaseArtifacts |
-            ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } |
-            Add-Content -Path $reportPath -Encoding UTF8
+          Get-Content -LiteralPath $checksumPath | Add-Content -Path $reportPath -Encoding UTF8
 
           Get-Content $reportPath
 
@@ -222,5 +226,6 @@ jobs:
             dist/TypeText-Windows-x64.zip
             dist/TypeText-Windows-x64-Offline-Portable.zip
             dist/TypeText-Windows-x64-Setup.exe
+            dist/TypeText-Windows-SHA256SUMS.txt
             dist/defender-scan-report.txt
           if-no-files-found: error

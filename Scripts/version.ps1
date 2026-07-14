@@ -38,6 +38,47 @@ function Write-TypeTextSha256Checksum {
     Write-Host "Wrote $ChecksumPath"
 }
 
+function Write-TypeTextWindowsChecksumManifest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StandardArchivePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OfflineArchivePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$InstallerPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$StandardExecutablePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OfflineExecutablePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputPath
+    )
+
+    $Entries = @(
+        [PSCustomObject]@{ Path = $StandardArchivePath; Name = "TypeText-Windows-x64.zip" },
+        [PSCustomObject]@{ Path = $OfflineArchivePath; Name = "TypeText-Windows-x64-Offline-Portable.zip" },
+        [PSCustomObject]@{ Path = $InstallerPath; Name = "TypeText-Windows-x64-Setup.exe" },
+        [PSCustomObject]@{ Path = $StandardExecutablePath; Name = "TypeText-Windows/TypeText.exe" },
+        [PSCustomObject]@{ Path = $OfflineExecutablePath; Name = "TypeText-Windows-Offline-Portable/TypeText.exe" }
+    )
+
+    $Lines = foreach ($Entry in $Entries) {
+        if (!(Test-Path -LiteralPath $Entry.Path -PathType Leaf)) {
+            throw "Cannot hash missing Windows release file: $($Entry.Path)"
+        }
+        $Hash = Get-FileHash -Algorithm SHA256 -LiteralPath $Entry.Path
+        "$($Hash.Hash.ToLowerInvariant())  $($Entry.Name)"
+    }
+
+    $Lines | Set-Content -LiteralPath $OutputPath -Encoding ASCII
+    Write-Host "Wrote $OutputPath"
+}
+
 function Invoke-TypeTextOptionalSigning {
     param(
         [Parameter(Mandatory = $true)]

@@ -259,8 +259,9 @@ then attaches them to the matching GitHub Release.
 `Scripts/generate-release-notes.sh`
 generates the release page changelog from commits since the previous `vX.X.X`
 tag, plus a full diff link. That same version is compiled into the app UI and
-written into portable build metadata. GitHub displays a SHA-256 digest for each
-release asset, so separate `.sha256` files are not attached.
+written into portable build metadata. The release workflow publishes
+`TypeText-Windows-SHA256SUMS.txt`, covering the three Windows downloads and the
+`TypeText.exe` inside each portable archive.
 
 GitHub release artifacts also include build provenance attestations. Verify a
 downloaded artifact with the GitHub CLI:

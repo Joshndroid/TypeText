@@ -319,6 +319,9 @@ jobs:
       - windows-installer
     timeout-minutes: 15
     steps:
+      - name: Checkout checksum tooling
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
       - name: Download Windows release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -467,6 +470,17 @@ jobs:
 
           $status = Get-MpComputerStatus -ErrorAction Stop
           $reportPath = Join-Path $PWD "defender-scan-report.txt"
+          $checksumPath = Join-Path $PWD "TypeText-Windows-SHA256SUMS.txt"
+          . (Join-Path $PWD "Scripts\version.ps1")
+
+          Write-TypeTextWindowsChecksumManifest `
+            -StandardArchivePath "defender-input\TypeText-Windows-x64.zip" `
+            -OfflineArchivePath "defender-input\TypeText-Windows-x64-Offline-Portable.zip" `
+            -InstallerPath "defender-input\TypeText-Windows-x64-Setup.exe" `
+            -StandardExecutablePath "defender-scan\expanded\standard-portable\TypeText-Windows\TypeText.exe" `
+            -OfflineExecutablePath "defender-scan\expanded\offline-portable\TypeText-Windows-Offline-Portable\TypeText.exe" `
+            -OutputPath $checksumPath
+
           @(
             "Microsoft Defender release scan: no detections",
             "Scan time (UTC): $([DateTime]::UtcNow.ToString('O'))",
@@ -477,22 +491,17 @@ jobs:
             "SHA-256 release artifact hashes:"
           ) | Set-Content -Path $reportPath -Encoding UTF8
 
-          $releaseArtifacts = @(
-            "defender-input\TypeText-Windows-x64.zip",
-            "defender-input\TypeText-Windows-x64-Offline-Portable.zip",
-            "defender-input\TypeText-Windows-x64-Setup.exe"
-          )
-          Get-FileHash -Algorithm SHA256 -Path $releaseArtifacts |
-            ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } |
-            Add-Content -Path $reportPath -Encoding UTF8
+          Get-Content -LiteralPath $checksumPath | Add-Content -Path $reportPath -Encoding UTF8
 
           Get-Content $reportPath
 
-      - name: Upload Microsoft Defender scan report
+      - name: Upload Microsoft Defender scan metadata
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: TypeText-Windows-Defender-scan-report
-          path: defender-scan-report.txt
+          path: |
+            defender-scan-report.txt
+            TypeText-Windows-SHA256SUMS.txt
           if-no-files-found: error
 
   release:
@@ -542,6 +551,7 @@ jobs:
             release-assets/TypeText-Windows-x64.zip
             release-assets/TypeText-Windows-x64-Offline-Portable.zip
             release-assets/TypeText-Windows-x64-Setup.exe
+            release-assets/TypeText-Windows-SHA256SUMS.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
@@ -556,6 +566,7 @@ jobs:
             release-assets/TypeText-Windows-x64.zip
             release-assets/TypeText-Windows-x64-Offline-Portable.zip
             release-assets/TypeText-Windows-x64-Setup.exe
+            release-assets/TypeText-Windows-SHA256SUMS.txt
 
   dry-run-summary:
     name: Verify dry-run release bundle
@@ -590,6 +601,7 @@ jobs:
             TypeText-Windows-x64.zip
             TypeText-Windows-x64-Offline-Portable.zip
             TypeText-Windows-x64-Setup.exe
+            TypeText-Windows-SHA256SUMS.txt
             defender-scan-report.txt
           )
 

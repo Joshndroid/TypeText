@@ -52,6 +52,7 @@ previous_tag="$(git -C "$ROOT_DIR" describe \
   echo "## Downloads"
   echo
   echo "GitHub displays a SHA-256 digest for each release asset."
+  echo "TypeText-Windows-SHA256SUMS.txt also records the hashes of the Windows downloads and both portable TypeText.exe files."
 } >"$OUTPUT_PATH"
 
 echo "Wrote $OUTPUT_PATH"
