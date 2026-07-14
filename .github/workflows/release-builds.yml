@@ -542,6 +542,16 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Extract Windows executables for attestation
+        run: |
+          # Attest the inner executables, not just the archives: AV vendors
+          # and users verify the extracted or installed TypeText.exe, and the
+          # installer packs the same binary as the standard portable archive.
+          unzip -o release-assets/TypeText-Windows-x64.zip -d release-assets/standard-portable
+          unzip -o release-assets/TypeText-Windows-x64-Offline-Portable.zip -d release-assets/offline-portable
+          test -f release-assets/standard-portable/TypeText-Windows/TypeText.exe
+          test -f release-assets/offline-portable/TypeText-Windows-Offline-Portable/TypeText.exe
+
       - name: Attest release artifacts
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
@@ -552,6 +562,8 @@ jobs:
             release-assets/TypeText-Windows-x64-Offline-Portable.zip
             release-assets/TypeText-Windows-x64-Setup.exe
             release-assets/TypeText-Windows-SHA256SUMS.txt
+            release-assets/standard-portable/TypeText-Windows/TypeText.exe
+            release-assets/offline-portable/TypeText-Windows-Offline-Portable/TypeText.exe
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3

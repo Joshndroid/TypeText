@@ -273,6 +273,15 @@ downloaded artifact with the GitHub CLI:
 gh attestation verify TypeText-Windows-x64.zip --repo Joshndroid/TypeText
 ```
 
+The `TypeText.exe` inside each Windows portable archive is attested
+individually, so an extracted executable can be verified directly. The
+installer packs the same binary as the standard portable archive, which means
+an installed `TypeText.exe` verifies the same way:
+
+```bash
+gh attestation verify TypeText.exe --repo Joshndroid/TypeText
+```
+
 Attestations prove the artifact was produced by this repository's GitHub Actions
 workflow.
 
