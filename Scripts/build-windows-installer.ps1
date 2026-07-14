@@ -82,8 +82,6 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\TypeText"
-Type: filesandordirs; Name: "{userappdata}\TypeText"
 Type: files; Name: "{userappdata}\Microsoft\Windows\Start Menu\Programs\Startup\TypeText.lnk"
 Type: files; Name: "{userappdata}\Microsoft\Windows\Start Menu\Programs\Startup\TypeText.cmd"
 
@@ -102,6 +100,28 @@ begin
     end;
 
     Exec(ExpandConstant('{cmd}'), '/C taskkill /IM "{#MyAppExeName}" /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    { The app registers open-on-startup through this HKCU Run value; remove it
+      so Windows does not try to launch the uninstalled app at logon. }
+    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'TypeText');
+
+    { Never delete user snippets silently: ask first, keep them by default,
+      and always keep them during silent uninstalls. }
+    if (not UninstallSilent) and
+       (DirExists(ExpandConstant('{localappdata}\TypeText')) or DirExists(ExpandConstant('{userappdata}\TypeText'))) then
+    begin
+      if MsgBox('Do you also want to delete your TypeText snippets, settings, and custom tokens?' + #13#10 + 'Choose No to keep them for a future installation.', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+      begin
+        DelTree(ExpandConstant('{localappdata}\TypeText'), True, True, True);
+        DelTree(ExpandConstant('{userappdata}\TypeText'), True, True, True);
+      end;
+    end;
   end;
 end;
 "@
