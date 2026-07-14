@@ -80,7 +80,76 @@ function Find-TypeTextDumpbin {
         }
     }
 
-    throw "dumpbin.exe was not found. Install the Visual C++ x64 build tools so the offline binary import table can be verified."
+    throw "dumpbin.exe was not found. Install the Visual C++ x64 build tools so Windows PE security properties can be verified."
+}
+
+function Assert-TypeTextPeHardening {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $Dumpbin = Find-TypeTextDumpbin
+    $DumpbinOutput = & $Dumpbin /nologo /headers $Path 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "dumpbin failed to inspect PE headers for $Path with exit code $LASTEXITCODE. $($DumpbinOutput | Out-String)"
+    }
+    $Headers = $DumpbinOutput -join "`n"
+
+    $RequiredCharacteristics = @(
+        "Dynamic base",
+        "High Entropy Virtual Addresses",
+        "NX compatible"
+    )
+    foreach ($Characteristic in $RequiredCharacteristics) {
+        if ($Headers -notmatch "(?im)^\s+$([regex]::Escape($Characteristic))\s*$") {
+            throw "$Path is missing required PE security characteristic: $Characteristic"
+        }
+    }
+
+    $SectionMatches = [regex]::Matches(
+        $Headers,
+        '(?ms)^SECTION HEADER #[0-9]+\s*\r?\n\s+(\S+)\s+name\s*\r?\n(.*?)(?=^SECTION HEADER #[0-9]+|\z)'
+    )
+    if ($SectionMatches.Count -eq 0) {
+        throw "Could not parse PE section headers for $Path; refusing to accept an unverified binary."
+    }
+
+    $ExecutableSections = @(
+        $SectionMatches | Where-Object {
+            $_.Groups[2].Value -match '(?im)^\s+.*\bExecute\b.*$'
+        } | ForEach-Object {
+            $_.Groups[1].Value
+        }
+    )
+    if ($ExecutableSections.Count -ne 1 -or $ExecutableSections[0] -ne ".text") {
+        $Description = if ($ExecutableSections.Count -eq 0) {
+            "none"
+        } else {
+            $ExecutableSections -join ", "
+        }
+        throw "$Path has unexpected executable PE sections: $Description. Expected only .text."
+    }
+
+    # Latin-1 preserves byte values one-to-one, so the printable-ASCII regex
+    # cannot bridge arbitrary high bytes by converting them to '?'.
+    $BinaryText = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($Path))
+    $PdbReferences = @(
+        [regex]::Matches($BinaryText, '[ -~]{4,}') | ForEach-Object {
+            $_.Value
+        } | Where-Object {
+            $_ -match '(?i)\.pdb'
+        }
+    )
+    $EmbeddedPdbPaths = @($PdbReferences | Where-Object { $_ -match '[\\/]' })
+    if ($EmbeddedPdbPaths.Count -gt 0) {
+        throw "$Path embeds a local PDB path: $($EmbeddedPdbPaths -join ', ')"
+    }
+
+    Write-Host "Verified PE hardening for $Path (ASLR, high-entropy VA, DEP/NX, .text-only execution, no PDB paths)."
+    if ($PdbReferences.Count -gt 0) {
+        Write-Host "Allowed filename-only PDB reference: $($PdbReferences -join ', ')"
+    }
 }
 
 function Assert-TypeTextOfflineImports {
@@ -156,6 +225,7 @@ if ($Variant -in @("All", "Standard")) {
         "--locked"
     )
     Assert-TypeTextBuiltExecutable -Path $ExeSource
+    Assert-TypeTextPeHardening -Path $ExeSource
 
     if (Test-Path $DistDir) {
         Remove-Item $DistDir -Recurse -Force
@@ -225,6 +295,7 @@ if ($Variant -in @("All", "Offline")) {
         "--locked"
     )
     Assert-TypeTextBuiltExecutable -Path $ExeSource
+    Assert-TypeTextPeHardening -Path $ExeSource
 
     Write-Host "Verifying offline portable PE imports"
     Assert-TypeTextOfflineImports -Path $ExeSource

@@ -394,6 +394,9 @@ The offline portable build does not check for updates, open update links, or
 offer startup registration. Those Windows integrations and the Registry
 dependency are excluded at compile time. The build also inspects the completed
 PE import table and fails if the executable links a direct networking DLL.
+Both Windows variants must also pass post-build checks for ASLR, high-entropy
+addressing, DEP/NX, a single executable `.text` section, and no embedded PDB
+path.
 
 ## macOS Permissions
 
