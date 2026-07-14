@@ -52,6 +52,90 @@ function Assert-TypeTextBuiltExecutable {
     }
 }
 
+function Find-TypeTextDumpbin {
+    $Command = Get-Command "dumpbin.exe" -ErrorAction SilentlyContinue
+    if ($Command) {
+        return $Command.Source
+    }
+
+    $VsWhereCandidates = @(
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
+    )
+    foreach ($VsWhere in $VsWhereCandidates) {
+        if (!(Test-Path $VsWhere)) {
+            continue
+        }
+
+        $FoundPaths = @(
+            & $VsWhere `
+                -latest `
+                -products "*" `
+                -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+                -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe"
+        )
+        $Dumpbin = $FoundPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($Dumpbin) {
+            return $Dumpbin
+        }
+    }
+
+    throw "dumpbin.exe was not found. Install the Visual C++ x64 build tools so the offline binary import table can be verified."
+}
+
+function Assert-TypeTextOfflineImports {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $Dumpbin = Find-TypeTextDumpbin
+    $DumpbinOutput = & $Dumpbin /nologo /imports $Path 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "dumpbin failed to inspect $Path with exit code $LASTEXITCODE. $($DumpbinOutput | Out-String)"
+    }
+
+    $Imports = [regex]::Matches(
+        ($DumpbinOutput -join "`n"),
+        '(?im)^\s+([A-Za-z0-9_.-]+\.dll)\s*$'
+    ) | ForEach-Object {
+        $_.Groups[1].Value.ToLowerInvariant()
+    } | Sort-Object -Unique
+
+    if (!$Imports -or $Imports -notcontains "kernel32.dll") {
+        throw "Could not parse the PE import table for $Path; refusing to accept an unverified offline binary."
+    }
+
+    $ForbiddenNetworkDlls = @(
+        "dhcpcsvc.dll",
+        "dhcpcsvc6.dll",
+        "dnsapi.dll",
+        "fwpuclnt.dll",
+        "httpapi.dll",
+        "iphlpapi.dll",
+        "mpr.dll",
+        "netapi32.dll",
+        "rasapi32.dll",
+        "rasdlg.dll",
+        "rasman.dll",
+        "urlmon.dll",
+        "webio.dll",
+        "wlanapi.dll",
+        "winhttp.dll",
+        "wininet.dll",
+        "winhttpcom.dll",
+        "ws2_32.dll",
+        "wsock32.dll"
+    )
+    $UnexpectedImports = @($Imports | Where-Object { $_ -in $ForbiddenNetworkDlls })
+    if ($UnexpectedImports.Count -gt 0) {
+        throw "Offline portable binary unexpectedly imports direct networking DLLs: $($UnexpectedImports -join ', ')"
+    }
+
+    Write-Host "Verified offline PE imports contain no direct networking DLLs."
+    Write-Host "Offline PE imports: $($Imports -join ', ')"
+}
+
 Set-Location $RootDir
 Write-Host "Building TypeText for Windows target: $WindowsTarget"
 Write-Host "Version: $Version"
@@ -141,6 +225,9 @@ if ($Variant -in @("All", "Offline")) {
         "--locked"
     )
     Assert-TypeTextBuiltExecutable -Path $ExeSource
+
+    Write-Host "Verifying offline portable PE imports"
+    Assert-TypeTextOfflineImports -Path $ExeSource
 
     Write-Host "Verifying offline portable binary capability markers"
     $OfflineBinaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($ExeSource))

@@ -391,7 +391,8 @@ dist\TypeText-Windows-x64-Setup.exe.sha256
 
 The offline portable build does not check for updates, open update links, or
 offer startup registration. Those Windows integrations and the Registry
-dependency are excluded at compile time.
+dependency are excluded at compile time. The build also inspects the completed
+PE import table and fails if the executable links a direct networking DLL.
 
 ## macOS Permissions
 
