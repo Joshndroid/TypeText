@@ -4304,7 +4304,30 @@ impl TypeTextApp {
                                 .selectable(true),
                             )
                             .on_hover_text("Expected digest reported by GitHub for this asset");
+                            if ui
+                                .small_button("Copy")
+                                .on_hover_text("Copy the expected SHA-256 to the clipboard")
+                                .clicked()
+                            {
+                                ui.ctx().copy_text(update.asset_sha256.clone());
+                                self.status = "Expected SHA-256 copied".to_string();
+                            }
                         });
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!(
+                                    "Check the download before opening it: {}",
+                                    verify_hash_command(&update.asset_name)
+                                ))
+                                .small()
+                                .weak(),
+                            )
+                            .selectable(true),
+                        )
+                        .on_hover_text(
+                            "Run this in the download folder and compare the output \
+                             with the expected SHA-256 above",
+                        );
                         ui.horizontal(|ui| {
                             if ui.button("Download").clicked() {
                                 self.open_update_download();
@@ -4472,6 +4495,19 @@ fn current_unix_time() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+}
+
+/// Platform-appropriate one-liner that hashes the downloaded update asset so
+/// the user can compare it with the expected digest shown in the UI. The
+/// browser performs the download, so the app never sees the file; this hint
+/// is the manual integrity check for that gap.
+#[cfg(not(feature = "offline-portable"))]
+fn verify_hash_command(asset_name: &str) -> String {
+    if cfg!(windows) {
+        format!("certutil -hashfile {asset_name} SHA256")
+    } else {
+        format!("shasum -a 256 {asset_name}")
+    }
 }
 
 #[cfg(not(feature = "offline-portable"))]
@@ -5139,6 +5175,20 @@ mod tests {
             cfg!(any(target_os = "macos", windows))
         );
         assert!(asset_platform_rank("TypeText-source.zip").is_none());
+    }
+
+    #[test]
+    #[cfg(not(feature = "offline-portable"))]
+    fn hash_verification_hint_matches_current_platform() {
+        let command = verify_hash_command("TypeText-Windows-x64-Setup.exe");
+        if cfg!(windows) {
+            assert_eq!(
+                command,
+                "certutil -hashfile TypeText-Windows-x64-Setup.exe SHA256"
+            );
+        } else {
+            assert_eq!(command, "shasum -a 256 TypeText-Windows-x64-Setup.exe");
+        }
     }
 
     #[test]
