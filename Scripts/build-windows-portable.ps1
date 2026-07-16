@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $RootDir = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "version.ps1")
+. (Join-Path $PSScriptRoot "security-review-policy.ps1")
 $Version = Get-TypeTextVersion -RootDir $RootDir
 $WindowsTarget = $env:TYPETEXT_WINDOWS_TARGET
 if ([string]::IsNullOrWhiteSpace($WindowsTarget)) {
@@ -230,6 +231,8 @@ if ($Variant -in @("All", "Standard")) {
     )
     Assert-TypeTextBuiltExecutable -Path $ExeSource
     Assert-TypeTextPeHardening -Path $ExeSource
+    Write-Host "Verifying standard binary capability-marker positive controls"
+    Assert-TypeTextCapabilityMarkers -Path $ExeSource -Expected Present
 
     if (Test-Path $DistDir) {
         Remove-Item $DistDir -Recurse -Force
@@ -305,19 +308,8 @@ if ($Variant -in @("All", "Offline")) {
     Write-Host "Verifying offline portable PE imports"
     Assert-TypeTextOfflineImports -Path $ExeSource
 
-    Write-Host "Verifying offline portable binary capability markers"
-    $OfflineBinaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($ExeSource))
-    $ForbiddenMarkers = @(
-        "api.github.com/repos/Joshndroid/TypeText/releases/latest",
-        "Could not open a WinHTTP session",
-        "Only HTTPS links can be opened",
-        "Software\Microsoft\Windows\CurrentVersion\Run"
-    )
-    foreach ($Marker in $ForbiddenMarkers) {
-        if ($OfflineBinaryText.Contains($Marker)) {
-            throw "Offline portable binary unexpectedly contains disabled capability marker: $Marker"
-        }
-    }
+    Write-Host "Verifying offline portable binary capability-marker absence"
+    Assert-TypeTextCapabilityMarkers -Path $ExeSource -Expected Absent
 
     if (Test-Path $OfflineDistDir) {
         Remove-Item $OfflineDistDir -Recurse -Force

@@ -30,5 +30,8 @@ Thumbs.db
 *.tmp
 *.bak
 
-# Private local security-review harness (reports are already under dist/)
-/Scripts/run-windows-security-review.ps1
+# Private local security-review harnesses (reports are already under dist/)
+/Scripts/*security-review*.ps1
+
+# Shared build policy is required by the tracked Windows packaging script
+!/Scripts/security-review-policy.ps1
