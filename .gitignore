@@ -29,3 +29,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.bak
+
+# Private local security-review harness (reports are already under dist/)
+/Scripts/run-windows-security-review.ps1
