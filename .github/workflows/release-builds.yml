@@ -553,7 +553,7 @@ jobs:
           test -f release-assets/offline-portable/TypeText-Windows-Offline-Portable/TypeText.exe
 
       - name: Attest release artifacts
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: |
             release-assets/TypeText-macOS.zip
