@@ -1,0 +1,8 @@
+name: TypeText CodeQL config
+
+paths:
+  - apps
+  - crates
+
+paths-ignore:
+  - third_party
