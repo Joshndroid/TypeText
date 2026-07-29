@@ -7,7 +7,7 @@ use eframe::egui;
 #[cfg(not(feature = "offline-portable"))]
 use serde::Deserialize;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(not(feature = "offline-portable"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
@@ -16,9 +16,10 @@ use typetext_core::{
     AppSettings, CustomToken, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_FAVOURITES,
     MAX_SNIPPET_TITLE_CHARS, MAX_TYPING_DELAY_MS, PortablePaths, QueuedSnippetClickAction,
     SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet, SnippetFile, SnippetGroup, SnippetSortOrder,
-    TokenFile, expand_snippet_tokens_with_custom, export_snippets, import_droptext_with_warnings,
-    load_or_create_settings, load_or_create_snippets, load_or_create_tokens, save_settings,
-    save_snippets, save_tokens, search_snippets, validate_settings,
+    TokenFile, WindowSize, expand_snippet_tokens_with_custom, export_snippets,
+    import_droptext_with_warnings, load_or_create_settings, load_or_create_snippets,
+    load_or_create_tokens, save_settings, save_snippets, save_tokens, search_snippets,
+    validate_settings,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -38,6 +39,8 @@ const SNIPPET_TRANSFER_COMBO_WIDTH: f32 = 68.0;
 const DETAIL_HEADER_SEPARATOR_OFFSET: f32 = 9.0;
 const WINDOW_RESIZE_EDGE_SIZE: f32 = 7.0;
 const WINDOW_RESIZE_CORNER_SIZE: f32 = 16.0;
+const DEFAULT_WINDOW_SIZE: [f32; 2] = [780.0, 570.0];
+const WINDOW_SIZE_SAVE_DELAY: Duration = Duration::from_millis(500);
 
 fn main() -> eframe::Result {
     #[cfg(windows)]
@@ -51,10 +54,16 @@ fn main() -> eframe::Result {
         return Ok(());
     }
 
+    let initial_window_size = resolve_paths()
+        .ok()
+        .and_then(|paths| load_or_create_settings(&paths).ok())
+        .and_then(|settings| settings.window_size)
+        .map(|size| [size.width, size.height])
+        .unwrap_or(DEFAULT_WINDOW_SIZE);
     let icon = app_icon_data();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_TITLE)
-        .with_inner_size([780.0, 570.0])
+        .with_inner_size(initial_window_size)
         .with_min_inner_size([560.0, 380.0])
         .with_decorations(false);
     if let Some(icon) = icon {
@@ -300,6 +309,8 @@ struct TypeTextApp {
     show_background_notice: bool,
     background_notice_seen: bool,
     open_minimized_pending: bool,
+    pending_window_size: Option<WindowSize>,
+    window_size_changed_at: Option<Instant>,
 }
 
 fn parse_hex_color(value: &str) -> Option<egui::Color32> {
@@ -959,27 +970,7 @@ fn sidebar_reorder_row(
 
 impl TypeTextApp {
     fn new(cc: &eframe::CreationContext<'_>) -> anyhow::Result<Self> {
-        #[cfg(feature = "offline-portable")]
-        let paths = {
-            let executable = std::env::current_exe()
-                .context("Could not determine the offline portable executable path")?;
-            if let Some(warning) = platform::storage_security_warning(&executable) {
-                return Err(anyhow::anyhow!(
-                    "Offline portable mode refuses remote storage. {warning}"
-                ));
-            }
-            PortablePaths::strictly_beside_executable()?
-        };
-        #[cfg(not(feature = "offline-portable"))]
-        let paths = PortablePaths::beside_executable()
-            .context("Could not determine a safe TypeText data directory")?;
-        if OFFLINE_PORTABLE
-            && let Some(warning) = platform::storage_security_warning(&paths.data_dir)
-        {
-            return Err(anyhow::anyhow!(
-                "Offline portable mode refuses remote data storage. {warning}"
-            ));
-        }
+        let paths = resolve_paths()?;
         let (snippets, snippets_load_error) = match load_or_create_snippets(&paths) {
             Ok(snippets) => (snippets, None),
             Err(error) => (
@@ -1115,6 +1106,8 @@ impl TypeTextApp {
             show_background_notice: false,
             background_notice_seen: false,
             open_minimized_pending,
+            pending_window_size: None,
+            window_size_changed_at: None,
         };
         if let Some(error) = tray_error {
             app.show_error(error);
@@ -1300,6 +1293,44 @@ impl TypeTextApp {
             self.request_hide_to_background(ctx);
         } else if minimized {
             self.request_hide_to_background(ctx);
+        }
+    }
+
+    fn track_window_size(&mut self, ctx: &egui::Context) {
+        let viewport = ctx.input(|input| input.viewport().clone());
+        if viewport.minimized == Some(true) || viewport.maximized == Some(true) {
+            return;
+        }
+        if let Some(rect) = viewport.inner_rect {
+            let size = WindowSize {
+                width: rect.width(),
+                height: rect.height(),
+            };
+            if self.settings.window_size != Some(size) {
+                self.settings.window_size = Some(size);
+                self.pending_window_size = Some(size);
+                self.window_size_changed_at = Some(Instant::now());
+            }
+        }
+        if self
+            .window_size_changed_at
+            .is_some_and(|changed_at| changed_at.elapsed() >= WINDOW_SIZE_SAVE_DELAY)
+        {
+            self.persist_pending_window_size();
+        }
+    }
+
+    fn persist_pending_window_size(&mut self) {
+        let Some(size) = self.pending_window_size else {
+            return;
+        };
+        let Ok(mut persisted_settings) = load_or_create_settings(&self.paths) else {
+            return;
+        };
+        persisted_settings.window_size = Some(size);
+        if save_settings(&self.paths, &persisted_settings).is_ok() {
+            self.pending_window_size = None;
+            self.window_size_changed_at = None;
         }
     }
 
@@ -2039,6 +2070,7 @@ fn insert_at_char_range(text: &mut String, start: usize, end: usize, insertion: 
 
 impl eframe::App for TypeTextApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.track_window_size(ctx);
         if self.open_minimized_pending {
             self.open_minimized_pending = false;
             self.background_notice_seen = true;
@@ -2105,6 +2137,35 @@ impl eframe::App for TypeTextApp {
         self.ui_warning_popup(&ctx);
         self.ui_error_popup(&ctx);
     }
+}
+
+impl Drop for TypeTextApp {
+    fn drop(&mut self) {
+        self.persist_pending_window_size();
+    }
+}
+
+fn resolve_paths() -> anyhow::Result<PortablePaths> {
+    #[cfg(feature = "offline-portable")]
+    let paths = {
+        let executable = std::env::current_exe()
+            .context("Could not determine the offline portable executable path")?;
+        if let Some(warning) = platform::storage_security_warning(&executable) {
+            return Err(anyhow::anyhow!(
+                "Offline portable mode refuses remote storage. {warning}"
+            ));
+        }
+        PortablePaths::strictly_beside_executable()?
+    };
+    #[cfg(not(feature = "offline-portable"))]
+    let paths = PortablePaths::beside_executable()
+        .context("Could not determine a safe TypeText data directory")?;
+    if OFFLINE_PORTABLE && let Some(warning) = platform::storage_security_warning(&paths.data_dir) {
+        return Err(anyhow::anyhow!(
+            "Offline portable mode refuses remote data storage. {warning}"
+        ));
+    }
+    Ok(paths)
 }
 
 impl TypeTextApp {

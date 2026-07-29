@@ -130,6 +130,15 @@ pub struct AppSettings {
     pub check_for_updates: bool,
     #[serde(default)]
     pub last_update_check_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_size: Option<WindowSize>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowSize {
+    pub width: f32,
+    pub height: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -215,6 +224,7 @@ impl Default for AppSettings {
             queued_snippet_click_action: default_queued_snippet_click_action(),
             check_for_updates: default_check_for_updates(),
             last_update_check_unix: None,
+            window_size: None,
         }
     }
 }
@@ -726,6 +736,16 @@ pub fn validate_snippets(snippets: &SnippetFile) -> Result<()> {
 }
 
 pub fn validate_settings(settings: &AppSettings) -> Result<()> {
+    if let Some(window_size) = settings.window_size
+        && (!window_size.width.is_finite()
+            || !window_size.height.is_finite()
+            || !(560.0..=16_384.0).contains(&window_size.width)
+            || !(380.0..=16_384.0).contains(&window_size.height))
+    {
+        return Err(anyhow!(
+            "Saved window size must be between 560 x 380 and 16384 x 16384."
+        ));
+    }
     if settings.typing_delay_ms > MAX_TYPING_DELAY_MS {
         return Err(anyhow!(
             "Typing delay cannot exceed {MAX_TYPING_DELAY_MS} milliseconds."
@@ -1314,6 +1334,7 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(r#"{"hotkey":"Ctrl+Alt+Space"}"#).unwrap();
 
         assert!(settings.favourite_hotkeys.iter().all(String::is_empty));
+        assert_eq!(settings.window_size, None);
     }
 
     #[test]
