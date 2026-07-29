@@ -1215,31 +1215,39 @@ fn sidebar_named_row(
     response
 }
 
-fn sidebar_reorder_row(
-    ui: &mut egui::Ui,
-    title: &str,
+struct SidebarReorderRow {
     selected: bool,
     can_drag: bool,
     can_move_up: bool,
     can_move_down: bool,
     reorder_control: EditorReorderControl,
-    item_name: &str,
+    item_name: &'static str,
     favourite_slot: Option<u8>,
+}
+
+fn sidebar_reorder_row(
+    ui: &mut egui::Ui,
+    title: &str,
+    row: SidebarReorderRow,
 ) -> (egui::Response, Option<egui::Response>, bool, bool) {
     const HANDLE_WIDTH: f32 = 26.0;
     const ARROW_BUTTON_WIDTH: f32 = 23.0;
     const ARROW_GAP: f32 = 3.0;
     const RIGHT_INSET: f32 = 7.0;
 
-    let badge_width = if favourite_slot.is_some() { 30.0 } else { 0.0 };
-    let control_width = match reorder_control {
+    let badge_width = if row.favourite_slot.is_some() {
+        30.0
+    } else {
+        0.0
+    };
+    let control_width = match row.reorder_control {
         EditorReorderControl::DragHandles => HANDLE_WIDTH,
-        EditorReorderControl::ArrowButtons if selected => ARROW_BUTTON_WIDTH * 2.0 + ARROW_GAP,
+        EditorReorderControl::ArrowButtons if row.selected => ARROW_BUTTON_WIDTH * 2.0 + ARROW_GAP,
         EditorReorderControl::ArrowButtons => 0.0,
     };
     let reserved_width = control_width + RIGHT_INSET * 2.0 + badge_width;
-    let response = sidebar_named_row(ui, title, selected, reserved_width);
-    if let Some(slot) = favourite_slot {
+    let response = sidebar_named_row(ui, title, row.selected, reserved_width);
+    if let Some(slot) = row.favourite_slot {
         ui.painter().text(
             egui::pos2(
                 response.rect.right() - RIGHT_INSET - control_width - 4.0,
@@ -1252,8 +1260,8 @@ fn sidebar_reorder_row(
         );
     }
 
-    if reorder_control == EditorReorderControl::ArrowButtons {
-        if !selected {
+    if row.reorder_control == EditorReorderControl::ArrowButtons {
+        if !row.selected {
             return (response, None, false, false);
         }
         let arrow_y = response.rect.center().y - 11.0;
@@ -1270,14 +1278,14 @@ fn sidebar_reorder_row(
         );
         let up_clicked = ui
             .put(up_rect, egui::Button::new("↑"))
-            .on_hover_text(format!("Move {item_name} up"))
+            .on_hover_text(format!("Move {} up", row.item_name))
             .clicked()
-            && can_move_up;
+            && row.can_move_up;
         let down_clicked = ui
             .put(down_rect, egui::Button::new("↓"))
-            .on_hover_text(format!("Move {item_name} down"))
+            .on_hover_text(format!("Move {} down", row.item_name))
             .clicked()
-            && can_move_down;
+            && row.can_move_down;
         return (response, None, up_clicked, down_clicked);
     }
 
@@ -1292,29 +1300,29 @@ fn sidebar_reorder_row(
         .interact(
             handle_rect,
             response.id.with("drag_handle"),
-            if can_drag {
+            if row.can_drag {
                 egui::Sense::drag()
             } else {
                 egui::Sense::hover()
             },
         )
-        .on_hover_text(if can_drag {
-            format!("Drag to reorder {item_name}")
+        .on_hover_text(if row.can_drag {
+            format!("Drag to reorder {}", row.item_name)
         } else {
-            format!("{item_name} order cannot be dragged")
+            format!("{} order cannot be dragged", row.item_name)
         });
     ui.painter().text(
         handle_rect.center(),
         egui::Align2::CENTER_CENTER,
         "⋮⋮",
         egui::TextStyle::Button.resolve(ui.style()),
-        if can_drag {
+        if row.can_drag {
             ui.visuals().text_color()
         } else {
             ui.visuals().weak_text_color()
         },
     );
-    if can_drag && (drag_response.hovered() || drag_response.dragged()) {
+    if row.can_drag && (drag_response.hovered() || drag_response.dragged()) {
         ui.ctx().set_cursor_icon(if drag_response.dragged() {
             egui::CursorIcon::Grabbing
         } else {
@@ -2303,13 +2311,18 @@ impl TypeTextApp {
                                         sidebar_reorder_row(
                                             ui,
                                             name,
-                                            selected,
-                                            self.snippets.groups.len() > 1,
-                                            *index > 0,
-                                            *index + 1 < self.snippets.groups.len(),
-                                            self.settings.editor_reorder_control,
-                                            "group",
-                                            None,
+                                            SidebarReorderRow {
+                                                selected,
+                                                can_drag: self.snippets.groups.len() > 1,
+                                                can_move_up: *index > 0,
+                                                can_move_down: *index + 1
+                                                    < self.snippets.groups.len(),
+                                                reorder_control: self
+                                                    .settings
+                                                    .editor_reorder_control,
+                                                item_name: "group",
+                                                favourite_slot: None,
+                                            },
                                         );
                                     if move_up {
                                         self.reorder_editor_group(*index, *index - 1);
@@ -2483,20 +2496,24 @@ impl TypeTextApp {
                                         sidebar_reorder_row(
                                             ui,
                                             title,
-                                            selected,
-                                            can_drag,
-                                            can_drag && *snippet_index > 0,
-                                            can_drag
-                                                && *snippet_index + 1
-                                                    < self
-                                                        .snippets
-                                                        .groups
-                                                        .get(*group_index)
-                                                        .map(|group| group.snippets.len())
-                                                        .unwrap_or_default(),
-                                            self.settings.editor_reorder_control,
-                                            "snippet",
-                                            *favourite_slot,
+                                            SidebarReorderRow {
+                                                selected,
+                                                can_drag,
+                                                can_move_up: can_drag && *snippet_index > 0,
+                                                can_move_down: can_drag
+                                                    && *snippet_index + 1
+                                                        < self
+                                                            .snippets
+                                                            .groups
+                                                            .get(*group_index)
+                                                            .map(|group| group.snippets.len())
+                                                            .unwrap_or_default(),
+                                                reorder_control: self
+                                                    .settings
+                                                    .editor_reorder_control,
+                                                item_name: "snippet",
+                                                favourite_slot: *favourite_slot,
+                                            },
                                         );
                                     if move_up {
                                         self.selected_group = *group_index;
@@ -4308,13 +4325,18 @@ impl TypeTextApp {
                                             sidebar_reorder_row(
                                                 ui,
                                                 &format!("{{{name}}}"),
-                                                selected,
-                                                self.tokens.custom_tokens.len() > 1,
-                                                *index > 0,
-                                                *index + 1 < self.tokens.custom_tokens.len(),
-                                                self.settings.editor_reorder_control,
-                                                "token",
-                                                None,
+                                                SidebarReorderRow {
+                                                    selected,
+                                                    can_drag: self.tokens.custom_tokens.len() > 1,
+                                                    can_move_up: *index > 0,
+                                                    can_move_down: *index + 1
+                                                        < self.tokens.custom_tokens.len(),
+                                                    reorder_control: self
+                                                        .settings
+                                                        .editor_reorder_control,
+                                                    item_name: "token",
+                                                    favourite_slot: None,
+                                                },
                                             );
                                         if move_up {
                                             self.reorder_editor_token(*index, *index - 1);
