@@ -211,7 +211,9 @@ Settings include:
 - Queue selection and paragraph-separator behavior.
 - Favourite slots and their optional shortcuts.
 - Light, dark, or system theme.
-- Accent color.
+- Curated accent-color presets or a custom hexadecimal accent.
+- Small, default, or large interface sizing.
+- Reduced visual effects for interface transitions.
 - Update checks, except in Windows offline portable.
 
 ## 10. Import, export, storage, and backups

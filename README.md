@@ -452,6 +452,8 @@ System Settings > Privacy & Security > Accessibility
   "openOnStartup": false,
   "theme": "system",
   "accentColor": "#0A7E76",
+  "interfaceSize": "default",
+  "reduceVisualEffects": false,
   "queuedSnippetClickAction": "addAgain",
   "checkForUpdates": true,
   "lastUpdateCheckUnix": null

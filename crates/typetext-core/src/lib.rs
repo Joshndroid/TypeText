@@ -127,6 +127,10 @@ pub struct AppSettings {
     #[serde(default = "default_accent_color")]
     pub accent_color: String,
     #[serde(default)]
+    pub interface_size: InterfaceSize,
+    #[serde(default)]
+    pub reduce_visual_effects: bool,
+    #[serde(default)]
     pub editor_reorder_control: EditorReorderControl,
     #[serde(default = "default_queued_snippet_click_action")]
     pub queued_snippet_click_action: QueuedSnippetClickAction,
@@ -158,6 +162,15 @@ pub enum EditorReorderControl {
     #[default]
     DragHandles,
     ArrowButtons,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum InterfaceSize {
+    Small,
+    #[default]
+    Default,
+    Large,
 }
 
 #[derive(Debug, Clone)]
@@ -245,6 +258,8 @@ impl Default for AppSettings {
             open_minimized: false,
             theme: default_theme(),
             accent_color: default_accent_color(),
+            interface_size: InterfaceSize::default(),
+            reduce_visual_effects: false,
             editor_reorder_control: EditorReorderControl::default(),
             queued_snippet_click_action: default_queued_snippet_click_action(),
             check_for_updates: default_check_for_updates(),

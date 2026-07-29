@@ -13,13 +13,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use typetext_core::MAX_WINDOWS_INPUT_DELAY_MS;
 use typetext_core::{
-    AppSettings, CustomToken, EditorReorderControl, MAX_EMPTY_LINES_BETWEEN_SNIPPETS,
-    MAX_FAVOURITES, MAX_SNIPPET_TITLE_CHARS, MAX_TYPING_DELAY_MS, PortablePaths,
-    QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet, SnippetFile,
-    SnippetGroup, SnippetSortOrder, TokenFile, WindowSize, expand_snippet_tokens_with_custom,
-    export_snippets, import_droptext_with_warnings, load_or_create_settings,
-    load_or_create_snippets, load_or_create_tokens, save_settings, save_snippets, save_tokens,
-    search_snippets, validate_settings,
+    AppSettings, CustomToken, EditorReorderControl, InterfaceSize,
+    MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_FAVOURITES, MAX_SNIPPET_TITLE_CHARS, MAX_TYPING_DELAY_MS,
+    PortablePaths, QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet,
+    SnippetFile, SnippetGroup, SnippetSortOrder, TokenFile, WindowSize,
+    expand_snippet_tokens_with_custom, export_snippets, import_droptext_with_warnings,
+    load_or_create_settings, load_or_create_snippets, load_or_create_tokens, save_settings,
+    save_snippets, save_tokens, search_snippets, validate_settings,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -44,6 +44,15 @@ const DEFAULT_WINDOW_SIZE: [f32; 2] = [860.0, 570.0];
 const WINDOW_SIZE_SAVE_DELAY: Duration = Duration::from_millis(500);
 const NAV_BUTTON_SIZE: [f32; 2] = [72.0, 24.0];
 const FILTER_BUTTON_HEIGHT: f32 = 24.0;
+const ACCENT_PRESETS: &[(&str, &str)] = &[
+    ("Teal", "#0A7E76"),
+    ("Blue", "#3478C8"),
+    ("Indigo", "#6657C8"),
+    ("Violet", "#8A4FB5"),
+    ("Rose", "#B64E6A"),
+    ("Orange", "#C66A24"),
+    ("Green", "#39845A"),
+];
 
 fn main() -> eframe::Result {
     #[cfg(windows)]
@@ -137,7 +146,7 @@ const SETTINGS_PANELS: &[(SettingsPanel, &str, &str)] = &[
     (
         SettingsPanel::Appearance,
         "Appearance",
-        "appearance theme system light dark accent color hex editor reordering drag handles arrow buttons mouse keyboard",
+        "appearance theme system light dark accent color hex presets interface size scale small default large accessibility reduce visual effects motion animation editor reordering drag handles arrow buttons mouse keyboard",
     ),
     (
         SettingsPanel::Data,
@@ -590,11 +599,11 @@ fn accent_hover_color(accent: egui::Color32, dark: bool) -> egui::Color32 {
     }
 }
 
-fn apply_modern_style(ctx: &egui::Context, accent_hex: &str) {
+fn apply_modern_style(ctx: &egui::Context, settings: &AppSettings) {
     ctx.all_styles_mut(|style| {
         let dark = style.visuals.dark_mode;
-        let accent =
-            parse_hex_color(accent_hex).unwrap_or_else(|| egui::Color32::from_rgb(10, 126, 118));
+        let accent = parse_hex_color(&settings.accent_color)
+            .unwrap_or_else(|| egui::Color32::from_rgb(10, 126, 118));
         let accent_hover = accent_hover_color(accent, dark);
         let accent_text = accent_text_color(accent);
         let (panel, raised, raised_hover, text, weak_text, border, input_bg) = if dark {
@@ -624,6 +633,11 @@ fn apply_modern_style(ctx: &egui::Context, accent_hex: &str) {
         style.spacing.button_padding = egui::vec2(8.0, 4.0);
         style.spacing.menu_margin = egui::Margin::same(6);
         style.spacing.indent = 10.0;
+        style.animation_time = if settings.reduce_visual_effects {
+            0.0
+        } else {
+            0.2
+        };
         let mut scroll_style = egui::style::ScrollStyle::floating();
         scroll_style.floating_allocated_width = scroll_style.bar_width;
         scroll_style.dormant_background_opacity = 0.0;
@@ -707,8 +721,14 @@ fn apply_modern_style(ctx: &egui::Context, accent_hex: &str) {
 }
 
 fn apply_theme(ctx: &egui::Context, settings: &AppSettings) {
+    let zoom_factor = match settings.interface_size {
+        InterfaceSize::Small => 0.9,
+        InterfaceSize::Default => 1.0,
+        InterfaceSize::Large => 1.15,
+    };
+    ctx.set_zoom_factor(zoom_factor);
     ctx.set_theme(theme_preference(&settings.theme));
-    apply_modern_style(ctx, &settings.accent_color);
+    apply_modern_style(ctx, settings);
 }
 
 fn configure_fonts(ctx: &egui::Context) {
@@ -5529,6 +5549,92 @@ impl TypeTextApp {
                             );
                         }
                     });
+                    ui.label(egui::RichText::new("Presets").small().weak());
+                    ui.horizontal_wrapped(|ui| {
+                        for &(name, hex) in ACCENT_PRESETS {
+                            let color = parse_hex_color(hex).expect("preset accent must be valid");
+                            let selected =
+                                self.settings.accent_color.eq_ignore_ascii_case(hex);
+                            let label = format!("{} {name}", if selected { "✓" } else { " " });
+                            let font_id = egui::TextStyle::Button.resolve(ui.style());
+                            let text_width = ui.fonts_mut(|fonts| {
+                                fonts
+                                    .layout_no_wrap(
+                                        format!("✓ {name}"),
+                                        font_id,
+                                        accent_text_color(color),
+                                    )
+                                    .size()
+                                    .x
+                            });
+                            let button_width =
+                                text_width + ui.spacing().button_padding.x * 2.0;
+                            let button_height = ui.spacing().interact_size.y;
+                            if ui
+                                .add_sized(
+                                    [button_width, button_height],
+                                    egui::Button::new(
+                                        egui::RichText::new(label)
+                                            .color(accent_text_color(color)),
+                                    )
+                                    .fill(color),
+                                )
+                                .on_hover_text(format!("{name}: {hex}"))
+                                .clicked()
+                            {
+                                self.settings.accent_color = hex.to_string();
+                                self.mark_settings_dirty();
+                            }
+                        }
+                    });
+                    });
+                    section_gap(ui);
+                    framed_section(ui, "Interface Size", "display scale", |ui| {
+                        ui.label(egui::RichText::new("Interface size").small());
+                        ui.horizontal(|ui| {
+                            for (value, label) in [
+                                (InterfaceSize::Small, "Small"),
+                                (InterfaceSize::Default, "Default"),
+                                (InterfaceSize::Large, "Large"),
+                            ] {
+                                if ui
+                                    .add(egui::Button::selectable(
+                                        self.settings.interface_size == value,
+                                        label,
+                                    ))
+                                    .clicked()
+                                {
+                                    self.settings.interface_size = value;
+                                    self.mark_settings_dirty();
+                                }
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(
+                                "Scales text, controls, and spacing together after saving.",
+                            )
+                            .small()
+                            .weak(),
+                        );
+                    });
+                    section_gap(ui);
+                    framed_section(ui, "Accessibility", "visual comfort", |ui| {
+                        if ui
+                            .checkbox(
+                                &mut self.settings.reduce_visual_effects,
+                                "Reduce visual effects",
+                            )
+                            .changed()
+                        {
+                            self.mark_settings_dirty();
+                        }
+                        ui.label(
+                            egui::RichText::new(
+                                "Removes interface transition animations while leaving typing behavior unchanged.",
+                            )
+                            .small()
+                            .weak(),
+                        );
                     });
                     section_gap(ui);
                     framed_section(ui, "Editor Reordering", "mouse controls", |ui| {
