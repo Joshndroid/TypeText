@@ -209,6 +209,140 @@ enum PendingEditorDeletion {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenIssueLevel {
+    Error,
+    Warning,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TokenIssue {
+    level: TokenIssueLevel,
+    message: String,
+}
+
+fn parse_token_references(text: &str) -> (Vec<String>, Vec<String>) {
+    let mut references = Vec::new();
+    let mut malformed = Vec::new();
+    let mut offset = 0;
+    while offset < text.len() {
+        let remaining = &text[offset..];
+        if let Some(escaped) = remaining.strip_prefix("{{") {
+            if let Some(end) = escaped.find("}}") {
+                offset += 2 + end + 2;
+            } else {
+                malformed.push("Unclosed escaped token starting with “{{”".to_string());
+                break;
+            }
+            continue;
+        }
+        if let Some(after_opening) = remaining.strip_prefix('{') {
+            let Some(end) = after_opening.find('}') else {
+                malformed.push("Unclosed token starting with “{”".to_string());
+                break;
+            };
+            let name = &after_opening[..end];
+            if name.is_empty() {
+                malformed.push("Empty token “{}”".to_string());
+            } else if !name
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+            {
+                malformed.push(format!("Malformed token “{{{name}}}”"));
+            } else if !references.iter().any(|reference| reference == name) {
+                references.push(name.to_string());
+            }
+            offset += 1 + end + 1;
+            continue;
+        }
+        if remaining.starts_with('}') {
+            malformed.push("Unmatched closing brace “}”".to_string());
+        }
+        let character = remaining
+            .chars()
+            .next()
+            .expect("remaining token text is not empty");
+        offset += character.len_utf8();
+    }
+    malformed.dedup();
+    (references, malformed)
+}
+
+fn custom_token_cycle(name: &str, custom_tokens: &[CustomToken]) -> Option<Vec<String>> {
+    fn visit(
+        name: &str,
+        custom_tokens: &[CustomToken],
+        path: &mut Vec<String>,
+        visited: &mut Vec<String>,
+    ) -> Option<Vec<String>> {
+        if let Some(cycle_start) = path.iter().position(|candidate| candidate == name) {
+            let mut cycle = path[cycle_start..].to_vec();
+            cycle.push(name.to_string());
+            return Some(cycle);
+        }
+        if visited.iter().any(|candidate| candidate == name) {
+            return None;
+        }
+        let token = custom_tokens.iter().find(|token| token.name == name)?;
+        path.push(name.to_string());
+        let (references, _) = parse_token_references(&token.value);
+        for reference in references {
+            if custom_tokens.iter().any(|token| token.name == reference)
+                && let Some(cycle) = visit(&reference, custom_tokens, path, visited)
+            {
+                return Some(cycle);
+            }
+        }
+        path.pop();
+        visited.push(name.to_string());
+        None
+    }
+
+    visit(name, custom_tokens, &mut Vec::new(), &mut Vec::new())
+}
+
+fn analyze_snippet_tokens(body: &str, custom_tokens: &[CustomToken]) -> Vec<TokenIssue> {
+    let (references, malformed) = parse_token_references(body);
+    let mut issues: Vec<TokenIssue> = malformed
+        .into_iter()
+        .map(|message| TokenIssue {
+            level: TokenIssueLevel::Error,
+            message,
+        })
+        .collect();
+
+    for reference in references {
+        let is_static = SUPPORTED_SNIPPET_TOKENS
+            .iter()
+            .any(|(name, _)| *name == reference);
+        let is_custom = custom_tokens.iter().any(|token| token.name == reference);
+        if !is_static && !is_custom {
+            issues.push(TokenIssue {
+                level: TokenIssueLevel::Error,
+                message: format!("Unknown token “{{{reference}}}”"),
+            });
+            continue;
+        }
+        if is_custom && let Some(cycle) = custom_token_cycle(&reference, custom_tokens) {
+            let message = format!(
+                "Recursive custom-token reference: {}",
+                cycle
+                    .iter()
+                    .map(|name| format!("{{{name}}}"))
+                    .collect::<Vec<_>>()
+                    .join(" → ")
+            );
+            if !issues.iter().any(|issue| issue.message == message) {
+                issues.push(TokenIssue {
+                    level: TokenIssueLevel::Warning,
+                    message,
+                });
+            }
+        }
+    }
+    issues
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
     not(any(windows, target_os = "macos")),
     expect(
@@ -3871,12 +4005,74 @@ impl TypeTextApp {
         );
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Body").small());
-        let body_height = (ui.available_height() - 2.0).max(108.0);
+        let body_height = (ui.available_height() * 0.55).max(108.0);
         let response = ui.add_sized(
             [ui.available_width(), body_height],
             egui::TextEdit::multiline(&mut self.edit_body).id_salt("edit_snippet_body"),
         );
         self.track_edit_body_cursor(ui, &response);
+
+        let token_issues = analyze_snippet_tokens(&self.edit_body, &self.tokens.custom_tokens);
+        ui.add_space(5.0);
+        if token_issues.is_empty() {
+            ui.label(
+                egui::RichText::new("Tokens valid")
+                    .small()
+                    .color(egui::Color32::from_rgb(50, 145, 95)),
+            );
+        } else {
+            for issue in &token_issues {
+                let color = match issue.level {
+                    TokenIssueLevel::Error => egui::Color32::from_rgb(190, 70, 60),
+                    TokenIssueLevel::Warning => ui.visuals().warn_fg_color,
+                };
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(format!("• {}", issue.message))
+                            .small()
+                            .color(color),
+                    )
+                    .wrap(),
+                );
+            }
+        }
+
+        ui.add_space(5.0);
+        ui.label(egui::RichText::new("Resolved Preview").small().strong());
+        let preview =
+            expand_snippet_tokens_with_custom(&self.edit_body, &self.tokens.custom_tokens);
+        egui::Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::symmetric(7, 5))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let preview_height = ui.available_height().max(54.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("snippet_resolved_preview")
+                    .max_height(preview_height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(if preview.is_empty() {
+                                    "Preview is empty"
+                                } else {
+                                    &preview
+                                })
+                                .monospace()
+                                .color(if preview.is_empty() {
+                                    ui.visuals().weak_text_color()
+                                } else {
+                                    ui.visuals().text_color()
+                                }),
+                            )
+                            .wrap()
+                            .selectable(true),
+                        );
+                    });
+            });
     }
 
     fn ui_token_picker(&mut self, ui: &mut egui::Ui, token_width: f32) {
@@ -5697,6 +5893,58 @@ mod tests {
 
         assert_eq!(body, "Use {date.today} here");
         assert_eq!(cursor, 16);
+    }
+
+    #[test]
+    fn token_analysis_reports_unknown_and_malformed_tokens() {
+        let issues = analyze_snippet_tokens(
+            "Known {date.today}; unknown {missing}; malformed {bad token}; open {",
+            &[],
+        );
+
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.message.contains("Unknown token “{missing}”"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.message.contains("Malformed token “{bad token}”"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.message.contains("Unclosed token"))
+        );
+    }
+
+    #[test]
+    fn escaped_tokens_are_not_reported_as_unknown() {
+        let issues = analyze_snippet_tokens("Literal {{not.a.token}}", &[]);
+
+        assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn token_analysis_warns_about_recursive_custom_references() {
+        let custom_tokens = vec![
+            CustomToken {
+                name: "first".to_string(),
+                value: "{second}".to_string(),
+            },
+            CustomToken {
+                name: "second".to_string(),
+                value: "{first}".to_string(),
+            },
+        ];
+
+        let issues = analyze_snippet_tokens("Use {first}", &custom_tokens);
+
+        assert!(issues.iter().any(|issue| {
+            issue.level == TokenIssueLevel::Warning
+                && issue.message.contains("{first} → {second} → {first}")
+        }));
     }
 
     fn read_settings_hotkey(settings_path: PathBuf) -> String {
