@@ -1,0 +1,33 @@
+name: Build release documents
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-release-documents:
+    name: Build release documents
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build user guide
+        shell: pwsh
+        run: |
+          . Scripts\version.ps1
+          $version = Get-TypeTextVersion -RootDir $PWD
+          Scripts\build-user-guide.ps1 `
+            -Version $version `
+            -Source docs\user-guide.md `
+            -OutputDir dist\user-guide
+
+      - name: Upload release documents
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: TypeText-release-documents
+          path: dist/user-guide
+          if-no-files-found: error

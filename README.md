@@ -282,11 +282,12 @@ git push origin v1.4.0
 ```
 
 Before creating the tag, run **Build release apps** manually from the GitHub
-Actions page and enter the intended `vX.Y.Z` tag. This dry run uses the real
-release jobs to check formatting, tests, Clippy, the dependency audit, signed
-and notarized macOS packaging, all Windows packages, and the Microsoft Defender
-scan. It also verifies the final artifact set and previews the release notes,
-but it does not create a tag, provenance attestations, or a GitHub Release.
+Actions page. No version input is required: the dry run uses the version already
+present in `Cargo.toml`. It runs the real release jobs to check formatting,
+tests, Clippy, the dependency audit, signed and notarized macOS packaging, all
+Windows packages, and the Microsoft Defender scan. It also verifies the final
+artifact set and previews the release notes, but it does not create a persistent
+tag, provenance attestations, or a GitHub Release.
 
 The workspace `version` in `Cargo.toml` is the single source of truth for the
 TypeText release version. Update it, let Cargo refresh `Cargo.lock`, commit both
@@ -348,9 +349,10 @@ offers assets with valid SHA-256 metadata from GitHub and displays the expected
 digest for verification after download. TypeText does not download, execute, or
 replace the running app automatically.
 
-The detailed release guide is maintained in `docs/user-guide.md`. Every Windows
-and macOS package build generates version-stamped HTML and PDF documentation,
-then bundles `TypeText-User-Guide.pdf` with the application.
+The detailed release guide is maintained in `docs/user-guide.md`. The reusable
+`release-documents.yml` workflow generates the version-stamped HTML and PDF
+once. The Windows and macOS package jobs download that artifact and bundle
+`TypeText-User-Guide.pdf` with the application.
 
 To generate the two guide files without building the application:
 

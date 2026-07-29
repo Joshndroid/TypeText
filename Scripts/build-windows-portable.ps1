@@ -217,12 +217,14 @@ Write-Host "Building TypeText for Windows target: $WindowsTarget"
 Write-Host "Version: $Version"
 Write-Host "Variant: $Variant"
 Write-Host "If the target is missing, run: rustup target add $WindowsTarget"
-& (Join-Path $RootDir "Scripts\build-user-guide.ps1") `
-    -Version $Version `
-    -Source (Join-Path $RootDir "docs\user-guide.md") `
-    -OutputDir $GuideBuildDir
+if ($env:TYPETEXT_PREBUILT_USER_GUIDE -ne "1") {
+    & (Join-Path $RootDir "Scripts\build-user-guide.ps1") `
+        -Version $Version `
+        -Source (Join-Path $RootDir "docs\user-guide.md") `
+        -OutputDir $GuideBuildDir
+}
 if (!(Test-Path -LiteralPath $GuidePdf)) {
-    throw "User guide generation did not create the expected PDF: $GuidePdf"
+    throw "Expected user guide was not found: $GuidePdf"
 }
 
 if ($Variant -in @("All", "Standard")) {

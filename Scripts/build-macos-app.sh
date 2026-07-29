@@ -81,10 +81,16 @@ fi
 cd "$ROOT_DIR"
 echo "Version: $VERSION"
 echo "Target: $MACOS_TARGET"
-bash "$ROOT_DIR/Scripts/build-user-guide.sh" \
-  --version "$VERSION" \
-  --source "$ROOT_DIR/docs/user-guide.md" \
-  --output-dir "$GUIDE_BUILD_DIR"
+if [[ "${TYPETEXT_PREBUILT_USER_GUIDE:-0}" != "1" ]]; then
+  bash "$ROOT_DIR/Scripts/build-user-guide.sh" \
+    --version "$VERSION" \
+    --source "$ROOT_DIR/docs/user-guide.md" \
+    --output-dir "$GUIDE_BUILD_DIR"
+fi
+if [[ ! -f "$GUIDE_BUILD_DIR/TypeText-User-Guide.pdf" ]]; then
+  echo "Expected user guide was not found: $GUIDE_BUILD_DIR/TypeText-User-Guide.pdf" >&2
+  exit 1
+fi
 "$CARGO_BIN" build --release --target "$MACOS_TARGET" -p typetext-desktop --locked
 
 APP_DIR="$ROOT_DIR/dist/TypeText.app"
