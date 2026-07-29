@@ -4013,14 +4013,47 @@ impl TypeTextApp {
         self.track_edit_body_cursor(ui, &response);
 
         let token_issues = analyze_snippet_tokens(&self.edit_body, &self.tokens.custom_tokens);
+        let snippet_unsaved = self
+            .snippets
+            .groups
+            .get(self.selected_group)
+            .and_then(|group| group.snippets.get(self.selected_snippet))
+            .is_some_and(|snippet| {
+                self.edit_title != snippet.title || self.edit_body != snippet.body
+            });
         ui.add_space(5.0);
-        if token_issues.is_empty() {
-            ui.label(
+        ui.horizontal(|ui| {
+            let valid_color = egui::Color32::from_rgb(50, 145, 95);
+            let token_status = if token_issues.is_empty() {
                 egui::RichText::new("Tokens valid")
                     .small()
-                    .color(egui::Color32::from_rgb(50, 145, 95)),
+                    .color(valid_color)
+            } else {
+                egui::RichText::new(format!(
+                    "{} token issue{}",
+                    token_issues.len(),
+                    if token_issues.len() == 1 { "" } else { "s" }
+                ))
+                .small()
+                .color(ui.visuals().warn_fg_color)
+            };
+            ui.label(token_status);
+            ui.label(egui::RichText::new("•").small().weak());
+            ui.label(
+                egui::RichText::new(if snippet_unsaved {
+                    "Snippet has unsaved changes"
+                } else {
+                    "Snippet saved"
+                })
+                .small()
+                .color(if snippet_unsaved {
+                    ui.visuals().warn_fg_color
+                } else {
+                    valid_color
+                }),
             );
-        } else {
+        });
+        if !token_issues.is_empty() {
             for issue in &token_issues {
                 let color = match issue.level {
                     TokenIssueLevel::Error => egui::Color32::from_rgb(190, 70, 60),
