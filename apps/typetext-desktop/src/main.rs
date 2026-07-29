@@ -35,6 +35,7 @@ const TRUSTED_UPDATE_PATH_PREFIX: &str = "/Joshndroid/TypeText/";
 const MAX_TOKEN_NAME_ATTEMPTS: usize = 10_000;
 const HEADER_CONTROL_HEIGHT: f32 = 24.0;
 const EDIT_HEADER_COMBO_WIDTH: f32 = 190.0;
+const EDIT_PANEL_TAB_WIDTH: f32 = 76.0;
 const SNIPPET_TRANSFER_COMBO_WIDTH: f32 = 68.0;
 const DETAIL_HEADER_SEPARATOR_OFFSET: f32 = 9.0;
 const WINDOW_RESIZE_EDGE_SIZE: f32 = 7.0;
@@ -3620,7 +3621,10 @@ impl TypeTextApp {
                 (EditPanel::Tokens, "Tokens"),
             ] {
                 if ui
-                    .selectable_label(self.edit_panel == panel, label)
+                    .add_sized(
+                        [EDIT_PANEL_TAB_WIDTH, HEADER_CONTROL_HEIGHT],
+                        egui::Button::selectable(self.edit_panel == panel, label),
+                    )
                     .clicked()
                     && self.edit_panel != panel
                 {
