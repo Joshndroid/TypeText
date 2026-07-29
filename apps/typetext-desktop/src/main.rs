@@ -41,6 +41,8 @@ const WINDOW_RESIZE_EDGE_SIZE: f32 = 7.0;
 const WINDOW_RESIZE_CORNER_SIZE: f32 = 16.0;
 const DEFAULT_WINDOW_SIZE: [f32; 2] = [780.0, 570.0];
 const WINDOW_SIZE_SAVE_DELAY: Duration = Duration::from_millis(500);
+const NAV_BUTTON_SIZE: [f32; 2] = [72.0, 24.0];
+const FILTER_BUTTON_HEIGHT: f32 = 24.0;
 
 fn main() -> eframe::Result {
     #[cfg(windows)]
@@ -433,6 +435,10 @@ fn apply_modern_style(ctx: &egui::Context, accent_hex: &str) {
             &mut visuals.widgets.open,
         ] {
             widget.corner_radius = egui::CornerRadius::same(6);
+            // Keep hover, pressed, selected, and focused highlights inside the
+            // widget's allocated rectangle so adjacent controls never appear
+            // to move as interaction state changes.
+            widget.expansion = 0.0;
         }
 
         visuals.widgets.noninteractive.bg_fill = panel;
@@ -535,8 +541,24 @@ fn unique_custom_token_name(tokens: &[CustomToken]) -> String {
 }
 
 fn nav_button(ui: &mut egui::Ui, selected: bool, label: &str) -> bool {
-    ui.add(egui::Button::selectable(selected, label).min_size(egui::vec2(68.0, 22.0)))
+    ui.add_sized(NAV_BUTTON_SIZE, egui::Button::selectable(selected, label))
         .clicked()
+}
+
+fn filter_button(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
+    let font_id = egui::TextStyle::Button.resolve(ui.style());
+    let text_color = ui.visuals().text_color();
+    let label_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(label.to_owned(), font_id, text_color)
+            .size()
+            .x
+    });
+    let width = (label_width + ui.spacing().button_padding.x * 2.0).max(42.0);
+    ui.add_sized(
+        [width, FILTER_BUTTON_HEIGHT],
+        egui::Button::selectable(selected, label),
+    )
 }
 
 fn start_window_drag_on_response(response: &egui::Response, ctx: &egui::Context) {
@@ -917,16 +939,7 @@ fn sidebar_reorder_row(
 
     let reserved_width = ARROW_BUTTON_WIDTH * 2.0 + ARROW_GAP + RIGHT_INSET * 2.0;
     let badge_width = if favourite_slot.is_some() { 28.0 } else { 0.0 };
-    let response = sidebar_named_row(
-        ui,
-        title,
-        selected,
-        if selected {
-            reserved_width
-        } else {
-            badge_width
-        },
-    );
+    let response = sidebar_named_row(ui, title, selected, reserved_width.max(badge_width));
     if !selected {
         if let Some(slot) = favourite_slot {
             ui.painter().text(
@@ -2627,13 +2640,7 @@ impl TypeTextApp {
 
             ui.add_space(5.0);
             ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add(egui::Button::selectable(
-                        self.chooser_group.is_none(),
-                        "All",
-                    ))
-                    .clicked()
-                {
+                if filter_button(ui, self.chooser_group.is_none(), "All").clicked() {
                     self.select_chooser_group(None);
                 }
 
@@ -2646,13 +2653,7 @@ impl TypeTextApp {
                     .collect();
 
                 for (index, name) in group_tabs {
-                    if ui
-                        .add(egui::Button::selectable(
-                            self.chooser_group == Some(index),
-                            name,
-                        ))
-                        .clicked()
-                    {
+                    if filter_button(ui, self.chooser_group == Some(index), &name).clicked() {
                         self.select_chooser_group(Some(index));
                     }
                 }
