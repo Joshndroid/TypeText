@@ -2665,11 +2665,14 @@ impl TypeTextApp {
     }
 
     fn ui_choose(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        section_header(
-            ui,
-            "Choose Snippet",
-            format!("{} available", self.results.len()),
-        );
+        ui.horizontal(|ui| {
+            ui.set_min_height(HEADER_CONTROL_HEIGHT);
+            section_header(
+                ui,
+                "Choose Snippet",
+                format!("{} available", self.results.len()),
+            );
+        });
         section_gap(ui);
 
         framed_section(ui, "Search", "filter snippets", |ui| {
@@ -2844,7 +2847,10 @@ impl TypeTextApp {
             EditPanel::Snippets => "Edit Snippet",
             EditPanel::Tokens => "Edit Token",
         };
-        section_header(ui, edit_heading, "");
+        ui.horizontal(|ui| {
+            ui.set_min_height(HEADER_CONTROL_HEIGHT);
+            section_header(ui, edit_heading, "");
+        });
         section_gap(ui);
 
         framed_section(ui, "Search", "filter items", |ui| {
