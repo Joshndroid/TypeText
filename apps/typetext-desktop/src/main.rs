@@ -403,7 +403,7 @@ fn apply_modern_style(ctx: &egui::Context, accent_hex: &str) {
         );
         style.text_styles.insert(
             egui::TextStyle::Small,
-            egui::FontId::new(9.5, egui::FontFamily::Proportional),
+            egui::FontId::new(11.5, egui::FontFamily::Proportional),
         );
         style.text_styles.insert(
             egui::TextStyle::Monospace,
@@ -3987,6 +3987,8 @@ impl TypeTextApp {
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let scrollbar_width = ui.spacing().scroll.allocated_width();
+                ui.add_space(scrollbar_width);
                 if ui.small_button("Save Settings").clicked() {
                     self.save_settings(ctx);
                 }
