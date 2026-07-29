@@ -222,11 +222,12 @@ Settings include:
 
 Open **Settings > Snippet Data**:
 
-- **Import** reads DropText INI or CSV snippets.
+- **Import > DropText File** reads and merges DropText INI or CSV snippets.
+- **Import > TypeText Folder** restores recognized files from an older TypeText data folder. Imported snippets, settings, and tokens replace the corresponding current data; files absent from the selected folder are left unchanged.
 - **Export** saves TypeText snippets as JSON.
 - **Clear All** removes all snippets; export a backup first if they may be needed later.
 
-Review imported content before typing it. A snippet can contain arbitrary text and Enter keys.
+Export a backup before restoring an older TypeText folder. Review imported content before typing it. A snippet can contain arbitrary text and Enter keys.
 
 ### Find your data
 

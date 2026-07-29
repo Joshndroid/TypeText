@@ -18,8 +18,9 @@ use typetext_core::{
     PortablePaths, QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet,
     SnippetFile, SnippetGroup, SnippetSortOrder, TokenFile, WindowSize,
     expand_snippet_tokens_with_custom, export_snippets, import_droptext_with_warnings,
-    load_or_create_settings, load_or_create_snippets, load_or_create_tokens, save_settings,
-    save_snippets, save_tokens, search_snippets, validate_settings,
+    import_legacy_typetext_folder, load_or_create_settings, load_or_create_snippets,
+    load_or_create_tokens, save_settings, save_snippets, save_tokens, search_snippets,
+    validate_settings,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -151,7 +152,7 @@ const SETTINGS_PANELS: &[(SettingsPanel, &str, &str)] = &[
     (
         SettingsPanel::Data,
         "Data",
-        "data updates github releases check for updates check now last checked download release verify sha import export clear all reset snippet data storage data folder open data tray",
+        "data updates github releases check for updates check now last checked download release verify sha import DropText older TypeText data folder restore migrate export clear all reset snippet data storage open tray",
     ),
 ];
 
@@ -1960,6 +1961,99 @@ impl TypeTextApp {
         }
     }
 
+    fn import_legacy_typetext_data(&mut self, ctx: &egui::Context) {
+        let data_dir = match platform::open_typetext_data_folder_dialog() {
+            Ok(Some(path)) => path,
+            Ok(None) => return,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+        if data_dir == self.paths.data_dir {
+            self.show_error("Select an older TypeText data folder, not the active data folder.");
+            return;
+        }
+        if OFFLINE_PORTABLE && let Some(warning) = platform::storage_security_warning(&data_dir) {
+            self.show_error(format!(
+                "Offline portable mode refuses imports from remote storage. {warning}"
+            ));
+            return;
+        }
+
+        let imported = match import_legacy_typetext_folder(&data_dir) {
+            Ok(imported) => imported,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+
+        let mut imported_parts = Vec::new();
+        let result = (|| -> anyhow::Result<()> {
+            if let Some(mut settings) = imported.settings {
+                if OFFLINE_PORTABLE {
+                    settings.open_on_startup = false;
+                    settings.check_for_updates = false;
+                    settings.last_update_check_unix = None;
+                }
+                settings.theme = normalize_theme(&settings.theme);
+                save_settings_with_effects(
+                    &self.paths,
+                    &mut settings,
+                    &self.hotkey_tx,
+                    &mut self.registered_hotkeys,
+                    &mut self.applied_startup_enabled,
+                )?;
+                self.settings = settings;
+                self.settings_dirty = false;
+                apply_theme(ctx, &self.settings);
+                imported_parts.push("settings");
+            }
+
+            if let Some(snippets) = imported.snippets {
+                save_snippets(&self.paths, &snippets)?;
+                self.snippets = snippets;
+                self.selected_group = 0;
+                self.selected_snippet = 0;
+                self.chooser_group = None;
+                self.selected_result = 0;
+                self.edit_group_active = false;
+                self.edit_snippet_active = false;
+                self.snippet_chain.clear();
+                self.snippet_chain_actions.clear();
+                self.load_selected_editor_snippet();
+                self.refresh_results();
+                imported_parts.push("snippets");
+            }
+
+            if let Some(tokens) = imported.tokens {
+                save_tokens(&self.paths, &tokens)?;
+                self.tokens = tokens;
+                self.selected_token = 0;
+                self.edit_token_active = false;
+                self.selected_token_kind = TokenSelection::Custom;
+                self.load_selected_editor_token();
+                imported_parts.push("tokens");
+            }
+
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                self.status = format!(
+                    "Imported TypeText {} from {}",
+                    imported_parts.join(", "),
+                    data_dir.display()
+                );
+            }
+            Err(error) => self.show_error(format!(
+                "The TypeText data import could not be completed. {error}"
+            )),
+        }
+    }
+
     fn export_typetext_snippets(&mut self) {
         let path = match platform::open_snippets_export_dialog(&self.paths.data_dir) {
             Ok(Some(path)) => path,
@@ -3040,6 +3134,7 @@ impl TypeTextApp {
 
         let mut cancel = false;
         let mut choose_file = false;
+        let mut choose_folder = false;
         egui::Area::new(egui::Id::new("import_confirmation_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -3050,7 +3145,7 @@ impl TypeTextApp {
                         ui.set_width(410.0);
                         centered_popup_label(
                             ui,
-                            egui::RichText::new("Import a trusted file")
+                            egui::RichText::new("Import trusted data")
                                 .strong()
                                 .size(15.5),
                             false,
@@ -3060,22 +3155,28 @@ impl TypeTextApp {
                         ui.add_space(8.0);
                         centered_popup_label(
                             ui,
-                            "Imported files can contain text that TypeText will type into other applications. Only import files you trust, and review imported snippets before using them.",
+                            "DropText files are merged with your snippets. An older TypeText data folder restores every recognized data file and replaces the corresponding current data. Export a backup first, only import data you trust, and review imported snippets before using them.",
                             true,
                         );
                         ui.add_space(10.0);
-                        centered_popup_button_row(ui, &[84.0, 104.0], |ui| {
+                        centered_popup_button_row(ui, &[70.0, 112.0, 128.0], |ui| {
                             if ui
-                                .add_sized([84.0, 24.0], egui::Button::new("Cancel"))
+                                .add_sized([70.0, 24.0], egui::Button::new("Cancel"))
                                 .clicked()
                             {
                                 cancel = true;
                             }
                             if ui
-                                .add_sized([104.0, 24.0], egui::Button::new("Choose File"))
+                                .add_sized([112.0, 24.0], egui::Button::new("DropText File"))
                                 .clicked()
                             {
                                 choose_file = true;
+                            }
+                            if ui
+                                .add_sized([128.0, 24.0], egui::Button::new("TypeText Folder"))
+                                .clicked()
+                            {
+                                choose_folder = true;
                             }
                         });
                     });
@@ -3086,6 +3187,9 @@ impl TypeTextApp {
         } else if choose_file {
             self.confirm_import = false;
             self.import_droptext_snippets();
+        } else if choose_folder {
+            self.confirm_import = false;
+            self.import_legacy_typetext_data(ctx);
         }
     }
 

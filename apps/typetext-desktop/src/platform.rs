@@ -176,8 +176,9 @@ mod windows_platform {
     };
     use windows::Win32::UI::Shell::{
         Common::COMDLG_FILTERSPEC, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_OVERWRITEPROMPT,
-        FOS_PATHMUSTEXIST, FileOpenDialog, FileSaveDialog, IFileDialog, IFileOpenDialog,
-        IFileSaveDialog, IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH, ShellExecuteW,
+        FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog, FileSaveDialog, IFileDialog,
+        IFileOpenDialog, IFileSaveDialog, IShellItem, SHCreateItemFromParsingName,
+        SIGDN_FILESYSPATH, ShellExecuteW,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, MSG, PM_REMOVE,
@@ -869,6 +870,26 @@ mod windows_platform {
         }
 
         show_dialog_and_take_path(&dialog.into(), "Windows file dialog failed")
+    }
+
+    pub fn open_typetext_data_folder_dialog() -> Result<Option<PathBuf>> {
+        let _com = ComInit::new();
+        let dialog: IFileOpenDialog =
+            unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }
+                .context("Could not open Windows folder dialog")?;
+        unsafe {
+            dialog
+                .SetTitle(w!("Import an older TypeText data folder"))
+                .and_then(|_| dialog.GetOptions())
+                .and_then(|options| {
+                    dialog.SetOptions(
+                        options | FOS_PICKFOLDERS | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM,
+                    )
+                })
+                .context("Could not configure Windows folder dialog")?;
+        }
+
+        show_dialog_and_take_path(&dialog.into(), "Windows folder dialog failed")
     }
 
     /// Native `IFileSaveDialog` replacement for the previous PowerShell
@@ -1644,6 +1665,34 @@ end try
         }
     }
 
+    pub fn open_typetext_data_folder_dialog() -> Result<Option<PathBuf>> {
+        let script = r#"
+try
+    set chosenFolder to choose folder with prompt "Import an older TypeText data folder"
+    return POSIX path of chosenFolder
+on error number -128
+    return ""
+end try
+"#;
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .output()
+            .context("Could not open macOS folder dialog")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("macOS folder dialog failed. {}", stderr.trim()));
+        }
+
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(PathBuf::from(path)))
+        }
+    }
+
     pub fn open_snippets_export_dialog(initial_dir: &Path) -> Result<Option<PathBuf>> {
         let initial_dir = initial_dir.display().to_string();
         let script = r#"
@@ -2165,6 +2214,12 @@ mod fallback_platform {
     pub fn open_droptext_file_dialog() -> Result<Option<std::path::PathBuf>> {
         Err(anyhow!(
             "Native DropText file picker is only implemented on macOS and Windows."
+        ))
+    }
+
+    pub fn open_typetext_data_folder_dialog() -> Result<Option<std::path::PathBuf>> {
+        Err(anyhow!(
+            "Native TypeText folder picker is only implemented on macOS and Windows."
         ))
     }
 

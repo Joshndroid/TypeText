@@ -18,7 +18,7 @@ system APIs rather than a browser engine or web-based application runtime.
 - Configurable paragraph separators between queued snippets
 - Built-in group, snippet, and token editor
 - Borderless app window with in-app Min, Max, and Exit controls
-- DropText INI/CSV import and TypeText JSON export
+- DropText INI/CSV import, older TypeText data-folder migration, and TypeText JSON export
 - Simple JSON snippet/settings storage
 - Configurable delay before typing and close-after-insert behavior
 - Windows-only character and separator typing delays

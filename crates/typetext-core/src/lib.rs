@@ -72,6 +72,13 @@ pub struct DropTextImport {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LegacyTypeTextImport {
+    pub snippets: Option<SnippetFile>,
+    pub settings: Option<AppSettings>,
+    pub tokens: Option<TokenFile>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnippetGroup {
@@ -453,6 +460,45 @@ pub fn load_or_create_tokens(paths: &PortablePaths) -> Result<TokenFile> {
 pub fn save_tokens(paths: &PortablePaths, tokens: &TokenFile) -> Result<()> {
     validate_tokens(tokens)?;
     save_json(paths.tokens_path.as_path(), tokens)
+}
+
+pub fn import_legacy_typetext_folder(data_dir: impl AsRef<Path>) -> Result<LegacyTypeTextImport> {
+    let data_dir = data_dir.as_ref();
+    if !data_dir.is_dir() {
+        return Err(anyhow!(
+            "The selected TypeText data location is not a folder."
+        ));
+    }
+
+    let paths = PortablePaths::from_data_dir(data_dir);
+    let snippets = load_optional_json::<SnippetFile>(&paths.snippets_path, MAX_SNIPPET_FILE_BYTES)?;
+    if let Some(snippets) = &snippets {
+        validate_snippets(snippets)?;
+    }
+
+    let settings =
+        load_optional_json::<AppSettings>(&paths.settings_path, MAX_SETTINGS_FILE_BYTES)?;
+    if let Some(settings) = &settings {
+        validate_settings(settings)?;
+    }
+
+    let mut tokens = load_optional_json::<TokenFile>(&paths.tokens_path, MAX_TOKEN_FILE_BYTES)?;
+    if let Some(tokens) = &mut tokens {
+        tokens.static_tokens = TokenFile::default().static_tokens;
+        validate_tokens(tokens)?;
+    }
+
+    if snippets.is_none() && settings.is_none() && tokens.is_none() {
+        return Err(anyhow!(
+            "The selected folder does not contain snippets.json, settings.json, or tokens.json."
+        ));
+    }
+
+    Ok(LegacyTypeTextImport {
+        snippets,
+        settings,
+        tokens,
+    })
 }
 
 pub fn import_droptext(path: impl AsRef<Path>) -> Result<SnippetFile> {
@@ -904,6 +950,22 @@ where
     let raw = String::from_utf8(bytes)
         .with_context(|| format!("{} is not valid UTF-8", path.display()))?;
     serde_json::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))
+}
+
+fn load_optional_json<T>(path: &Path, max_bytes: u64) -> Result<Option<T>>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let bytes = read_limited(path, max_bytes)?;
+    let raw = String::from_utf8(bytes)
+        .with_context(|| format!("{} is not valid UTF-8", path.display()))?;
+    serde_json::from_str(&raw)
+        .with_context(|| format!("Could not parse {}", path.display()))
+        .map(Some)
 }
 
 fn read_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
