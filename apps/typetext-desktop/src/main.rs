@@ -190,6 +190,24 @@ enum DraggedEditItem {
     Token(usize),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PendingEditorDeletion {
+    Group {
+        index: usize,
+        name: String,
+        snippet_count: usize,
+    },
+    Snippet {
+        group_index: usize,
+        snippet_index: usize,
+        title: String,
+    },
+    Token {
+        index: usize,
+        name: String,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
     not(any(windows, target_os = "macos")),
@@ -377,6 +395,7 @@ struct TypeTextApp {
     pending_favourite_slot: Option<u8>,
     pending_edit_navigation: Option<EditNavigation>,
     dragged_edit_item: Option<DraggedEditItem>,
+    pending_editor_deletion: Option<PendingEditorDeletion>,
     capturing_hotkey: Option<platform::HotkeyAction>,
     settings_dirty: bool,
     applied_startup_enabled: bool,
@@ -1234,6 +1253,7 @@ impl TypeTextApp {
             pending_favourite_slot: None,
             pending_edit_navigation: None,
             dragged_edit_item: None,
+            pending_editor_deletion: None,
             capturing_hotkey: None,
             settings_dirty: false,
             applied_startup_enabled,
@@ -2463,6 +2483,7 @@ impl eframe::App for TypeTextApp {
 
         window_resize_handles(ui, &ctx);
         self.ui_clear_all_confirmation(&ctx);
+        self.ui_editor_deletion_confirmation(&ctx);
         self.ui_import_confirmation(&ctx);
         self.ui_favourite_confirmation(&ctx);
         self.ui_unsaved_editor_confirmation(&ctx);
@@ -2502,6 +2523,153 @@ fn resolve_paths() -> anyhow::Result<PortablePaths> {
 }
 
 impl TypeTextApp {
+    fn request_selected_group_deletion(&mut self) {
+        let Some(group) = self.snippets.groups.get(self.selected_group) else {
+            return;
+        };
+        self.pending_editor_deletion = Some(PendingEditorDeletion::Group {
+            index: self.selected_group,
+            name: group.name.clone(),
+            snippet_count: group.snippets.len(),
+        });
+    }
+
+    fn request_selected_snippet_deletion(&mut self) {
+        let Some(snippet) = self
+            .snippets
+            .groups
+            .get(self.selected_group)
+            .and_then(|group| group.snippets.get(self.selected_snippet))
+        else {
+            return;
+        };
+        self.pending_editor_deletion = Some(PendingEditorDeletion::Snippet {
+            group_index: self.selected_group,
+            snippet_index: self.selected_snippet,
+            title: snippet.title.clone(),
+        });
+    }
+
+    fn request_selected_token_deletion(&mut self) {
+        let Some(token) = self.tokens.custom_tokens.get(self.selected_token) else {
+            return;
+        };
+        self.pending_editor_deletion = Some(PendingEditorDeletion::Token {
+            index: self.selected_token,
+            name: token.name.clone(),
+        });
+    }
+
+    fn ui_editor_deletion_confirmation(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_editor_deletion.clone() else {
+            return;
+        };
+        let (heading, message, confirm_label) = match &pending {
+            PendingEditorDeletion::Group {
+                name,
+                snippet_count,
+                ..
+            } => (
+                format!("Delete group “{name}”?"),
+                if *snippet_count == 0 {
+                    "This will permanently remove the group.".to_string()
+                } else {
+                    format!(
+                        "This will permanently remove the group and its {snippet_count} snippet{}.",
+                        if *snippet_count == 1 { "" } else { "s" }
+                    )
+                },
+                "Delete Group",
+            ),
+            PendingEditorDeletion::Snippet { title, .. } => (
+                format!("Delete snippet “{title}”?"),
+                "This will permanently remove the snippet and free its favourite slot, if assigned."
+                    .to_string(),
+                "Delete Snippet",
+            ),
+            PendingEditorDeletion::Token { name, .. } => (
+                format!("Delete token “{{{name}}}”?"),
+                "This removes the custom token. Snippets that reference it will keep the token text unchanged."
+                    .to_string(),
+                "Delete Token",
+            ),
+        };
+
+        let mut confirm = false;
+        let mut cancel = false;
+        egui::Area::new(egui::Id::new("editor_deletion_confirmation_dialog"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.set_max_width(460.0);
+                        ui.label(egui::RichText::new(heading).strong().size(15.5));
+                        ui.add_space(8.0);
+                        ui.add(egui::Label::new(message).wrap());
+                        ui.add_space(10.0);
+                        ui.horizontal_centered(|ui| {
+                            if ui.button("Cancel").clicked() {
+                                cancel = true;
+                            }
+                            if ui.button(confirm_label).clicked() {
+                                confirm = true;
+                            }
+                        });
+                    });
+            });
+
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            cancel = true;
+        }
+        if confirm {
+            self.pending_editor_deletion = None;
+            match pending {
+                PendingEditorDeletion::Group { index, name, .. }
+                    if self
+                        .snippets
+                        .groups
+                        .get(index)
+                        .is_some_and(|group| group.name == name) =>
+                {
+                    self.selected_group = index;
+                    self.delete_selected_editor_group();
+                }
+                PendingEditorDeletion::Snippet {
+                    group_index,
+                    snippet_index,
+                    title,
+                } if self
+                    .snippets
+                    .groups
+                    .get(group_index)
+                    .and_then(|group| group.snippets.get(snippet_index))
+                    .is_some_and(|snippet| snippet.title == title) =>
+                {
+                    self.selected_group = group_index;
+                    self.selected_snippet = snippet_index;
+                    self.delete_selected_editor_snippet();
+                }
+                PendingEditorDeletion::Token { index, name }
+                    if self
+                        .tokens
+                        .custom_tokens
+                        .get(index)
+                        .is_some_and(|token| token.name == name) =>
+                {
+                    self.selected_token = index;
+                    self.delete_selected_editor_token();
+                }
+                _ => {
+                    self.status = "Delete cancelled because the selected item changed".to_string();
+                }
+            }
+        } else if cancel {
+            self.pending_editor_deletion = None;
+        }
+    }
+
     fn ui_unsaved_editor_confirmation(&mut self, ctx: &egui::Context) {
         if self.pending_edit_navigation.is_none() {
             return;
@@ -2530,7 +2698,7 @@ impl TypeTextApp {
                             .wrap(),
                         );
                         ui.add_space(10.0);
-                        ui.horizontal(|ui| {
+                        ui.horizontal_centered(|ui| {
                             if ui.button("Keep Editing").clicked() {
                                 cancel = true;
                             }
@@ -2588,7 +2756,7 @@ impl TypeTextApp {
                             .wrap(),
                         );
                         ui.add_space(10.0);
-                        ui.horizontal(|ui| {
+                        ui.horizontal_centered(|ui| {
                             if ui.button("Cancel").clicked() {
                                 cancel = true;
                             }
@@ -2638,18 +2806,13 @@ impl TypeTextApp {
                             .wrap(),
                         );
                         ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.button("Choose File").clicked() {
-                                        choose_file = true;
-                                    }
-                                    if ui.button("Cancel").clicked() {
-                                        cancel = true;
-                                    }
-                                },
-                            );
+                        ui.horizontal_centered(|ui| {
+                            if ui.button("Cancel").clicked() {
+                                cancel = true;
+                            }
+                            if ui.button("Choose File").clicked() {
+                                choose_file = true;
+                            }
                         });
                     });
             });
@@ -2698,21 +2861,19 @@ impl TypeTextApp {
                             .wrap(),
                         );
                         ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui
-                                    .add_sized([78.0, 24.0], egui::Button::new("Exit"))
-                                    .clicked()
-                                {
-                                    exit = true;
-                                }
-                                if ui
-                                    .add_sized([120.0, 24.0], egui::Button::new("Keep Running"))
-                                    .clicked()
-                                {
-                                    keep_running = true;
-                                }
-                            });
+                        ui.horizontal_centered(|ui| {
+                            if ui
+                                .add_sized([120.0, 24.0], egui::Button::new("Keep Running"))
+                                .clicked()
+                            {
+                                keep_running = true;
+                            }
+                            if ui
+                                .add_sized([78.0, 24.0], egui::Button::new("Exit"))
+                                .clicked()
+                            {
+                                exit = true;
+                            }
                         });
                     });
             });
@@ -2773,21 +2934,19 @@ impl TypeTextApp {
                             .wrap(),
                         );
                         ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui
-                                    .add_sized([88.0, 24.0], egui::Button::new("Clear All"))
-                                    .clicked()
-                                {
-                                    confirm = true;
-                                }
-                                if ui
-                                    .add_sized([78.0, 24.0], egui::Button::new("Cancel"))
-                                    .clicked()
-                                {
-                                    cancel = true;
-                                }
-                            });
+                        ui.horizontal_centered(|ui| {
+                            if ui
+                                .add_sized([78.0, 24.0], egui::Button::new("Cancel"))
+                                .clicked()
+                            {
+                                cancel = true;
+                            }
+                            if ui
+                                .add_sized([88.0, 24.0], egui::Button::new("Clear All"))
+                                .clicked()
+                            {
+                                confirm = true;
+                            }
                         });
                     });
             });
@@ -3318,7 +3477,7 @@ impl TypeTextApp {
                     .on_hover_text("Delete selected group")
                     .clicked()
                 {
-                    self.delete_selected_editor_group();
+                    self.request_selected_group_deletion();
                 }
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Save"))
@@ -3344,7 +3503,7 @@ impl TypeTextApp {
                     .on_hover_text("Delete selected snippet")
                     .clicked()
                 {
-                    self.delete_selected_editor_snippet();
+                    self.request_selected_snippet_deletion();
                 }
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Save"))
@@ -3433,7 +3592,7 @@ impl TypeTextApp {
                     .on_hover_text("Delete custom token")
                     .clicked()
                 {
-                    self.delete_selected_editor_token();
+                    self.request_selected_token_deletion();
                 }
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Save"))
@@ -3847,7 +4006,7 @@ impl TypeTextApp {
                     .on_hover_text("Delete selected snippet")
                     .clicked()
                 {
-                    self.delete_selected_editor_snippet();
+                    self.request_selected_snippet_deletion();
                 }
                 if ui
                     .add_enabled(can_edit_snippet, egui::Button::new("Save"))
