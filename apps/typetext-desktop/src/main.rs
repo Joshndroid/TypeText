@@ -2234,6 +2234,13 @@ impl TypeTextApp {
         self.update_queue_status();
     }
 
+    fn clear_snippet_queue(&mut self) {
+        self.snippet_chain.clear();
+        self.snippet_chain_actions.clear();
+        self.insert_when_focus_lost = false;
+        self.status = "Queue cleared".to_string();
+    }
+
     fn update_queue_status(&mut self) {
         self.insert_when_focus_lost = true;
         if self.snippet_chain.is_empty() {
@@ -3720,14 +3727,12 @@ impl TypeTextApp {
                                     [52.0, HEADER_CONTROL_HEIGHT],
                                     egui::Button::new("Clear"),
                                 )
+                                .on_hover_text("Clear the queue (Esc)")
                             })
                             .inner
                             .clicked()
                         {
-                            self.snippet_chain.clear();
-                            self.snippet_chain_actions.clear();
-                            self.insert_when_focus_lost = false;
-                            self.status = "Chain cleared".to_string();
+                            self.clear_snippet_queue();
                         }
                         if ui
                             .add_enabled_ui(!self.snippet_chain.is_empty(), |ui| {
@@ -3798,6 +3803,10 @@ impl TypeTextApp {
             });
 
         section_gap(ui);
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) && !self.snippet_chain.is_empty()
+        {
+            self.clear_snippet_queue();
+        }
         if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
             self.insert_selected(ctx);
         }
