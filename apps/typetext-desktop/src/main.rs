@@ -120,6 +120,7 @@ enum SettingsPanel {
     Typing,
     Selection,
     Favourites,
+    HotkeyHints,
     Appearance,
     Data,
 }
@@ -144,6 +145,11 @@ const SETTINGS_PANELS: &[(SettingsPanel, &str, &str)] = &[
         SettingsPanel::Favourites,
         "Favourites",
         "favourites favorite direct snippet hotkeys optional hotkey capture clear assigned",
+    ),
+    (
+        SettingsPanel::HotkeyHints,
+        "Hotkey Hints",
+        "global keys keyboard shortcuts reference help escape clear queue enter type insert ctrl command save add duplicate delete system wide summon favourites",
     ),
     (
         SettingsPanel::Appearance,
@@ -5401,9 +5407,13 @@ impl TypeTextApp {
                     |ui| {
                         ui.set_clip_rect(sidebar_rect);
                         ui.set_width_range(sidebar_rect.width()..=sidebar_rect.width());
-                        let mut found_match = false;
+                        let hints_match =
+                            settings_panel_matches(SettingsPanel::HotkeyHints, &self.settings_search);
+                        let mut found_match = hints_match;
                         for (panel, label, _) in SETTINGS_PANELS {
-                            if settings_panel_matches(*panel, &self.settings_search) {
+                            if *panel != SettingsPanel::HotkeyHints
+                                && settings_panel_matches(*panel, &self.settings_search)
+                            {
                                 found_match = true;
                                 if sidebar_group_row(ui, label, self.settings_panel == *panel)
                                     .clicked()
@@ -5418,6 +5428,20 @@ impl TypeTextApp {
                                 egui::RichText::new("No matching settings")
                                     .color(ui.visuals().weak_text_color()),
                             );
+                        }
+                        if hints_match {
+                            ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                                if sidebar_group_row(
+                                    ui,
+                                    "Hotkey Hints",
+                                    self.settings_panel == SettingsPanel::HotkeyHints,
+                                )
+                                .clicked()
+                                {
+                                    self.settings_panel = SettingsPanel::HotkeyHints;
+                                }
+                                ui.separator();
+                            });
                         }
                     },
                 );
@@ -5448,6 +5472,9 @@ impl TypeTextApp {
                             }
                             SettingsPanel::Favourites => {
                                 ("Favourites", "Manage direct snippet hotkeys")
+                            }
+                            SettingsPanel::HotkeyHints => {
+                                ("Hotkey Hints", "Keyboard shortcuts available in TypeText")
                             }
                             SettingsPanel::Appearance => {
                                 ("Appearance", "Choose theme, accent, and editor controls")
@@ -5739,6 +5766,69 @@ impl TypeTextApp {
                             }
                         });
                     }
+                    });
+                }
+
+                if current_panel_matches && self.settings_panel == SettingsPanel::HotkeyHints {
+                    framed_section(ui, "System-wide", "available from other apps", |ui| {
+                        egui::Grid::new("hotkey_hints_system_wide")
+                            .num_columns(2)
+                            .spacing([16.0, 8.0])
+                            .show(ui, |ui| {
+                                ui.monospace(if self.settings.hotkey.trim().is_empty() {
+                                    "Not configured"
+                                } else {
+                                    self.settings.hotkey.trim()
+                                });
+                                ui.label("Open TypeText directly on the Choose page.");
+                                ui.end_row();
+
+                                ui.monospace("Favourite hotkeys");
+                                ui.label(
+                                    "Type an assigned favourite directly into the active app. \
+                                     Configure these on the Favourites page.",
+                                );
+                                ui.end_row();
+                            });
+                    });
+
+                    section_gap(ui);
+                    framed_section(ui, "TypeText window", "fixed keyboard shortcuts", |ui| {
+                        let command = if cfg!(target_os = "macos") {
+                            "Cmd"
+                        } else {
+                            "Ctrl"
+                        };
+                        egui::Grid::new("hotkey_hints_typetext_window")
+                            .num_columns(2)
+                            .spacing([16.0, 8.0])
+                            .show(ui, |ui| {
+                                ui.monospace("Escape");
+                                ui.label(
+                                    "Clear the snippet queue on Choose, or cancel an open confirmation.",
+                                );
+                                ui.end_row();
+
+                                ui.monospace("Enter");
+                                ui.label("Type the selected snippet or queued snippets.");
+                                ui.end_row();
+
+                                ui.monospace(format!("{command}+S"));
+                                ui.label("Save changes to the current editor item.");
+                                ui.end_row();
+
+                                ui.monospace(format!("{command}+N"));
+                                ui.label("Add an item in the current editor section.");
+                                ui.end_row();
+
+                                ui.monospace(format!("{command}+D"));
+                                ui.label("Duplicate the selected snippet.");
+                                ui.end_row();
+
+                                ui.monospace(format!("{command}+Backspace"));
+                                ui.label("Delete the selected editor item after confirmation.");
+                                ui.end_row();
+                            });
                     });
                 }
 
