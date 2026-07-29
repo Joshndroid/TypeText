@@ -5722,89 +5722,106 @@ impl TypeTextApp {
 
                 if current_panel_matches && self.settings_panel == SettingsPanel::Appearance {
                     framed_section(ui, "Theme & Accent", "colour scheme", |ui| {
-                    ui.horizontal(|ui| {
-                        for (value, label) in
-                            [("system", "System"), ("light", "Light"), ("dark", "Dark")]
-                        {
-                            if ui
-                                .add(egui::Button::selectable(
-                                    self.settings.theme == value,
-                                    label,
-                                ))
-                                .clicked()
-                            {
-                                self.settings.theme = value.to_string();
-                                self.mark_settings_dirty();
-                            }
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Accent").small());
-                        if ui
-                            .add_sized(
-                                [86.0, 24.0],
-                                egui::TextEdit::singleline(&mut self.settings.accent_color)
-                                    .hint_text("#0A7E76")
-                                    .vertical_align(egui::Align::Center),
-                            )
-                            .changed()
-                        {
-                            self.mark_settings_dirty();
-                        }
-
-                        let mut accent_color = parse_hex_color(&self.settings.accent_color)
-                            .unwrap_or_else(|| egui::Color32::from_rgb(10, 126, 118));
-                        if ui.color_edit_button_srgba(&mut accent_color).changed() {
-                            self.settings.accent_color = format_hex_color(accent_color);
-                            self.mark_settings_dirty();
-                        }
-
-                        if parse_hex_color(&self.settings.accent_color).is_none() {
-                            ui.label(
-                                egui::RichText::new("Use #RRGGBB")
-                                    .small()
-                                    .color(ui.visuals().warn_fg_color),
-                            );
-                        }
-                    });
-                    ui.label(egui::RichText::new("Presets").small().weak());
-                    ui.horizontal_wrapped(|ui| {
-                        for &(name, hex) in ACCENT_PRESETS {
-                            let color = parse_hex_color(hex).expect("preset accent must be valid");
-                            let selected =
-                                self.settings.accent_color.eq_ignore_ascii_case(hex);
-                            let label = format!("{} {name}", if selected { "✓" } else { " " });
-                            let font_id = egui::TextStyle::Button.resolve(ui.style());
-                            let text_width = ui.fonts_mut(|fonts| {
-                                fonts
-                                    .layout_no_wrap(
-                                        format!("✓ {name}"),
-                                        font_id,
-                                        accent_text_color(color),
-                                    )
-                                    .size()
-                                    .x
+                    egui::Grid::new("theme_accent_controls")
+                        .num_columns(2)
+                        .spacing([8.0, 6.0])
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("Theme").small().weak());
+                            ui.horizontal(|ui| {
+                                ui.set_min_height(HEADER_CONTROL_HEIGHT);
+                                for (value, label) in [
+                                    ("system", "System"),
+                                    ("light", "Light"),
+                                    ("dark", "Dark"),
+                                ] {
+                                    if ui
+                                        .add(egui::Button::selectable(
+                                            self.settings.theme == value,
+                                            label,
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.settings.theme = value.to_string();
+                                        self.mark_settings_dirty();
+                                    }
+                                }
                             });
-                            let button_width =
-                                text_width + ui.spacing().button_padding.x * 2.0;
-                            let button_height = ui.spacing().interact_size.y;
-                            if ui
-                                .add_sized(
-                                    [button_width, button_height],
-                                    egui::Button::new(
-                                        egui::RichText::new(label)
-                                            .color(accent_text_color(color)),
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Accent").small().weak());
+                            ui.horizontal(|ui| {
+                                ui.set_min_height(HEADER_CONTROL_HEIGHT);
+                                if ui
+                                    .add_sized(
+                                        [86.0, HEADER_CONTROL_HEIGHT],
+                                        egui::TextEdit::singleline(
+                                            &mut self.settings.accent_color,
+                                        )
+                                        .hint_text("#0A7E76")
+                                        .vertical_align(egui::Align::Center),
                                     )
-                                    .fill(color),
-                                )
-                                .on_hover_text(format!("{name}: {hex}"))
-                                .clicked()
-                            {
-                                self.settings.accent_color = hex.to_string();
-                                self.mark_settings_dirty();
-                            }
-                        }
-                    });
+                                    .changed()
+                                {
+                                    self.mark_settings_dirty();
+                                }
+
+                                let mut accent_color =
+                                    parse_hex_color(&self.settings.accent_color).unwrap_or_else(
+                                        || egui::Color32::from_rgb(10, 126, 118),
+                                    );
+                                if ui.color_edit_button_srgba(&mut accent_color).changed() {
+                                    self.settings.accent_color = format_hex_color(accent_color);
+                                    self.mark_settings_dirty();
+                                }
+
+                                if parse_hex_color(&self.settings.accent_color).is_none() {
+                                    ui.label(
+                                        egui::RichText::new("Use #RRGGBB")
+                                            .small()
+                                            .color(ui.visuals().warn_fg_color),
+                                    );
+                                }
+                            });
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Presets").small().weak());
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
+                                for &(name, hex) in ACCENT_PRESETS {
+                                    let color =
+                                        parse_hex_color(hex).expect("preset accent must be valid");
+                                    let font_id = egui::TextStyle::Button.resolve(ui.style());
+                                    let text_width = ui.fonts_mut(|fonts| {
+                                        fonts
+                                            .layout_no_wrap(
+                                                name.to_owned(),
+                                                font_id,
+                                                accent_text_color(color),
+                                            )
+                                            .size()
+                                            .x
+                                    });
+                                    let button_width =
+                                        text_width + ui.spacing().button_padding.x * 2.0;
+                                    if ui
+                                        .add_sized(
+                                            [button_width, HEADER_CONTROL_HEIGHT],
+                                            egui::Button::new(
+                                                egui::RichText::new(name)
+                                                    .color(accent_text_color(color)),
+                                            )
+                                            .fill(color),
+                                        )
+                                        .on_hover_text(format!("{name}: {hex}"))
+                                        .clicked()
+                                    {
+                                        self.settings.accent_color = hex.to_string();
+                                        self.mark_settings_dirty();
+                                    }
+                                }
+                            });
+                            ui.end_row();
+                        });
                     });
                     section_gap(ui);
                     framed_section(ui, "Interface Size", "display scale", |ui| {
