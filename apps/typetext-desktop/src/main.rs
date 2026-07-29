@@ -1731,7 +1731,10 @@ impl TypeTextApp {
                         detail_header(ui, "Group Details", |_| {});
                         section_gap(ui);
                         if can_edit {
-                            ui.text_edit_singleline(&mut self.edit_group_name);
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.edit_group_name)
+                                    .vertical_align(egui::Align::Center),
+                            );
                         }
                     },
                 );
@@ -2613,7 +2616,9 @@ impl TypeTextApp {
             ui.horizontal(|ui| {
                 let response = ui.add_sized(
                     [ui.available_width() - 84.0, 24.0],
-                    egui::TextEdit::singleline(&mut self.search).hint_text("Search snippets"),
+                    egui::TextEdit::singleline(&mut self.search)
+                        .hint_text("Search snippets")
+                        .vertical_align(egui::Align::Center),
                 );
                 if response.changed() {
                     self.refresh_results();
@@ -2796,7 +2801,8 @@ impl TypeTextApp {
             ui.add_sized(
                 [ui.available_width(), 24.0],
                 egui::TextEdit::singleline(&mut self.edit_search)
-                    .hint_text("Search groups, snippets, or tokens"),
+                    .hint_text("Search groups, snippets, or tokens")
+                    .vertical_align(egui::Align::Center),
             );
         });
         section_gap(ui);
@@ -3204,7 +3210,10 @@ impl TypeTextApp {
                                 ui.label(&token.response);
                             }
                         } else if can_edit {
-                            ui.text_edit_singleline(&mut self.edit_token_name);
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.edit_token_name)
+                                    .vertical_align(egui::Align::Center),
+                            );
                             ui.add_space(6.0);
                             ui.label(egui::RichText::new("Value").small());
                             let value_height = (ui.available_height() - 4.0).max(120.0);
@@ -3291,7 +3300,7 @@ impl TypeTextApp {
 
         ui.add_sized(
             [ui.available_width(), 24.0],
-            egui::TextEdit::singleline(&mut self.edit_title),
+            egui::TextEdit::singleline(&mut self.edit_title).vertical_align(egui::Align::Center),
         );
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Body").small());
@@ -3646,7 +3655,8 @@ impl TypeTextApp {
                             });
                         ui.add_sized(
                             [ui.available_width(), 24.0],
-                            egui::TextEdit::singleline(&mut self.edit_title),
+                            egui::TextEdit::singleline(&mut self.edit_title)
+                                .vertical_align(egui::Align::Center),
                         );
                     });
                 });
@@ -3993,7 +4003,8 @@ impl TypeTextApp {
                         if ui
                             .add_sized(
                                 [220.0, 24.0],
-                                egui::TextEdit::singleline(&mut self.settings.hotkey),
+                                egui::TextEdit::singleline(&mut self.settings.hotkey)
+                                    .vertical_align(egui::Align::Center),
                             )
                             .changed()
                         {
@@ -4213,7 +4224,8 @@ impl TypeTextApp {
                                     egui::TextEdit::singleline(
                                         &mut self.settings.favourite_hotkeys[slot_index],
                                     )
-                                    .hint_text("Optional hotkey"),
+                                    .hint_text("Optional hotkey")
+                                    .vertical_align(egui::Align::Center),
                                 )
                                 .changed()
                             {
@@ -4271,7 +4283,8 @@ impl TypeTextApp {
                             .add_sized(
                                 [86.0, 24.0],
                                 egui::TextEdit::singleline(&mut self.settings.accent_color)
-                                    .hint_text("#0A7E76"),
+                                    .hint_text("#0A7E76")
+                                    .vertical_align(egui::Align::Center),
                             )
                             .changed()
                         {
