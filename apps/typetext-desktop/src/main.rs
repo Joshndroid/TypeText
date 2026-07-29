@@ -1623,6 +1623,13 @@ impl TypeTextApp {
         }
     }
 
+    fn discard_editor_changes(&mut self) {
+        match self.edit_panel {
+            EditPanel::Groups | EditPanel::Snippets => self.load_selected_editor_snippet(),
+            EditPanel::Tokens => self.load_selected_editor_token(),
+        }
+    }
+
     fn request_edit_navigation(&mut self, navigation: EditNavigation) {
         let is_noop = match navigation {
             EditNavigation::View(view) => self.view == view,
@@ -2894,6 +2901,7 @@ impl TypeTextApp {
         }
         if discard {
             if let Some(navigation) = self.pending_edit_navigation.take() {
+                self.discard_editor_changes();
                 self.apply_edit_navigation(navigation);
             }
         } else if cancel {
@@ -3975,12 +3983,114 @@ impl TypeTextApp {
                             );
                             ui.add_space(6.0);
                             ui.label(egui::RichText::new("Value").small());
-                            let value_height = (ui.available_height() - 4.0).max(120.0);
+                            let value_height = (ui.available_height() * 0.45).max(108.0);
                             ui.add_sized(
                                 [ui.available_width(), value_height],
                                 egui::TextEdit::multiline(&mut self.edit_token_value)
                                     .lock_focus(true),
                             );
+
+                            let mut draft_tokens = self.tokens.custom_tokens.clone();
+                            if let Some(token) = draft_tokens.get_mut(self.selected_token) {
+                                token.name = self.edit_token_name.trim().to_string();
+                                token.value = self.edit_token_value.clone();
+                            }
+                            let token_issues =
+                                analyze_snippet_tokens(&self.edit_token_value, &draft_tokens);
+                            let token_unsaved = self
+                                .tokens
+                                .custom_tokens
+                                .get(self.selected_token)
+                                .is_some_and(|token| {
+                                    self.edit_token_name != token.name
+                                        || self.edit_token_value != token.value
+                                });
+
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                let valid_color = egui::Color32::from_rgb(50, 145, 95);
+                                let validation_status = if token_issues.is_empty() {
+                                    egui::RichText::new("Tokens valid")
+                                        .small()
+                                        .color(valid_color)
+                                } else {
+                                    egui::RichText::new(format!(
+                                        "{} token issue{}",
+                                        token_issues.len(),
+                                        if token_issues.len() == 1 { "" } else { "s" }
+                                    ))
+                                    .small()
+                                    .color(ui.visuals().warn_fg_color)
+                                };
+                                ui.label(validation_status);
+                                ui.label(egui::RichText::new("•").small().weak());
+                                ui.label(
+                                    egui::RichText::new(if token_unsaved {
+                                        "Token has unsaved changes"
+                                    } else {
+                                        "Token saved"
+                                    })
+                                    .small()
+                                    .color(if token_unsaved {
+                                        ui.visuals().warn_fg_color
+                                    } else {
+                                        valid_color
+                                    }),
+                                );
+                            });
+                            for issue in &token_issues {
+                                let color = match issue.level {
+                                    TokenIssueLevel::Error => egui::Color32::from_rgb(190, 70, 60),
+                                    TokenIssueLevel::Warning => ui.visuals().warn_fg_color,
+                                };
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(format!("• {}", issue.message))
+                                            .small()
+                                            .color(color),
+                                    )
+                                    .wrap(),
+                                );
+                            }
+
+                            ui.add_space(5.0);
+                            ui.label(egui::RichText::new("Resolved Preview").small().strong());
+                            let preview = expand_snippet_tokens_with_custom(
+                                &self.edit_token_value,
+                                &draft_tokens,
+                            );
+                            egui::Frame::new()
+                                .fill(ui.visuals().faint_bg_color)
+                                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                                .corner_radius(4.0)
+                                .inner_margin(egui::Margin::symmetric(7, 5))
+                                .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    let preview_height = ui.available_height().max(54.0);
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("token_resolved_preview")
+                                        .max_height(preview_height)
+                                        .auto_shrink([false, false])
+                                        .show(ui, |ui| {
+                                            ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new(if preview.is_empty() {
+                                                        "Preview is empty"
+                                                    } else {
+                                                        &preview
+                                                    })
+                                                    .monospace()
+                                                    .color(if preview.is_empty() {
+                                                        ui.visuals().weak_text_color()
+                                                    } else {
+                                                        ui.visuals().text_color()
+                                                    }),
+                                                )
+                                                .wrap()
+                                                .selectable(true),
+                                            );
+                                        });
+                                });
                         }
                     },
                 );
