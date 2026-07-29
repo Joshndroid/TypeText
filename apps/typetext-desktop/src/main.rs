@@ -3588,6 +3588,38 @@ impl TypeTextApp {
     }
 
     fn ui_edit(&mut self, ui: &mut egui::Ui) {
+        let (save_with_shortcut, add_with_shortcut, duplicate_with_shortcut, delete_with_shortcut) =
+            ui.input(|input| {
+                let shortcut_modifiers =
+                    input.modifiers.command && !input.modifiers.shift && !input.modifiers.alt;
+                (
+                    shortcut_modifiers && input.key_pressed(egui::Key::S),
+                    shortcut_modifiers && input.key_pressed(egui::Key::N),
+                    shortcut_modifiers && input.key_pressed(egui::Key::D),
+                    shortcut_modifiers && input.key_pressed(egui::Key::Backspace),
+                )
+            });
+        let shortcut_keys = [
+            (save_with_shortcut, egui::Key::S),
+            (add_with_shortcut, egui::Key::N),
+            (duplicate_with_shortcut, egui::Key::D),
+            (delete_with_shortcut, egui::Key::Backspace),
+        ];
+        ui.input_mut(|input| {
+            input.events.retain(|event| {
+                !shortcut_keys.iter().any(|(active, shortcut_key)| {
+                    *active
+                        && matches!(
+                            event,
+                            egui::Event::Key {
+                                key,
+                                pressed: true,
+                                ..
+                            } if key == shortcut_key
+                        )
+                })
+            });
+        });
         if !ui.input(|input| input.pointer.primary_down()) {
             self.dragged_edit_item = None;
         }
@@ -3660,6 +3692,38 @@ impl TypeTextApp {
                 EditPanel::Tokens => self.ui_edit_tokens(ui, edit_rect),
             },
         );
+
+        if self.pending_edit_navigation.is_none() && self.pending_editor_deletion.is_none() {
+            if save_with_shortcut && self.editor_has_unsaved_changes() {
+                self.save_current_editor();
+            } else if add_with_shortcut {
+                let navigation = match self.edit_panel {
+                    EditPanel::Groups => EditNavigation::AddGroup,
+                    EditPanel::Snippets => EditNavigation::AddSnippet,
+                    EditPanel::Tokens => EditNavigation::AddToken,
+                };
+                self.request_edit_navigation(navigation);
+            } else if duplicate_with_shortcut && self.edit_panel == EditPanel::Snippets {
+                self.duplicate_selected_editor_snippet();
+            } else if delete_with_shortcut {
+                match self.edit_panel {
+                    EditPanel::Groups => self.request_selected_group_deletion(),
+                    EditPanel::Snippets => self.request_selected_snippet_deletion(),
+                    EditPanel::Tokens if self.selected_token_kind == TokenSelection::Custom => {
+                        self.request_selected_token_deletion();
+                    }
+                    EditPanel::Tokens => {}
+                }
+            }
+        }
+    }
+
+    fn save_current_editor(&mut self) {
+        match self.edit_panel {
+            EditPanel::Groups => self.save_selected_editor_group(),
+            EditPanel::Snippets => self.save_selected_editor_snippet(),
+            EditPanel::Tokens => self.save_selected_editor_token(),
+        }
     }
 
     fn ui_snippet_group_selector(&mut self, ui: &mut egui::Ui, width: f32) {
@@ -3748,19 +3812,23 @@ impl TypeTextApp {
                     self.edit_group_active && self.selected_group < self.snippets.groups.len();
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Delete"))
-                    .on_hover_text("Delete selected group")
+                    .on_hover_text("Delete selected group (Ctrl+Backspace)")
                     .clicked()
                 {
                     self.request_selected_group_deletion();
                 }
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Save"))
-                    .on_hover_text("Save selected group")
+                    .on_hover_text("Save selected group (Ctrl+S)")
                     .clicked()
                 {
                     self.save_selected_editor_group();
                 }
-                if ui.button("Add").on_hover_text("Add group").clicked() {
+                if ui
+                    .button("Add")
+                    .on_hover_text("Add group (Ctrl+N)")
+                    .clicked()
+                {
                     self.request_edit_navigation(EditNavigation::AddGroup);
                 }
             }
@@ -3774,19 +3842,23 @@ impl TypeTextApp {
                         .is_some();
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Delete"))
-                    .on_hover_text("Delete selected snippet")
+                    .on_hover_text("Delete selected snippet (Ctrl+Backspace)")
                     .clicked()
                 {
                     self.request_selected_snippet_deletion();
                 }
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Save"))
-                    .on_hover_text("Save selected snippet")
+                    .on_hover_text("Save selected snippet (Ctrl+S)")
                     .clicked()
                 {
                     self.save_selected_editor_snippet();
                 }
-                if ui.button("Add").on_hover_text("Add snippet").clicked() {
+                if ui
+                    .button("Add")
+                    .on_hover_text("Add snippet (Ctrl+N)")
+                    .clicked()
+                {
                     self.request_edit_navigation(EditNavigation::AddSnippet);
                 }
                 let current_slot = self
@@ -3863,19 +3935,23 @@ impl TypeTextApp {
                     && self.selected_token < self.tokens.custom_tokens.len();
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Delete"))
-                    .on_hover_text("Delete custom token")
+                    .on_hover_text("Delete custom token (Ctrl+Backspace)")
                     .clicked()
                 {
                     self.request_selected_token_deletion();
                 }
                 if ui
                     .add_enabled(can_edit, egui::Button::new("Save"))
-                    .on_hover_text("Save custom token")
+                    .on_hover_text("Save custom token (Ctrl+S)")
                     .clicked()
                 {
                     self.save_selected_editor_token();
                 }
-                if ui.button("Add").on_hover_text("Add custom token").clicked() {
+                if ui
+                    .button("Add")
+                    .on_hover_text("Add custom token (Ctrl+N)")
+                    .clicked()
+                {
                     self.request_edit_navigation(EditNavigation::AddToken);
                 }
             }
@@ -4221,7 +4297,7 @@ impl TypeTextApp {
             .on_hover_text("Copy selected snippet to another group");
             if ui
                 .add_enabled(can_edit_snippet, egui::Button::new("Duplicate"))
-                .on_hover_text("Duplicate selected snippet in this group")
+                .on_hover_text("Duplicate selected snippet in this group (Ctrl+D)")
                 .clicked()
             {
                 requested_duplicate = true;

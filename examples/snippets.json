@@ -5,6 +5,10 @@
       "name": "Common Replies",
       "snippets": [
         {
+          "title": "Getting Started",
+          "body": "Welcome to TypeText!\n\nClick a snippet in Choose to add it to the queue. Select a group and use Add Group to queue every snippet in it.\n\nOpen Edit to create your own groups, snippets, and custom tokens. You can use tokens such as {date.today} or {Program.Version} inside snippet text.\n\nEdit or delete this starter snippet whenever you are ready."
+        },
+        {
           "title": "Follow up",
           "body": "Hi, just following up on this. Please let me know if you need anything else."
         },

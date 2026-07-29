@@ -25,7 +25,6 @@ pub const MAX_CUSTOM_TOKENS: usize = 1_000;
 pub const MAX_FAVOURITES: usize = 10;
 pub const MAX_TOKEN_NAME_CHARS: usize = 128;
 pub const MAX_TOKEN_VALUE_CHARS: usize = 100_000;
-const CURRENT_TOKEN_FILE_VERSION: u32 = 2;
 const STARTER_CUSTOM_TOKEN_NAME: &str = "Program.Version";
 const STARTER_CUSTOM_TOKEN_VALUE: &str = "1.0.0";
 pub const SUPPORTED_SNIPPET_TOKENS: &[(&str, &str)] = &[
@@ -187,6 +186,11 @@ impl Default for SnippetFile {
                 name: "Common Replies".to_string(),
                 snippets: vec![
                     Snippet {
+                        title: "Getting Started".to_string(),
+                        body: "Welcome to TypeText!\n\nClick a snippet in Choose to add it to the queue. Select a group and use Add Group to queue every snippet in it.\n\nOpen Edit to create your own groups, snippets, and custom tokens. You can use tokens such as {date.today} or {Program.Version} inside snippet text.\n\nEdit or delete this starter snippet whenever you are ready.".to_string(),
+                        favourite_slot: None,
+                    },
+                    Snippet {
                         title: "Follow up".to_string(),
                         body: "Hi, just following up on this. Please let me know if you need anything else.".to_string(),
                         favourite_slot: None,
@@ -206,7 +210,7 @@ impl Default for SnippetFile {
 impl Default for TokenFile {
     fn default() -> Self {
         Self {
-            version: CURRENT_TOKEN_FILE_VERSION,
+            version: 1,
             static_tokens: SUPPORTED_SNIPPET_TOKENS
                 .iter()
                 .map(|(name, description)| StaticToken {
@@ -421,20 +425,11 @@ pub fn load_or_create_tokens(paths: &PortablePaths) -> Result<TokenFile> {
         &TokenFile::default(),
         MAX_TOKEN_FILE_BYTES,
     )?;
-    let tokens_upgraded = if tokens.version < CURRENT_TOKEN_FILE_VERSION {
-        if tokens.custom_tokens.is_empty() {
-            tokens.custom_tokens.push(starter_custom_token());
-        }
-        tokens.version = CURRENT_TOKEN_FILE_VERSION;
-        true
-    } else {
-        false
-    };
     let default_static_tokens = TokenFile::default().static_tokens;
     let static_tokens_changed = tokens.static_tokens != default_static_tokens;
     tokens.static_tokens = default_static_tokens;
     validate_tokens(&tokens)?;
-    if !existed || tokens_upgraded || static_tokens_changed {
+    if !existed || static_tokens_changed {
         save_tokens(paths, &tokens)?;
     }
     Ok(tokens)
@@ -1273,41 +1268,8 @@ mod tests {
     fn default_tokens_include_an_editable_custom_token_example() {
         let tokens = TokenFile::default();
 
-        assert_eq!(tokens.version, CURRENT_TOKEN_FILE_VERSION);
+        assert_eq!(tokens.version, 1);
         assert_eq!(tokens.custom_tokens, [starter_custom_token()]);
-    }
-
-    #[test]
-    fn legacy_empty_token_files_receive_the_starter_token_once() {
-        let data_dir = std::env::temp_dir().join(format!(
-            "typetext-token-migration-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let paths = PortablePaths::from_data_dir(&data_dir);
-        fs::create_dir_all(&data_dir).unwrap();
-        fs::write(
-            &paths.tokens_path,
-            r#"{"version":1,"staticTokens":[],"customTokens":[]}"#,
-        )
-        .unwrap();
-
-        let mut tokens = load_or_create_tokens(&paths).unwrap();
-        assert_eq!(tokens.version, CURRENT_TOKEN_FILE_VERSION);
-        assert_eq!(tokens.custom_tokens, [starter_custom_token()]);
-
-        tokens.custom_tokens.clear();
-        save_tokens(&paths, &tokens).unwrap();
-        assert!(
-            load_or_create_tokens(&paths)
-                .unwrap()
-                .custom_tokens
-                .is_empty()
-        );
-
-        let _ = fs::remove_dir_all(data_dir);
     }
 
     #[test]
@@ -1316,7 +1278,7 @@ mod tests {
 
         assert_eq!(search_snippets(&snippets, "follow").len(), 1);
         assert_eq!(search_snippets(&snippets, "help").len(), 1);
-        assert_eq!(search_snippets(&snippets, "common").len(), 2);
+        assert_eq!(search_snippets(&snippets, "common").len(), 3);
     }
 
     #[test]
@@ -1357,14 +1319,14 @@ mod tests {
             .into_iter()
             .map(|result| result.title)
             .collect();
-        assert_eq!(ascending, ["Follow up", "Thanks"]);
+        assert_eq!(ascending, ["Follow up", "Getting Started", "Thanks"]);
 
         snippets.groups[0].sort_order = SnippetSortOrder::AlphabeticalDescending;
         let descending: Vec<_> = search_snippets(&snippets, "")
             .into_iter()
             .map(|result| result.title)
             .collect();
-        assert_eq!(descending, ["Thanks", "Follow up"]);
+        assert_eq!(descending, ["Thanks", "Getting Started", "Follow up"]);
     }
 
     #[test]
