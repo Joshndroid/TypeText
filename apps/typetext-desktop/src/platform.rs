@@ -2269,22 +2269,23 @@ mod fallback_platform {
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub use fallback_platform::{
     TrayHandle, install_app_mutex, install_reopen_handler, install_tray_icon,
-    open_droptext_file_dialog, open_folder, open_snippets_export_dialog, register_hotkeys,
-    reregister_hotkeys, set_startup_enabled, startup_enabled, storage_security_warning,
-    tray_status, type_text, type_text_current_focus,
+    open_droptext_file_dialog, open_folder, open_snippets_export_dialog,
+    open_typetext_data_folder_dialog, register_hotkeys, reregister_hotkeys, set_startup_enabled,
+    startup_enabled, storage_security_warning, tray_status, type_text, type_text_current_focus,
 };
 #[cfg(target_os = "macos")]
 pub use macos_platform::{
     install_app_mutex, install_reopen_handler, open_droptext_file_dialog, open_folder,
-    open_snippets_export_dialog, register_hotkeys, reregister_hotkeys, set_startup_enabled,
-    startup_enabled, storage_security_warning, tray_status, type_text, type_text_current_focus,
+    open_snippets_export_dialog, open_typetext_data_folder_dialog, register_hotkeys,
+    reregister_hotkeys, set_startup_enabled, startup_enabled, storage_security_warning,
+    tray_status, type_text, type_text_current_focus,
 };
 #[cfg(windows)]
 pub use windows_platform::{
     harden_dll_search, install_app_mutex, install_reopen_handler, open_droptext_file_dialog,
-    open_folder, open_snippets_export_dialog, register_hotkeys, reregister_hotkeys,
-    set_startup_enabled, startup_enabled, storage_security_warning, tray_status, type_text,
-    type_text_current_focus,
+    open_folder, open_snippets_export_dialog, open_typetext_data_folder_dialog, register_hotkeys,
+    reregister_hotkeys, set_startup_enabled, startup_enabled, storage_security_warning,
+    tray_status, type_text, type_text_current_focus,
 };
 
 #[cfg(all(

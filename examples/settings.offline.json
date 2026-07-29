@@ -1,4 +1,5 @@
 {
+  "version": 2,
   "hotkey": "Ctrl+Alt+Space",
   "favouriteHotkeys": ["", "", "", "", "", "", "", "", "", ""],
   "typingDelayMs": 80,

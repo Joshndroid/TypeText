@@ -237,6 +237,8 @@ Open **Settings > Storage** to see the active data folder, then use **Open Data*
 - `settings.json`
 - `tokens.json`
 
+Each file carries a schema version. After replacing the executable or installing an update, TypeText compares those versions with the formats supported by the new release. If migration is required, a popup lists the affected files. Select **OK** to update them and continue. Updates that do not change a data schema do not prompt. Invalid or unreadable files are reported as errors instead of being migrated.
+
 Back up all three files while TypeText is closed. Portable users should back up the whole TypeText folder. The JSON data is readable and is not encrypted.
 
 ### Sensitive information

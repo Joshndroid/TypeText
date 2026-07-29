@@ -20,6 +20,8 @@ system APIs rather than a browser engine or web-based application runtime.
 - Borderless app window with in-app Min, Max, and Exit controls
 - DropText INI/CSV import, older TypeText data-folder migration, and TypeText JSON export
 - Simple JSON snippet/settings storage
+- Schema-versioned startup migrations with confirmation
+- Schema-versioned startup migrations with confirmation
 - Configurable delay before typing and close-after-insert behavior
 - Windows-only character and separator typing delays
 - Open-on-startup setting for macOS and Windows
@@ -441,6 +443,7 @@ System Settings > Privacy & Security > Accessibility
 
 ```json
 {
+  "version": 2,
   "hotkey": "Ctrl+Alt+Space",
   "favouriteHotkeys": ["", "", "", "", "", "", "", "", "", ""],
   "typingDelayMs": 80,

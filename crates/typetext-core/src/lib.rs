@@ -25,6 +25,9 @@ pub const MAX_CUSTOM_TOKENS: usize = 1_000;
 pub const MAX_FAVOURITES: usize = 10;
 pub const MAX_TOKEN_NAME_CHARS: usize = 128;
 pub const MAX_TOKEN_VALUE_CHARS: usize = 100_000;
+pub const CURRENT_SNIPPET_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_TOKEN_SCHEMA_VERSION: u32 = 2;
 const STARTER_CUSTOM_TOKEN_NAME: &str = "Program.Version";
 const STARTER_CUSTOM_TOKEN_VALUE: &str = "1.0.0";
 pub const SUPPORTED_SNIPPET_TOKENS: &[(&str, &str)] = &[
@@ -79,6 +82,13 @@ pub struct LegacyTypeTextImport {
     pub tokens: Option<TokenFile>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataFileMigration {
+    Snippets,
+    Settings,
+    Tokens,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnippetGroup {
@@ -109,6 +119,8 @@ pub struct Snippet {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
+    #[serde(default = "legacy_data_version")]
+    pub version: u32,
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
     #[serde(default = "default_favourite_hotkeys")]
@@ -201,7 +213,7 @@ pub struct SearchResult {
 impl Default for SnippetFile {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: CURRENT_SNIPPET_SCHEMA_VERSION,
             groups: vec![SnippetGroup {
                 name: "Common Replies".to_string(),
                 snippets: vec![
@@ -230,7 +242,7 @@ impl Default for SnippetFile {
 impl Default for TokenFile {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: CURRENT_TOKEN_SCHEMA_VERSION,
             static_tokens: SUPPORTED_SNIPPET_TOKENS
                 .iter()
                 .map(|(name, description)| StaticToken {
@@ -253,6 +265,7 @@ fn starter_custom_token() -> CustomToken {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            version: CURRENT_SETTINGS_SCHEMA_VERSION,
             hotkey: default_hotkey(),
             favourite_hotkeys: default_favourite_hotkeys(),
             typing_delay_ms: default_typing_delay_ms(),
@@ -448,10 +461,9 @@ pub fn load_or_create_tokens(paths: &PortablePaths) -> Result<TokenFile> {
         MAX_TOKEN_FILE_BYTES,
     )?;
     let default_static_tokens = TokenFile::default().static_tokens;
-    let static_tokens_changed = tokens.static_tokens != default_static_tokens;
     tokens.static_tokens = default_static_tokens;
     validate_tokens(&tokens)?;
-    if !existed || static_tokens_changed {
+    if !existed {
         save_tokens(paths, &tokens)?;
     }
     Ok(tokens)
@@ -471,21 +483,25 @@ pub fn import_legacy_typetext_folder(data_dir: impl AsRef<Path>) -> Result<Legac
     }
 
     let paths = PortablePaths::from_data_dir(data_dir);
-    let snippets = load_optional_json::<SnippetFile>(&paths.snippets_path, MAX_SNIPPET_FILE_BYTES)?;
-    if let Some(snippets) = &snippets {
+    let mut snippets =
+        load_optional_json::<SnippetFile>(&paths.snippets_path, MAX_SNIPPET_FILE_BYTES)?;
+    if let Some(snippets) = &mut snippets {
         validate_snippets(snippets)?;
+        snippets.version = CURRENT_SNIPPET_SCHEMA_VERSION;
     }
 
-    let settings =
+    let mut settings =
         load_optional_json::<AppSettings>(&paths.settings_path, MAX_SETTINGS_FILE_BYTES)?;
-    if let Some(settings) = &settings {
+    if let Some(settings) = &mut settings {
         validate_settings(settings)?;
+        settings.version = CURRENT_SETTINGS_SCHEMA_VERSION;
     }
 
     let mut tokens = load_optional_json::<TokenFile>(&paths.tokens_path, MAX_TOKEN_FILE_BYTES)?;
     if let Some(tokens) = &mut tokens {
         tokens.static_tokens = TokenFile::default().static_tokens;
         validate_tokens(tokens)?;
+        tokens.version = CURRENT_TOKEN_SCHEMA_VERSION;
     }
 
     if snippets.is_none() && settings.is_none() && tokens.is_none() {
@@ -714,7 +730,10 @@ fn parse_droptext_data(
         return Err(anyhow!("No DropText snippets were found."));
     }
 
-    let snippets = SnippetFile { version: 1, groups };
+    let snippets = SnippetFile {
+        version: CURRENT_SNIPPET_SCHEMA_VERSION,
+        groups,
+    };
     validate_snippets(&snippets)?;
     Ok(snippets)
 }
@@ -763,6 +782,12 @@ pub fn search_snippets(snippets: &SnippetFile, query: &str) -> Vec<SearchResult>
 }
 
 pub fn validate_snippets(snippets: &SnippetFile) -> Result<()> {
+    if snippets.version == 0 || snippets.version > CURRENT_SNIPPET_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "Snippet data uses unsupported schema version {}.",
+            snippets.version
+        ));
+    }
     if snippets.groups.len() > MAX_GROUPS {
         return Err(anyhow!(
             "Snippet data contains more than {MAX_GROUPS} groups."
@@ -822,6 +847,12 @@ pub fn validate_snippets(snippets: &SnippetFile) -> Result<()> {
 }
 
 pub fn validate_settings(settings: &AppSettings) -> Result<()> {
+    if settings.version == 0 || settings.version > CURRENT_SETTINGS_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "Settings data uses unsupported schema version {}.",
+            settings.version
+        ));
+    }
     if let Some(window_size) = settings.window_size
         && (!window_size.width.is_finite()
             || !window_size.height.is_finite()
@@ -872,6 +903,12 @@ pub fn validate_settings(settings: &AppSettings) -> Result<()> {
 }
 
 pub fn validate_tokens(tokens: &TokenFile) -> Result<()> {
+    if tokens.version == 0 || tokens.version > CURRENT_TOKEN_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "Token data uses unsupported schema version {}.",
+            tokens.version
+        ));
+    }
     if tokens.custom_tokens.len() > MAX_CUSTOM_TOKENS {
         return Err(anyhow!(
             "Token data contains more than {MAX_CUSTOM_TOKENS} custom tokens."
@@ -1293,6 +1330,10 @@ fn default_hotkey() -> String {
     "Ctrl+Alt+Space".to_string()
 }
 
+fn legacy_data_version() -> u32 {
+    1
+}
+
 fn default_favourite_hotkeys() -> [String; MAX_FAVOURITES] {
     std::array::from_fn(|_| String::new())
 }
@@ -1345,7 +1386,7 @@ mod tests {
     fn default_tokens_include_an_editable_custom_token_example() {
         let tokens = TokenFile::default();
 
-        assert_eq!(tokens.version, 1);
+        assert_eq!(tokens.version, CURRENT_TOKEN_SCHEMA_VERSION);
         assert_eq!(tokens.custom_tokens, [starter_custom_token()]);
     }
 
@@ -1470,7 +1511,7 @@ Program Exam Done="Done the exam \r\nFor details please conduct further \r\nI am
 
         let snippets = parse_droptext_ini(raw).unwrap();
 
-        assert_eq!(snippets.version, 1);
+        assert_eq!(snippets.version, CURRENT_SNIPPET_SCHEMA_VERSION);
         assert_eq!(snippets.groups.len(), 2);
         assert_eq!(snippets.groups[0].name, "Initial Progranm Exam Entry");
         assert_eq!(snippets.groups[0].snippets[0].title, "Program Exam Summary");

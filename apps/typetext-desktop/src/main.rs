@@ -13,10 +13,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use typetext_core::MAX_WINDOWS_INPUT_DELAY_MS;
 use typetext_core::{
-    AppSettings, CustomToken, EditorReorderControl, InterfaceSize,
-    MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_FAVOURITES, MAX_SNIPPET_TITLE_CHARS, MAX_TYPING_DELAY_MS,
-    PortablePaths, QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet,
-    SnippetFile, SnippetGroup, SnippetSortOrder, TokenFile, WindowSize,
+    AppSettings, CURRENT_SETTINGS_SCHEMA_VERSION, CURRENT_SNIPPET_SCHEMA_VERSION,
+    CURRENT_TOKEN_SCHEMA_VERSION, CustomToken, DataFileMigration, EditorReorderControl,
+    InterfaceSize, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_FAVOURITES, MAX_SNIPPET_TITLE_CHARS,
+    MAX_TYPING_DELAY_MS, PortablePaths, QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS,
+    SearchResult, Snippet, SnippetFile, SnippetGroup, SnippetSortOrder, TokenFile, WindowSize,
     expand_snippet_tokens_with_custom, export_snippets, import_droptext_with_warnings,
     import_legacy_typetext_folder, load_or_create_settings, load_or_create_snippets,
     load_or_create_tokens, save_settings, save_snippets, save_tokens, search_snippets,
@@ -535,6 +536,7 @@ struct TypeTextApp {
     status: String,
     error_message: Option<String>,
     warning_message: Option<String>,
+    pending_data_migrations: Vec<DataFileMigration>,
     confirm_clear_all: bool,
     confirm_import: bool,
     pending_favourite_slot: Option<u8>,
@@ -1320,7 +1322,7 @@ fn sidebar_reorder_row(
 impl TypeTextApp {
     fn new(cc: &eframe::CreationContext<'_>) -> anyhow::Result<Self> {
         let paths = resolve_paths()?;
-        let (snippets, snippets_load_error) = match load_or_create_snippets(&paths) {
+        let (mut snippets, snippets_load_error) = match load_or_create_snippets(&paths) {
             Ok(snippets) => (snippets, None),
             Err(error) => (
                 SnippetFile::default(),
@@ -1338,7 +1340,7 @@ impl TypeTextApp {
                 )),
             ),
         };
-        let (tokens, tokens_load_error) = match load_or_create_tokens(&paths) {
+        let (mut tokens, tokens_load_error) = match load_or_create_tokens(&paths) {
             Ok(tokens) => (tokens, None),
             Err(error) => (
                 TokenFile::default(),
@@ -1347,6 +1349,19 @@ impl TypeTextApp {
                 )),
             ),
         };
+        let mut pending_data_migrations = Vec::new();
+        if snippets.version < CURRENT_SNIPPET_SCHEMA_VERSION {
+            pending_data_migrations.push(DataFileMigration::Snippets);
+        }
+        if settings.version < CURRENT_SETTINGS_SCHEMA_VERSION {
+            pending_data_migrations.push(DataFileMigration::Settings);
+        }
+        if tokens.version < CURRENT_TOKEN_SCHEMA_VERSION {
+            pending_data_migrations.push(DataFileMigration::Tokens);
+        }
+        snippets.version = CURRENT_SNIPPET_SCHEMA_VERSION;
+        settings.version = CURRENT_SETTINGS_SCHEMA_VERSION;
+        tokens.version = CURRENT_TOKEN_SCHEMA_VERSION;
         if OFFLINE_PORTABLE {
             settings.open_on_startup = false;
             settings.check_for_updates = false;
@@ -1401,7 +1416,7 @@ impl TypeTextApp {
                 }
                 Err(_) => (None, None),
             };
-        let open_minimized_pending = settings.open_minimized;
+        let open_minimized_pending = settings.open_minimized && pending_data_migrations.is_empty();
 
         let mut app = Self {
             paths,
@@ -1434,6 +1449,7 @@ impl TypeTextApp {
             status,
             error_message,
             warning_message: None,
+            pending_data_migrations,
             confirm_clear_all: false,
             confirm_import: false,
             pending_favourite_slot: None,
@@ -2163,10 +2179,8 @@ impl TypeTextApp {
     }
 
     fn clear_all_snippets(&mut self) {
-        self.snippets = SnippetFile {
-            version: 1,
-            groups: Vec::new(),
-        };
+        self.snippets = SnippetFile::default();
+        self.snippets.groups.clear();
         self.selected_group = 0;
         self.selected_snippet = 0;
         self.edit_group_active = false;
@@ -2702,6 +2716,102 @@ impl TypeTextApp {
         self.error_message = Some(message.into());
     }
 
+    fn apply_pending_data_migrations(&mut self, ctx: &egui::Context) {
+        let result = (|| -> anyhow::Result<()> {
+            for migration in self.pending_data_migrations.clone() {
+                match migration {
+                    DataFileMigration::Snippets => {
+                        save_snippets(&self.paths, &self.snippets)?;
+                    }
+                    DataFileMigration::Settings => {
+                        save_settings_with_effects(
+                            &self.paths,
+                            &mut self.settings,
+                            &self.hotkey_tx,
+                            &mut self.registered_hotkeys,
+                            &mut self.applied_startup_enabled,
+                        )?;
+                        self.settings_dirty = false;
+                        apply_theme(ctx, &self.settings);
+                    }
+                    DataFileMigration::Tokens => {
+                        save_tokens(&self.paths, &self.tokens)?;
+                    }
+                }
+            }
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                self.pending_data_migrations.clear();
+                self.status = "TypeText data migration completed".to_string();
+            }
+            Err(error) => self.show_error(format!(
+                "TypeText could not complete the stored-data migration. The migration prompt will remain available so you can retry. {error}"
+            )),
+        }
+    }
+
+    fn ui_data_migration_popup(&mut self, ctx: &egui::Context) {
+        if self.pending_data_migrations.is_empty() {
+            return;
+        }
+
+        let names = self
+            .pending_data_migrations
+            .iter()
+            .map(|migration| match migration {
+                DataFileMigration::Snippets => "snippets.json",
+                DataFileMigration::Settings => "settings.json",
+                DataFileMigration::Tokens => "tokens.json",
+            })
+            .collect::<Vec<_>>();
+        let mut migrate = false;
+
+        egui::Area::new(egui::Id::new("data_migration_dialog"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.set_width(420.0);
+                        centered_popup_label(
+                            ui,
+                            egui::RichText::new("TypeText data migration required")
+                                .strong()
+                                .size(15.5),
+                            false,
+                        );
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        centered_popup_label(
+                            ui,
+                            format!(
+                                "There are migrations required for: {}. TypeText will update these files to the current format. Press OK to continue.",
+                                names.join(", ")
+                            ),
+                            true,
+                        );
+                        ui.add_space(10.0);
+                        centered_popup_button_row(ui, &[78.0], |ui| {
+                            if ui
+                                .add_sized([78.0, 24.0], egui::Button::new("OK"))
+                                .clicked()
+                            {
+                                migrate = true;
+                            }
+                        });
+                    });
+            });
+
+        if migrate {
+            self.apply_pending_data_migrations(ctx);
+        }
+    }
+
     fn load_selected_editor_snippet(&mut self) {
         self.edit_group_name = self
             .snippets
@@ -2755,6 +2865,9 @@ impl eframe::App for TypeTextApp {
             self.hide_to_background(ctx);
         }
         self.handle_window_lifecycle(ctx);
+        if !self.pending_data_migrations.is_empty() {
+            return;
+        }
         self.handle_tray_commands(ctx);
         self.handle_hotkey_capture(ctx);
         #[cfg(not(feature = "offline-portable"))]
@@ -2814,6 +2927,7 @@ impl eframe::App for TypeTextApp {
         self.ui_favourite_confirmation(&ctx);
         self.ui_unsaved_editor_confirmation(&ctx);
         self.ui_background_notice(&ctx);
+        self.ui_data_migration_popup(&ctx);
         self.ui_warning_popup(&ctx);
         self.ui_error_popup(&ctx);
     }
