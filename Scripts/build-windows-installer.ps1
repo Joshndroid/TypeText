@@ -25,13 +25,15 @@ $Iscc = $env:ISCC_EXE
 if ([string]::IsNullOrWhiteSpace($Iscc)) {
     $Candidates = @(
         "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
-        "${env:ProgramFiles}\Inno Setup 7\ISCC.exe"
+        "${env:ProgramFiles}\Inno Setup 7\ISCC.exe",
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
     )
     $Iscc = $Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
 
 if ([string]::IsNullOrWhiteSpace($Iscc) -or !(Test-Path $Iscc)) {
-    throw "Inno Setup compiler not found. Install Inno Setup 7 or set ISCC_EXE."
+    throw "Inno Setup compiler not found. Install Inno Setup 6 or 7, or set ISCC_EXE."
 }
 
 $DistDirForInno = $DistDir.Replace("\", "\\")
