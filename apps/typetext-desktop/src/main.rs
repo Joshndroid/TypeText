@@ -3672,7 +3672,7 @@ impl TypeTextApp {
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         add_selected_group = ui
-                            .add_enabled(can_add_group, egui::Button::new("Add Group"))
+                            .add_enabled(can_add_group, egui::Button::new("Queue Group"))
                             .on_hover_text("Add every snippet in the selected group to the queue")
                             .clicked();
                     });
@@ -3711,16 +3711,54 @@ impl TypeTextApp {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(42.0, HEADER_CONTROL_HEIGHT),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| section_header(ui, "Queue", ""),
-                    );
+                    ui.set_min_height(HEADER_CONTROL_HEIGHT);
+                    section_header(ui, "Queue", format!("{} queued", self.snippet_chain.len()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled_ui(!self.snippet_chain.is_empty(), |ui| {
+                                ui.add_sized(
+                                    [52.0, HEADER_CONTROL_HEIGHT],
+                                    egui::Button::new("Clear"),
+                                )
+                            })
+                            .inner
+                            .clicked()
+                        {
+                            self.snippet_chain.clear();
+                            self.snippet_chain_actions.clear();
+                            self.insert_when_focus_lost = false;
+                            self.status = "Chain cleared".to_string();
+                        }
+                        if ui
+                            .add_enabled_ui(!self.snippet_chain.is_empty(), |ui| {
+                                ui.add_sized(
+                                    [78.0, HEADER_CONTROL_HEIGHT],
+                                    egui::Button::new("Undo Last"),
+                                )
+                            })
+                            .inner
+                            .clicked()
+                        {
+                            self.undo_last_queue_action();
+                        }
 
-                    let actions_width = 142.0;
-                    let queue_width = (ui.available_width() - actions_width).max(0.0);
+                        let instruction = if self.snippet_chain.is_empty() {
+                            "Choose snippets to build the queue"
+                        } else {
+                            "Ready - click a text field in the destination app"
+                        };
+                        let colour = if self.snippet_chain.is_empty() {
+                            ui.visuals().weak_text_color()
+                        } else {
+                            ui.visuals().selection.bg_fill
+                        };
+                        ui.label(egui::RichText::new(instruction).strong().color(colour));
+                    });
+                });
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(
-                        egui::vec2(queue_width, HEADER_CONTROL_HEIGHT),
+                        egui::vec2(ui.available_width(), HEADER_CONTROL_HEIGHT),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             egui::ScrollArea::horizontal()
@@ -3733,7 +3771,7 @@ impl TypeTextApp {
                                     ui.horizontal(|ui| {
                                         if self.snippet_chain.is_empty() {
                                             ui.label(
-                                                egui::RichText::new("Click a snippet to add it")
+                                                egui::RichText::new("No snippets queued")
                                                     .small()
                                                     .color(ui.visuals().weak_text_color()),
                                             );
@@ -3756,31 +3794,6 @@ impl TypeTextApp {
                                 });
                         },
                     );
-
-                    if ui
-                        .add_enabled_ui(!self.snippet_chain.is_empty(), |ui| {
-                            ui.add_sized(
-                                [78.0, HEADER_CONTROL_HEIGHT],
-                                egui::Button::new("Undo Last"),
-                            )
-                        })
-                        .inner
-                        .clicked()
-                    {
-                        self.undo_last_queue_action();
-                    }
-                    if ui
-                        .add_enabled_ui(!self.snippet_chain.is_empty(), |ui| {
-                            ui.add_sized([52.0, HEADER_CONTROL_HEIGHT], egui::Button::new("Clear"))
-                        })
-                        .inner
-                        .clicked()
-                    {
-                        self.snippet_chain.clear();
-                        self.snippet_chain_actions.clear();
-                        self.insert_when_focus_lost = false;
-                        self.status = "Chain cleared".to_string();
-                    }
                 });
             });
 

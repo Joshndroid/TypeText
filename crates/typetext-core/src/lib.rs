@@ -219,7 +219,7 @@ impl Default for SnippetFile {
                 snippets: vec![
                     Snippet {
                         title: "Getting Started".to_string(),
-                        body: "Welcome to TypeText!\n\nClick a snippet in Choose to add it to the queue. Select a group and use Add Group to queue every snippet in it.\n\nOpen Edit to create your own groups, snippets, and custom tokens. You can use tokens such as {date.today} or {Program.Version} inside snippet text.\n\nEdit or delete this starter snippet whenever you are ready.".to_string(),
+                        body: "Welcome to TypeText!\n\nClick a snippet in Choose to add it to the queue. Select a group and use Queue Group to queue every snippet in it.\n\nOpen Edit to create your own groups, snippets, and custom tokens. You can use tokens such as {date.today} or {Program.Version} inside snippet text.\n\nEdit or delete this starter snippet whenever you are ready.".to_string(),
                         favourite_slot: None,
                     },
                     Snippet {
