@@ -800,6 +800,35 @@ fn filter_button(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Respon
     )
 }
 
+fn centered_popup_button_row<R>(
+    ui: &mut egui::Ui,
+    button_widths: &[f32],
+    add_buttons: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let buttons_width = button_widths.iter().sum::<f32>();
+    let gaps_width = ui.spacing().item_spacing.x * button_widths.len().saturating_sub(1) as f32;
+    let left_space = ((ui.available_width() - buttons_width - gaps_width) / 2.0).max(0.0);
+    ui.horizontal(|ui| {
+        ui.add_space(left_space);
+        add_buttons(ui)
+    })
+}
+
+fn centered_popup_label(
+    ui: &mut egui::Ui,
+    text: impl Into<egui::WidgetText>,
+    wrap: bool,
+) -> egui::Response {
+    ui.with_layout(
+        egui::Layout::top_down_justified(egui::Align::Center),
+        |ui| {
+            let label = egui::Label::new(text).halign(egui::Align::Center);
+            ui.add(if wrap { label.wrap() } else { label })
+        },
+    )
+    .inner
+}
+
 fn start_window_drag_on_response(response: &egui::Response, ctx: &egui::Context) {
     if response.drag_started() {
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
@@ -2738,16 +2767,26 @@ impl TypeTextApp {
                 egui::Frame::window(ui.style())
                     .inner_margin(egui::Margin::symmetric(18, 12))
                     .show(ui, |ui| {
-                        ui.set_max_width(460.0);
-                        ui.label(egui::RichText::new(heading).strong().size(15.5));
+                        ui.set_width(400.0);
+                        centered_popup_label(
+                            ui,
+                            egui::RichText::new(heading).strong().size(15.5),
+                            false,
+                        );
                         ui.add_space(8.0);
-                        ui.add(egui::Label::new(message).wrap());
+                        centered_popup_label(ui, message, true);
                         ui.add_space(10.0);
-                        ui.horizontal_centered(|ui| {
-                            if ui.button("Cancel").clicked() {
+                        centered_popup_button_row(ui, &[84.0, 118.0], |ui| {
+                            if ui
+                                .add_sized([84.0, 24.0], egui::Button::new("Cancel"))
+                                .clicked()
+                            {
                                 cancel = true;
                             }
-                            if ui.button(confirm_label).clicked() {
+                            if ui
+                                .add_sized([118.0, 24.0], egui::Button::new(confirm_label))
+                                .clicked()
+                            {
                                 confirm = true;
                             }
                         });
@@ -2818,25 +2857,32 @@ impl TypeTextApp {
                 egui::Frame::window(ui.style())
                     .inner_margin(egui::Margin::symmetric(18, 12))
                     .show(ui, |ui| {
-                        ui.set_max_width(440.0);
-                        ui.label(
+                        ui.set_width(390.0);
+                        centered_popup_label(
+                            ui,
                             egui::RichText::new("Discard unsaved changes?")
                                 .strong()
                                 .size(15.5),
+                            false,
                         );
                         ui.add_space(8.0);
-                        ui.add(
-                            egui::Label::new(
-                                "The fields in this editor have changed since you last saved them.",
-                            )
-                            .wrap(),
+                        centered_popup_label(
+                            ui,
+                            "The fields in this editor have changed since you last saved them.",
+                            true,
                         );
                         ui.add_space(10.0);
-                        ui.horizontal_centered(|ui| {
-                            if ui.button("Keep Editing").clicked() {
+                        centered_popup_button_row(ui, &[100.0, 120.0], |ui| {
+                            if ui
+                                .add_sized([100.0, 24.0], egui::Button::new("Keep Editing"))
+                                .clicked()
+                            {
                                 cancel = true;
                             }
-                            if ui.button("Discard Changes").clicked() {
+                            if ui
+                                .add_sized([120.0, 24.0], egui::Button::new("Discard Changes"))
+                                .clicked()
+                            {
                                 discard = true;
                             }
                         });
@@ -2876,25 +2922,34 @@ impl TypeTextApp {
                 egui::Frame::window(ui.style())
                     .inner_margin(egui::Margin::symmetric(18, 12))
                     .show(ui, |ui| {
-                        ui.set_max_width(420.0);
-                        ui.label(
+                        ui.set_width(380.0);
+                        centered_popup_label(
+                            ui,
                             egui::RichText::new(format!("Replace favourite #{slot}?"))
                                 .strong()
                                 .size(15.5),
+                            false,
                         );
                         ui.add_space(8.0);
-                        ui.add(
-                            egui::Label::new(format!(
+                        centered_popup_label(
+                            ui,
+                            format!(
                                 "Favourite #{slot} is currently assigned to “{current_owner}”."
-                            ))
-                            .wrap(),
+                            ),
+                            true,
                         );
                         ui.add_space(10.0);
-                        ui.horizontal_centered(|ui| {
-                            if ui.button("Cancel").clicked() {
+                        centered_popup_button_row(ui, &[84.0, 84.0], |ui| {
+                            if ui
+                                .add_sized([84.0, 24.0], egui::Button::new("Cancel"))
+                                .clicked()
+                            {
                                 cancel = true;
                             }
-                            if ui.button("Replace").clicked() {
+                            if ui
+                                .add_sized([84.0, 24.0], egui::Button::new("Replace"))
+                                .clicked()
+                            {
                                 replace = true;
                             }
                         });
@@ -2922,29 +2977,34 @@ impl TypeTextApp {
                 egui::Frame::window(ui.style())
                     .inner_margin(egui::Margin::symmetric(18, 12))
                     .show(ui, |ui| {
-                        ui.set_max_width(460.0);
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("Import a trusted file")
-                                    .strong()
-                                    .size(15.5),
-                            );
-                        });
+                        ui.set_width(410.0);
+                        centered_popup_label(
+                            ui,
+                            egui::RichText::new("Import a trusted file")
+                                .strong()
+                                .size(15.5),
+                            false,
+                        );
                         ui.add_space(6.0);
                         ui.separator();
                         ui.add_space(8.0);
-                        ui.add(
-                            egui::Label::new(
-                                "Imported files can contain text that TypeText will type into other applications. Only import files you trust, and review imported snippets before using them.",
-                            )
-                            .wrap(),
+                        centered_popup_label(
+                            ui,
+                            "Imported files can contain text that TypeText will type into other applications. Only import files you trust, and review imported snippets before using them.",
+                            true,
                         );
                         ui.add_space(10.0);
-                        ui.horizontal_centered(|ui| {
-                            if ui.button("Cancel").clicked() {
+                        centered_popup_button_row(ui, &[84.0, 104.0], |ui| {
+                            if ui
+                                .add_sized([84.0, 24.0], egui::Button::new("Cancel"))
+                                .clicked()
+                            {
                                 cancel = true;
                             }
-                            if ui.button("Choose File").clicked() {
+                            if ui
+                                .add_sized([104.0, 24.0], egui::Button::new("Choose File"))
+                                .clicked()
+                            {
                                 choose_file = true;
                             }
                         });
@@ -2973,29 +3033,28 @@ impl TypeTextApp {
                 egui::Frame::window(ui.style())
                     .inner_margin(egui::Margin::symmetric(18, 12))
                     .show(ui, |ui| {
-                        ui.set_max_width(460.0);
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("TypeText will keep running")
-                                    .strong()
-                                    .size(15.5)
-                                    .color(ui.visuals().text_color()),
-                            );
-                        });
+                        ui.set_width(410.0);
+                        centered_popup_label(
+                            ui,
+                            egui::RichText::new("TypeText will keep running")
+                                .strong()
+                                .size(15.5)
+                                .color(ui.visuals().text_color()),
+                            false,
+                        );
                         ui.add_space(6.0);
                         ui.separator();
                         ui.add_space(8.0);
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(
-                                    "Closing or hiding the window leaves TypeText running in the background. Use the tray icon to Open, go to Settings, or Exit.",
-                                )
-                                .size(11.5),
+                        centered_popup_label(
+                            ui,
+                            egui::RichText::new(
+                                "Closing or hiding the window leaves TypeText running in the background. Use the tray icon to Open, go to Settings, or Exit.",
                             )
-                            .wrap(),
+                            .size(11.5),
+                            true,
                         );
                         ui.add_space(10.0);
-                        ui.horizontal_centered(|ui| {
+                        centered_popup_button_row(ui, &[120.0, 78.0], |ui| {
                             if ui
                                 .add_sized([120.0, 24.0], egui::Button::new("Keep Running"))
                                 .clicked()
@@ -3046,29 +3105,28 @@ impl TypeTextApp {
                 egui::Frame::window(ui.style())
                     .inner_margin(egui::Margin::symmetric(18, 12))
                     .show(ui, |ui| {
-                        ui.set_max_width(460.0);
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("Clear all snippets?")
-                                    .strong()
-                                    .size(15.5)
-                                    .color(ui.visuals().text_color()),
-                            );
-                        });
+                        ui.set_width(400.0);
+                        centered_popup_label(
+                            ui,
+                            egui::RichText::new("Clear all snippets?")
+                                .strong()
+                                .size(15.5)
+                                .color(ui.visuals().text_color()),
+                            false,
+                        );
                         ui.add_space(6.0);
                         ui.separator();
                         ui.add_space(8.0);
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(format!(
+                        centered_popup_label(
+                            ui,
+                            egui::RichText::new(format!(
                                     "This will permanently remove {snippet_count} snippets from {group_count} groups."
                                 ))
                                 .size(11.5),
-                            )
-                            .wrap(),
+                            true,
                         );
                         ui.add_space(10.0);
-                        ui.horizontal_centered(|ui| {
+                        centered_popup_button_row(ui, &[78.0, 88.0], |ui| {
                             if ui
                                 .add_sized([78.0, 24.0], egui::Button::new("Cancel"))
                                 .clicked()
@@ -3110,21 +3168,21 @@ impl TypeTextApp {
                 egui::Frame::window(ui.style())
                     .inner_margin(egui::Margin::symmetric(18, 12))
                     .show(ui, |ui| {
-                        ui.set_max_width(460.0);
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("Error")
-                                    .strong()
-                                    .size(15.5)
-                                    .color(ui.visuals().text_color()),
-                            );
-                        });
+                        ui.set_width(400.0);
+                        centered_popup_label(
+                            ui,
+                            egui::RichText::new("Error")
+                                .strong()
+                                .size(15.5)
+                                .color(ui.visuals().text_color()),
+                            false,
+                        );
                         ui.add_space(6.0);
                         ui.separator();
                         ui.add_space(8.0);
-                        ui.add(egui::Label::new(egui::RichText::new(message).size(11.5)).wrap());
+                        centered_popup_label(ui, egui::RichText::new(message).size(11.5), true);
                         ui.add_space(10.0);
-                        ui.vertical_centered(|ui| {
+                        centered_popup_button_row(ui, &[78.0], |ui| {
                             if ui
                                 .add_sized([78.0, 24.0], egui::Button::new("OK"))
                                 .clicked()
@@ -3157,21 +3215,21 @@ impl TypeTextApp {
                 egui::Frame::window(ui.style())
                     .inner_margin(egui::Margin::symmetric(18, 12))
                     .show(ui, |ui| {
-                        ui.set_max_width(460.0);
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("Import warning")
-                                    .strong()
-                                    .size(15.5)
-                                    .color(ui.visuals().text_color()),
-                            );
-                        });
+                        ui.set_width(400.0);
+                        centered_popup_label(
+                            ui,
+                            egui::RichText::new("Import warning")
+                                .strong()
+                                .size(15.5)
+                                .color(ui.visuals().text_color()),
+                            false,
+                        );
                         ui.add_space(6.0);
                         ui.separator();
                         ui.add_space(8.0);
-                        ui.add(egui::Label::new(egui::RichText::new(message).size(11.5)).wrap());
+                        centered_popup_label(ui, egui::RichText::new(message).size(11.5), true);
                         ui.add_space(10.0);
-                        ui.vertical_centered(|ui| {
+                        centered_popup_button_row(ui, &[78.0], |ui| {
                             if ui
                                 .add_sized([78.0, 24.0], egui::Button::new("OK"))
                                 .clicked()
