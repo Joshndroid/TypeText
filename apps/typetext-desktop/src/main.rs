@@ -103,6 +103,62 @@ enum EditPanel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsPanel {
+    General,
+    Typing,
+    Selection,
+    Favourites,
+    Appearance,
+    Data,
+}
+
+const SETTINGS_PANELS: &[(SettingsPanel, &str, &str)] = &[
+    (
+        SettingsPanel::General,
+        "General",
+        "hotkey global summon shortcut capture startup launch behavior open on startup open minimized",
+    ),
+    (
+        SettingsPanel::Typing,
+        "Typing",
+        "typing insertion behavior delay before typing windows character delay windows separator delay milliseconds hide close after inserting text start each queued snippet on a new line empty lines between snippets reset default",
+    ),
+    (
+        SettingsPanel::Selection,
+        "Selection",
+        "selection queued snippet clicks behavior add again remove from chain",
+    ),
+    (
+        SettingsPanel::Favourites,
+        "Favourites",
+        "favourites favorite direct snippet hotkeys optional hotkey capture clear assigned",
+    ),
+    (
+        SettingsPanel::Appearance,
+        "Appearance",
+        "appearance theme system light dark accent color hex",
+    ),
+    (
+        SettingsPanel::Data,
+        "Data",
+        "data updates github releases check for updates check now last checked download release verify sha import export clear all reset snippet data storage data folder open data tray",
+    ),
+];
+
+fn settings_panel_matches(panel: SettingsPanel, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    SETTINGS_PANELS
+        .iter()
+        .find(|(candidate, _, _)| *candidate == panel)
+        .is_some_and(|(_, label, keywords)| {
+            let searchable = format!("{} {keywords}", label.to_lowercase());
+            query
+                .split_whitespace()
+                .all(|term| searchable.contains(term))
+        })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenSelection {
     Custom,
     Static,
@@ -267,8 +323,10 @@ struct TypeTextApp {
     results: Vec<SearchResult>,
     search: String,
     edit_search: String,
+    settings_search: String,
     view: View,
     edit_panel: EditPanel,
+    settings_panel: SettingsPanel,
     chooser_group: Option<usize>,
     selected_result: usize,
     selected_group: usize,
@@ -1067,8 +1125,10 @@ impl TypeTextApp {
             results,
             search: String::new(),
             edit_search: String::new(),
+            settings_search: String::new(),
             view: View::Choose,
             edit_panel: EditPanel::Snippets,
+            settings_panel: SettingsPanel::General,
             chooser_group: None,
             selected_result: 0,
             selected_group: 0,
@@ -3977,30 +4037,139 @@ impl TypeTextApp {
 
     fn ui_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal(|ui| {
+            ui.set_min_height(HEADER_CONTROL_HEIGHT);
             section_header(ui, "Settings", "preferences and app data");
-            if self.settings_dirty {
-                ui.label(
-                    egui::RichText::new("Unsaved changes - click Save Settings")
-                        .small()
-                        .strong()
-                        .color(ui.visuals().hyperlink_color),
-                );
-            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let scrollbar_width = ui.spacing().scroll.allocated_width();
-                ui.add_space(scrollbar_width);
-                if ui.small_button("Save Settings").clicked() {
+                if ui.button("Save Settings").clicked() {
                     self.save_settings(ctx);
+                }
+                if self.settings_dirty {
+                    ui.label(
+                        egui::RichText::new("Unsaved changes")
+                            .strong()
+                            .color(ui.visuals().hyperlink_color),
+                    );
                 }
             });
         });
         section_gap(ui);
 
-        egui::ScrollArea::vertical()
-            .id_salt("settings_sections")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                framed_section(ui, "Hotkey", "global summon shortcut", |ui| {
+        let mut search_changed = false;
+        framed_section(ui, "Search", "find settings", |ui| {
+            search_changed = ui
+                .add_sized(
+                    [ui.available_width(), 24.0],
+                    egui::TextEdit::singleline(&mut self.settings_search)
+                        .hint_text("Search settings")
+                        .vertical_align(egui::Align::Center),
+                )
+                .changed();
+        });
+        if search_changed
+            && let Some((panel, _, _)) = SETTINGS_PANELS
+                .iter()
+                .find(|(panel, _, _)| settings_panel_matches(*panel, &self.settings_search))
+        {
+            self.settings_panel = *panel;
+        }
+        section_gap(ui);
+
+        let settings_size = ui.available_size();
+        let (settings_rect, _) = ui.allocate_exact_size(settings_size, egui::Sense::hover());
+        let sidebar_width = edit_sidebar_width(settings_rect.width());
+
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(settings_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Min)),
+            |ui| {
+                let (sidebar_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(sidebar_width, settings_rect.height()),
+                    egui::Sense::hover(),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(sidebar_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                    |ui| {
+                        ui.set_clip_rect(sidebar_rect);
+                        ui.set_width_range(sidebar_rect.width()..=sidebar_rect.width());
+                        let mut found_match = false;
+                        for (panel, label, _) in SETTINGS_PANELS {
+                            if settings_panel_matches(*panel, &self.settings_search) {
+                                found_match = true;
+                                if sidebar_group_row(ui, label, self.settings_panel == *panel)
+                                    .clicked()
+                                {
+                                    self.settings_panel = *panel;
+                                }
+                                ui.add_space(1.0);
+                            }
+                        }
+                        if !found_match {
+                            ui.label(
+                                egui::RichText::new("No matching settings")
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                        }
+                    },
+                );
+
+                ui.separator();
+
+                let detail_width = ui.available_width();
+                let (detail_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(detail_width, settings_rect.height()),
+                    egui::Sense::hover(),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(detail_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                    |ui| {
+                        ui.set_clip_rect(detail_rect);
+                        ui.set_width_range(detail_rect.width()..=detail_rect.width());
+                        let (title, description) = match self.settings_panel {
+                            SettingsPanel::General => {
+                                ("General", "Application shortcuts and startup behaviour")
+                            }
+                            SettingsPanel::Typing => {
+                                ("Typing", "Control how snippets are inserted")
+                            }
+                            SettingsPanel::Selection => {
+                                ("Selection", "Choose how queued snippet clicks behave")
+                            }
+                            SettingsPanel::Favourites => {
+                                ("Favourites", "Manage direct snippet hotkeys")
+                            }
+                            SettingsPanel::Appearance => {
+                                ("Appearance", "Choose the application theme and accent")
+                            }
+                            SettingsPanel::Data => {
+                                ("Data", "Manage updates, snippet data, and storage")
+                            }
+                        };
+                        detail_header(ui, title, |_| {});
+                        ui.label(
+                            egui::RichText::new(description)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        section_gap(ui);
+
+                        let current_panel_matches =
+                            settings_panel_matches(self.settings_panel, &self.settings_search);
+                        egui::ScrollArea::vertical()
+                            .id_salt("settings_detail")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                if !current_panel_matches {
+                    ui.label(
+                        egui::RichText::new("No settings match your search")
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                }
+                if current_panel_matches && self.settings_panel == SettingsPanel::General {
+                    framed_section(ui, "Hotkey", "global summon shortcut", |ui| {
                     ui.horizontal(|ui| {
                         if ui
                             .add_sized(
@@ -4030,10 +4199,10 @@ impl TypeTextApp {
                             };
                         }
                     });
-                });
+                    });
 
-                section_gap(ui);
-                framed_section(ui, "Startup", "launch behavior", |ui| {
+                    section_gap(ui);
+                    framed_section(ui, "Startup", "launch behavior", |ui| {
                     if !OFFLINE_PORTABLE
                         && ui
                             .checkbox(&mut self.settings.open_on_startup, "Open on Startup")
@@ -4047,10 +4216,11 @@ impl TypeTextApp {
                     {
                         self.mark_settings_dirty();
                     }
-                });
+                    });
+                }
 
-                section_gap(ui);
-                framed_section(ui, "Typing", "insertion behavior", |ui| {
+                if current_panel_matches && self.settings_panel == SettingsPanel::Typing {
+                    framed_section(ui, "Insertion", "timing and layout", |ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("Delay before typing").small());
                         if ui
@@ -4167,10 +4337,11 @@ impl TypeTextApp {
                             self.mark_settings_dirty();
                         }
                     });
-                });
+                    });
+                }
 
-                section_gap(ui);
-                framed_section(ui, "Selection", "queued snippet clicks", |ui| {
+                if current_panel_matches && self.settings_panel == SettingsPanel::Selection {
+                    framed_section(ui, "Click Behaviour", "queued snippets", |ui| {
                     ui.horizontal(|ui| {
                         for (value, label) in [
                             (QueuedSnippetClickAction::AddAgain, "Add again"),
@@ -4188,10 +4359,11 @@ impl TypeTextApp {
                             }
                         }
                     });
-                });
+                    });
+                }
 
-                section_gap(ui);
-                framed_section(ui, "Favourites", "direct snippet hotkeys", |ui| {
+                if current_panel_matches && self.settings_panel == SettingsPanel::Favourites {
+                    framed_section(ui, "Assignments", "slots and hotkeys", |ui| {
                     for slot_index in 0..MAX_FAVOURITES {
                         let slot = (slot_index + 1) as u8;
                         let assigned = self
@@ -4204,25 +4376,15 @@ impl TypeTextApp {
                                     .iter()
                                     .find(|snippet| snippet.favourite_slot == Some(slot))
                                     .map(|snippet| format!("{} · {}", snippet.title, group.name))
-                            })
-                            .unwrap_or_else(|| "Not assigned".to_string());
+                            });
                         ui.horizontal(|ui| {
                             ui.add_sized(
                                 [24.0, HEADER_CONTROL_HEIGHT],
                                 egui::Label::new(egui::RichText::new(format!("#{slot}")).small()),
                             );
-                            ui.add_sized(
-                                [220.0, HEADER_CONTROL_HEIGHT],
-                                egui::Label::new(
-                                    egui::RichText::new(assigned)
-                                        .small()
-                                        .color(ui.visuals().weak_text_color()),
-                                )
-                                .truncate(),
-                            );
                             if ui
                                 .add_sized(
-                                    [180.0, HEADER_CONTROL_HEIGHT],
+                                    [150.0, HEADER_CONTROL_HEIGHT],
                                     egui::TextEdit::singleline(
                                         &mut self.settings.favourite_hotkeys[slot_index],
                                     )
@@ -4257,12 +4419,24 @@ impl TypeTextApp {
                                 self.settings.favourite_hotkeys[slot_index].clear();
                                 self.mark_settings_dirty();
                             }
+                            if let Some(assigned) = assigned {
+                                ui.add_sized(
+                                    [ui.available_width(), HEADER_CONTROL_HEIGHT],
+                                    egui::Label::new(
+                                        egui::RichText::new(assigned)
+                                            .small()
+                                            .color(ui.visuals().weak_text_color()),
+                                    )
+                                    .truncate(),
+                                );
+                            }
                         });
                     }
-                });
+                    });
+                }
 
-                section_gap(ui);
-                framed_section(ui, "Appearance", "theme", |ui| {
+                if current_panel_matches && self.settings_panel == SettingsPanel::Appearance {
+                    framed_section(ui, "Theme & Accent", "colour scheme", |ui| {
                     ui.horizontal(|ui| {
                         for (value, label) in
                             [("system", "System"), ("light", "Light"), ("dark", "Dark")]
@@ -4308,12 +4482,13 @@ impl TypeTextApp {
                             );
                         }
                     });
-                });
+                    });
+                }
 
                 #[cfg(not(feature = "offline-portable"))]
                 {
-                    section_gap(ui);
-                    framed_section(ui, "Updates", "GitHub releases", |ui| {
+                    if current_panel_matches && self.settings_panel == SettingsPanel::Data {
+                        framed_section(ui, "Updates", "GitHub releases", |ui| {
                     if ui
                         .checkbox(
                             &mut self.settings.check_for_updates,
@@ -4406,44 +4581,53 @@ impl TypeTextApp {
                             }
                         });
                     }
-                    });
+                        });
+                    }
                 }
 
-                section_gap(ui);
-                framed_section(ui, "Snippet Data", "import, export, and reset", |ui| {
-                    ui.horizontal(|ui| {
-                        if ui.button("Import").clicked() {
-                            self.confirm_import = true;
+                if current_panel_matches && self.settings_panel == SettingsPanel::Data {
+                    #[cfg(not(feature = "offline-portable"))]
+                    section_gap(ui);
+                    framed_section(ui, "Snippet Data", "import, export, and reset", |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("Import").clicked() {
+                                self.confirm_import = true;
+                            }
+                            if ui.button("Export").clicked() {
+                                self.export_typetext_snippets();
+                            }
+                            if ui.button("Clear All").clicked() {
+                                self.confirm_clear_all = true;
+                            }
+                        });
+                    });
+
+                    section_gap(ui);
+                    framed_section(ui, "Storage", "data folder", |ui| {
+                        ui.monospace(self.paths.data_dir.display().to_string());
+                        if let Some(warning) =
+                            platform::storage_security_warning(&self.paths.data_dir)
+                        {
+                            ui.label(
+                                egui::RichText::new(warning)
+                                    .small()
+                                    .color(egui::Color32::from_rgb(190, 70, 60)),
+                            );
                         }
-                        if ui.button("Export").clicked() {
-                            self.export_typetext_snippets();
-                        }
-                        if ui.button("Clear All").clicked() {
-                            self.confirm_clear_all = true;
+                        ui.label(egui::RichText::new(platform::tray_status()).small().weak());
+                        ui.add_space(2.0);
+                        if ui.button("Open Data").clicked()
+                            && let Err(error) = platform::open_folder(&self.paths.data_dir)
+                        {
+                            self.show_error(error.to_string());
                         }
                     });
-                });
-
-                section_gap(ui);
-                framed_section(ui, "Storage", "data folder", |ui| {
-                    ui.monospace(self.paths.data_dir.display().to_string());
-                    if let Some(warning) = platform::storage_security_warning(&self.paths.data_dir)
-                    {
-                        ui.label(
-                            egui::RichText::new(warning)
-                                .small()
-                                .color(egui::Color32::from_rgb(190, 70, 60)),
-                        );
-                    }
-                    ui.label(egui::RichText::new(platform::tray_status()).small().weak());
-                    ui.add_space(2.0);
-                    if ui.button("Open Data").clicked()
-                        && let Err(error) = platform::open_folder(&self.paths.data_dir)
-                    {
-                        self.show_error(error.to_string());
-                    }
-                });
-            });
+                }
+                            });
+                    },
+                );
+            },
+        );
     }
 }
 
