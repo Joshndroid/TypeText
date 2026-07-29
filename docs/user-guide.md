@@ -63,7 +63,7 @@ TypeText has three main areas:
 
 - **Choose** searches snippets, filters by group, and builds the typing queue.
 - **Edit** manages groups, snippets, custom tokens, and built-in token references.
-- **Settings** controls shortcuts, typing behavior, favourites, appearance, updates, storage, import, and export.
+- **Settings** controls shortcuts, typing behavior, favourites, appearance, updates, storage, import, and export. **Hotkey Hints** is pinned to the bottom of its sidebar as a keyboard reference.
 
 The top-right controls belong to TypeText:
 
@@ -81,12 +81,14 @@ The default chooser shortcut is:
 
 To change it:
 
-1. Open **Settings > Hotkey**.
+1. Open **Settings > General** and find **Hotkey**.
 2. Capture or enter the new key combination.
 3. Click **Save Settings**.
 4. Hide TypeText and test the shortcut from another application.
 
 Up to ten favourite snippets can also have direct-insertion shortcuts. Configure these under **Settings > Favourites**. The chooser shortcut and all favourite shortcuts must be unique. Another application or the operating system may already own a shortcut, in which case choose another combination.
+
+Open **Settings > Hotkey Hints** for a read-only reference covering the configured chooser shortcut, favourite hotkeys, queue keys, and editor shortcuts.
 
 ## 5. Create groups and snippets
 
@@ -127,17 +129,37 @@ Each group can use:
 
 Favourite snippets show a muted `#1` through `#10` marker in Edit and Choose. Deleting the snippet frees its slot.
 
+### Editor keyboard shortcuts
+
+The Groups, Snippets, and Tokens editors share these shortcuts. Use **Ctrl** on Windows and **Cmd** on macOS:
+
+- **Ctrl/Cmd+S** saves the current editor item.
+- **Ctrl/Cmd+N** adds an item in the current editor section.
+- **Ctrl/Cmd+D** duplicates the selected snippet.
+- **Ctrl/Cmd+Backspace** requests deletion of the selected editor item.
+
 ## 6. Type a snippet
 
 1. In another application, select or click near the field that will receive the text.
 2. Open TypeText with its global shortcut.
 3. In **Choose**, search by snippet name or text, or filter by group.
 4. Click a snippet to add it to the queue.
-5. Add more snippets if needed.
+5. Add more snippets if needed, or select a group and use **Queue Group** to queue the entire group.
 6. Click the destination text field when TypeText asks you to select it.
 7. TypeText hides, restores focus, and types the queued content.
 
-Use **Undo Last** to remove the most recently queued item or **Clear** to empty the queue. Clicking an already queued snippet can add it again; this behavior is configurable under **Settings > Selection**.
+The queue panel always remains two rows high. Its header shows the queue count, destination guidance, **Undo Last**, and **Clear**; queued snippet titles appear underneath.
+
+- **Undo Last** reverses the most recent queue action, including a whole-group addition.
+- **Clear** empties the queue.
+- **Escape** clears the queue while TypeText is focused.
+- **Enter** types the selected snippet or queued chain.
+- Left-clicking an unqueued snippet adds it.
+- **Settings > Selection** controls whether left-clicking an already queued snippet adds another occurrence or removes one.
+- Right-clicking a queued snippet always removes its most recently queued occurrence.
+- Double-click has no separate action and behaves like one click.
+
+Escape prevents a waiting queue from being sent if it is pressed before leaving TypeText. It is not a system-wide cancellation key and cannot interrupt text that TypeText has already started typing in another application.
 
 ### Type a favourite directly
 
@@ -210,6 +232,7 @@ Settings include:
 - Delay and Windows typing timing.
 - Queue selection and paragraph-separator behavior.
 - Favourite slots and their optional shortcuts.
+- A searchable **Hotkey Hints** reference for system-wide and in-app keys.
 - Light, dark, or system theme.
 - Curated accent-color presets or a custom hexadecimal accent.
 - Small, default, or large interface sizing.
@@ -257,8 +280,10 @@ Do not use TypeText to store passwords, recovery codes, API keys, or other secre
 ### Text goes to the wrong application
 
 - Queue first, then click the exact destination field.
+- If the destination is not correct and TypeText still has focus, press **Escape** to clear the waiting queue.
 - Avoid switching to another window while insertion begins.
 - Increase **Delay before typing** if focus restoration is slow.
+- Escape cannot stop an insertion that has already started.
 
 ### A shortcut does not work
 

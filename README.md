@@ -12,6 +12,8 @@ system APIs rather than a browser engine or web-based application runtime.
 - Ten numbered favourite snippets with optional direct-insertion global hotkeys
 - Searchable snippet chooser with group filtering
 - Snippet chaining for inserting multiple text chunks together
+- Whole-group queueing with a persistent queue count and destination-field guidance
+- Queue controls for undo, clear, Escape-to-clear, and right-click removal
 - Dynamic local date and time tokens in snippet text
 - Custom snippet tokens stored in `tokens.json`
 - Configurable queued-snippet behavior: add duplicates or remove queued entries
@@ -21,13 +23,13 @@ system APIs rather than a browser engine or web-based application runtime.
 - DropText INI/CSV import, older TypeText data-folder migration, and TypeText JSON export
 - Simple JSON snippet/settings storage
 - Schema-versioned startup migrations with confirmation
-- Schema-versioned startup migrations with confirmation
 - Configurable delay before typing and close-after-insert behavior
 - Windows-only character and separator typing delays
 - Open-on-startup setting for macOS and Windows
 - Open-minimized launch setting
 - Light, dark, and system theme support with configurable accent color
 - Staged settings changes with a visible Save Settings reminder
+- Searchable Hotkey Hints reference in Settings
 - Daily GitHub release update checks with platform-specific download links
 - Bundled JetBrains Mono UI font for consistent rendering
 - Low-footprint native Rust/egui desktop app
@@ -142,6 +144,24 @@ The optional snippet JSON field is `"favouriteSlot": 1` (valid values 1–10).
 Older files without this field remain compatible. Settings store the ten
 optional shortcuts in `favouriteHotkeys`; exports preserve assignments.
 
+## Queue Controls
+
+In Choose, click a snippet to add it to the queue, or select a group and use
+**Queue Group** to add every snippet in that group. The two-row queue panel keeps
+its height whether empty or populated, shows the queued count, lists queued
+snippet titles, and prompts you to click a text field in the destination app
+when the queue is ready.
+
+Use **Undo Last** to undo the most recent queue action, including a whole-group
+addition. Use **Clear** or press **Escape** while TypeText is focused to empty the
+queue before selecting a destination. Escape is an in-app shortcut and does not
+interrupt text that TypeText has already started typing in another application.
+
+Left-clicking an unqueued snippet adds it. Settings > Selection controls whether
+left-clicking an already queued snippet adds another occurrence or removes one.
+Right-clicking a queued snippet always removes its most recently queued
+occurrence. Double-click has no separate action and behaves like one click.
+
 ## Security Features
 
 TypeText uses several safeguards to limit its local and update-related attack
@@ -205,6 +225,18 @@ The Edit tab has separate Groups, Snippets, and Tokens views. In the Snippets
 view, the header dropdown selects the active snippet group, and Snippet Details
 provides Copy, Move, and Tokens menus. In the Tokens view, the header dropdown
 switches the sidebar between Custom Tokens and Static Tokens.
+
+The action buttons use a consistent height in all three editor views. Keyboard
+shortcuts use **Ctrl** on Windows and **Cmd** on macOS:
+
+- **Ctrl/Cmd+S** saves the current editor item.
+- **Ctrl/Cmd+N** adds an item in the current editor section.
+- **Ctrl/Cmd+D** duplicates the selected snippet.
+- **Ctrl/Cmd+Backspace** requests deletion of the selected editor item.
+
+Settings > Hotkey Hints provides an in-app reference for these fixed shortcuts,
+the chooser shortcut, favourite hotkeys, **Enter** insertion, and **Escape**
+queue clearing.
 
 The app uses an in-app window header instead of the operating system title bar.
 Use **Min** to hide TypeText to the background, **Max** to toggle maximize, and
