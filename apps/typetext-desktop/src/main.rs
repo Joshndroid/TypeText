@@ -13,13 +13,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use typetext_core::MAX_WINDOWS_INPUT_DELAY_MS;
 use typetext_core::{
-    AppSettings, CustomToken, MAX_EMPTY_LINES_BETWEEN_SNIPPETS, MAX_FAVOURITES,
-    MAX_SNIPPET_TITLE_CHARS, MAX_TYPING_DELAY_MS, PortablePaths, QueuedSnippetClickAction,
-    SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet, SnippetFile, SnippetGroup, SnippetSortOrder,
-    TokenFile, WindowSize, expand_snippet_tokens_with_custom, export_snippets,
-    import_droptext_with_warnings, load_or_create_settings, load_or_create_snippets,
-    load_or_create_tokens, save_settings, save_snippets, save_tokens, search_snippets,
-    validate_settings,
+    AppSettings, CustomToken, EditorReorderControl, MAX_EMPTY_LINES_BETWEEN_SNIPPETS,
+    MAX_FAVOURITES, MAX_SNIPPET_TITLE_CHARS, MAX_TYPING_DELAY_MS, PortablePaths,
+    QueuedSnippetClickAction, SUPPORTED_SNIPPET_TOKENS, SearchResult, Snippet, SnippetFile,
+    SnippetGroup, SnippetSortOrder, TokenFile, WindowSize, expand_snippet_tokens_with_custom,
+    export_snippets, import_droptext_with_warnings, load_or_create_settings,
+    load_or_create_snippets, load_or_create_tokens, save_settings, save_snippets, save_tokens,
+    search_snippets, validate_settings,
 };
 
 const APP_VERSION: &str = env!("TYPETEXT_APP_VERSION");
@@ -39,7 +39,7 @@ const SNIPPET_TRANSFER_COMBO_WIDTH: f32 = 68.0;
 const DETAIL_HEADER_SEPARATOR_OFFSET: f32 = 9.0;
 const WINDOW_RESIZE_EDGE_SIZE: f32 = 7.0;
 const WINDOW_RESIZE_CORNER_SIZE: f32 = 16.0;
-const DEFAULT_WINDOW_SIZE: [f32; 2] = [780.0, 570.0];
+const DEFAULT_WINDOW_SIZE: [f32; 2] = [860.0, 570.0];
 const WINDOW_SIZE_SAVE_DELAY: Duration = Duration::from_millis(500);
 const NAV_BUTTON_SIZE: [f32; 2] = [72.0, 24.0];
 const FILTER_BUTTON_HEIGHT: f32 = 24.0;
@@ -136,7 +136,7 @@ const SETTINGS_PANELS: &[(SettingsPanel, &str, &str)] = &[
     (
         SettingsPanel::Appearance,
         "Appearance",
-        "appearance theme system light dark accent color hex",
+        "appearance theme system light dark accent color hex editor reordering drag handles arrow buttons mouse keyboard",
     ),
     (
         SettingsPanel::Data,
@@ -175,22 +175,19 @@ enum EditNavigation {
     },
     TokenKind(TokenSelection),
     Token(usize),
-    MoveGroup {
-        group_index: usize,
-        offset: isize,
-    },
-    MoveSnippet {
-        group_index: usize,
-        snippet_index: usize,
-        offset: isize,
-    },
-    MoveToken {
-        token_index: usize,
-        offset: isize,
-    },
     AddGroup,
     AddSnippet,
     AddToken,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DraggedEditItem {
+    Group(usize),
+    Snippet {
+        group_index: usize,
+        snippet_index: usize,
+    },
+    Token(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,6 +376,7 @@ struct TypeTextApp {
     confirm_import: bool,
     pending_favourite_slot: Option<u8>,
     pending_edit_navigation: Option<EditNavigation>,
+    dragged_edit_item: Option<DraggedEditItem>,
     capturing_hotkey: Option<platform::HotkeyAction>,
     settings_dirty: bool,
     applied_startup_enabled: bool,
@@ -1008,57 +1006,110 @@ fn sidebar_reorder_row(
     ui: &mut egui::Ui,
     title: &str,
     selected: bool,
+    can_drag: bool,
     can_move_up: bool,
     can_move_down: bool,
+    reorder_control: EditorReorderControl,
     item_name: &str,
     favourite_slot: Option<u8>,
-) -> (egui::Response, bool, bool) {
+) -> (egui::Response, Option<egui::Response>, bool, bool) {
+    const HANDLE_WIDTH: f32 = 26.0;
     const ARROW_BUTTON_WIDTH: f32 = 23.0;
     const ARROW_GAP: f32 = 3.0;
     const RIGHT_INSET: f32 = 7.0;
 
-    let reserved_width = ARROW_BUTTON_WIDTH * 2.0 + ARROW_GAP + RIGHT_INSET * 2.0;
-    let badge_width = if favourite_slot.is_some() { 28.0 } else { 0.0 };
-    let response = sidebar_named_row(ui, title, selected, reserved_width.max(badge_width));
-    if !selected {
-        if let Some(slot) = favourite_slot {
-            ui.painter().text(
-                egui::pos2(response.rect.right() - 8.0, response.rect.center().y),
-                egui::Align2::RIGHT_CENTER,
-                format!("#{slot}"),
-                egui::TextStyle::Small.resolve(ui.style()),
-                ui.visuals().weak_text_color(),
-            );
-            response.clone().on_hover_text(format!("Favourite {slot}"));
-        }
-        return (response, false, false);
+    let badge_width = if favourite_slot.is_some() { 30.0 } else { 0.0 };
+    let control_width = match reorder_control {
+        EditorReorderControl::DragHandles => HANDLE_WIDTH,
+        EditorReorderControl::ArrowButtons if selected => ARROW_BUTTON_WIDTH * 2.0 + ARROW_GAP,
+        EditorReorderControl::ArrowButtons => 0.0,
+    };
+    let reserved_width = control_width + RIGHT_INSET * 2.0 + badge_width;
+    let response = sidebar_named_row(ui, title, selected, reserved_width);
+    if let Some(slot) = favourite_slot {
+        ui.painter().text(
+            egui::pos2(
+                response.rect.right() - RIGHT_INSET - control_width - 4.0,
+                response.rect.center().y,
+            ),
+            egui::Align2::RIGHT_CENTER,
+            format!("#{slot}"),
+            egui::TextStyle::Small.resolve(ui.style()),
+            ui.visuals().weak_text_color(),
+        );
     }
 
-    let arrow_y = response.rect.center().y - 11.0;
-    let down_rect = egui::Rect::from_min_size(
+    if reorder_control == EditorReorderControl::ArrowButtons {
+        if !selected {
+            return (response, None, false, false);
+        }
+        let arrow_y = response.rect.center().y - 11.0;
+        let down_rect = egui::Rect::from_min_size(
+            egui::pos2(
+                response.rect.right() - RIGHT_INSET - ARROW_BUTTON_WIDTH,
+                arrow_y,
+            ),
+            egui::vec2(ARROW_BUTTON_WIDTH, 22.0),
+        );
+        let up_rect = egui::Rect::from_min_size(
+            egui::pos2(down_rect.left() - ARROW_GAP - ARROW_BUTTON_WIDTH, arrow_y),
+            egui::vec2(ARROW_BUTTON_WIDTH, 22.0),
+        );
+        let up_clicked = ui
+            .put(up_rect, egui::Button::new("↑"))
+            .on_hover_text(format!("Move {item_name} up"))
+            .clicked()
+            && can_move_up;
+        let down_clicked = ui
+            .put(down_rect, egui::Button::new("↓"))
+            .on_hover_text(format!("Move {item_name} down"))
+            .clicked()
+            && can_move_down;
+        return (response, None, up_clicked, down_clicked);
+    }
+
+    let handle_rect = egui::Rect::from_min_size(
         egui::pos2(
-            response.rect.right() - RIGHT_INSET - ARROW_BUTTON_WIDTH,
-            arrow_y,
+            response.rect.right() - RIGHT_INSET - HANDLE_WIDTH,
+            response.rect.top(),
         ),
-        egui::vec2(ARROW_BUTTON_WIDTH, 22.0),
+        egui::vec2(HANDLE_WIDTH, response.rect.height()),
     );
-    let up_rect = egui::Rect::from_min_size(
-        egui::pos2(down_rect.left() - ARROW_GAP - ARROW_BUTTON_WIDTH, arrow_y),
-        egui::vec2(ARROW_BUTTON_WIDTH, 22.0),
+    let drag_response = ui
+        .interact(
+            handle_rect,
+            response.id.with("drag_handle"),
+            if can_drag {
+                egui::Sense::drag()
+            } else {
+                egui::Sense::hover()
+            },
+        )
+        .on_hover_text(if can_drag {
+            format!("Drag to reorder {item_name}")
+        } else {
+            format!("{item_name} order cannot be dragged")
+        });
+    ui.painter().text(
+        handle_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "⋮⋮",
+        egui::TextStyle::Button.resolve(ui.style()),
+        if can_drag {
+            ui.visuals().text_color()
+        } else {
+            ui.visuals().weak_text_color()
+        },
     );
+    if can_drag && (drag_response.hovered() || drag_response.dragged()) {
+        ui.ctx().set_cursor_icon(if drag_response.dragged() {
+            egui::CursorIcon::Grabbing
+        } else {
+            egui::CursorIcon::Grab
+        });
+    }
 
-    let up_clicked = ui
-        .put(up_rect, egui::Button::new("↑"))
-        .on_hover_text(format!("Move {item_name} up"))
-        .clicked()
-        && can_move_up;
-    let down_clicked = ui
-        .put(down_rect, egui::Button::new("↓"))
-        .on_hover_text(format!("Move {item_name} down"))
-        .clicked()
-        && can_move_down;
-
-    (response, up_clicked, down_clicked)
+    (response, Some(drag_response), false, false)
 }
 
 impl TypeTextApp {
@@ -1182,6 +1233,7 @@ impl TypeTextApp {
             confirm_import: false,
             pending_favourite_slot: None,
             pending_edit_navigation: None,
+            dragged_edit_item: None,
             capturing_hotkey: None,
             settings_dirty: false,
             applied_startup_enabled,
@@ -1450,34 +1502,6 @@ impl TypeTextApp {
                 self.selected_token = token_index;
                 self.edit_token_active = true;
                 self.load_selected_editor_token();
-            }
-            EditNavigation::MoveGroup {
-                group_index,
-                offset,
-            } => {
-                self.selected_group = group_index;
-                self.edit_group_active = true;
-                self.move_selected_editor_group(offset);
-            }
-            EditNavigation::MoveSnippet {
-                group_index,
-                snippet_index,
-                offset,
-            } => {
-                self.selected_group = group_index;
-                self.selected_snippet = snippet_index;
-                self.edit_snippet_active = true;
-                self.load_selected_editor_snippet();
-                self.move_selected_editor_snippet(offset);
-            }
-            EditNavigation::MoveToken {
-                token_index,
-                offset,
-            } => {
-                self.selected_token = token_index;
-                self.edit_token_active = true;
-                self.load_selected_editor_token();
-                self.move_selected_editor_token(offset);
             }
             EditNavigation::AddGroup => self.add_editor_group(),
             EditNavigation::AddSnippet => self.add_editor_snippet(),
@@ -1905,25 +1929,52 @@ impl TypeTextApp {
                                 for (index, name) in &group_names {
                                     let selected =
                                         self.edit_group_active && self.selected_group == *index;
-                                    let (response, move_up, move_down) = sidebar_reorder_row(
-                                        ui,
-                                        name,
-                                        selected,
-                                        *index > 0,
-                                        *index + 1 < self.snippets.groups.len(),
-                                        "group",
-                                        None,
-                                    );
+                                    let (response, drag_response, move_up, move_down) =
+                                        sidebar_reorder_row(
+                                            ui,
+                                            name,
+                                            selected,
+                                            self.snippets.groups.len() > 1,
+                                            *index > 0,
+                                            *index + 1 < self.snippets.groups.len(),
+                                            self.settings.editor_reorder_control,
+                                            "group",
+                                            None,
+                                        );
                                     if move_up {
-                                        self.request_edit_navigation(EditNavigation::MoveGroup {
-                                            group_index: *index,
-                                            offset: -1,
-                                        });
+                                        self.reorder_editor_group(*index, *index - 1);
                                     } else if move_down {
-                                        self.request_edit_navigation(EditNavigation::MoveGroup {
-                                            group_index: *index,
-                                            offset: 1,
-                                        });
+                                        self.reorder_editor_group(*index, *index + 1);
+                                    } else if drag_response
+                                        .as_ref()
+                                        .is_some_and(egui::Response::drag_started)
+                                    {
+                                        if self.editor_has_unsaved_changes() && !selected {
+                                            self.request_edit_navigation(EditNavigation::Group(
+                                                *index,
+                                            ));
+                                        } else {
+                                            if !selected {
+                                                self.apply_edit_navigation(EditNavigation::Group(
+                                                    *index,
+                                                ));
+                                            }
+                                            self.dragged_edit_item =
+                                                Some(DraggedEditItem::Group(*index));
+                                        }
+                                    }
+                                    if ui.input(|input| {
+                                        input.pointer.primary_down()
+                                            && input.pointer.interact_pos().is_some_and(
+                                                |position| response.rect.contains(position),
+                                            )
+                                    }) && let Some(DraggedEditItem::Group(source)) =
+                                        self.dragged_edit_item
+                                        && source != *index
+                                    {
+                                        self.reorder_editor_group(source, *index);
+                                        self.dragged_edit_item =
+                                            Some(DraggedEditItem::Group(*index));
                                     } else if response.clicked() {
                                         self.request_edit_navigation(EditNavigation::Group(*index));
                                     }
@@ -2045,38 +2096,91 @@ impl TypeTextApp {
                             .max_height(ui.available_height())
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                let snippet_count = self
-                                    .snippets
-                                    .groups
-                                    .get(self.selected_group)
-                                    .map(|group| group.snippets.len())
-                                    .unwrap_or_default();
                                 for (group_index, snippet_index, title, favourite_slot) in
                                     &snippet_titles
                                 {
                                     let selected = self.edit_snippet_active
                                         && self.selected_group == *group_index
                                         && self.selected_snippet == *snippet_index;
-                                    let (response, move_up, move_down) = sidebar_reorder_row(
-                                        ui,
-                                        title,
-                                        selected,
-                                        !searching_all_groups && *snippet_index > 0,
-                                        !searching_all_groups && *snippet_index + 1 < snippet_count,
-                                        "snippet",
-                                        *favourite_slot,
-                                    );
+                                    let can_drag = !searching_all_groups
+                                        && self.snippets.groups.get(*group_index).is_some_and(
+                                            |group| {
+                                                group.sort_order == SnippetSortOrder::Custom
+                                                    && group.snippets.len() > 1
+                                            },
+                                        );
+                                    let (response, drag_response, move_up, move_down) =
+                                        sidebar_reorder_row(
+                                            ui,
+                                            title,
+                                            selected,
+                                            can_drag,
+                                            can_drag && *snippet_index > 0,
+                                            can_drag
+                                                && *snippet_index + 1
+                                                    < self
+                                                        .snippets
+                                                        .groups
+                                                        .get(*group_index)
+                                                        .map(|group| group.snippets.len())
+                                                        .unwrap_or_default(),
+                                            self.settings.editor_reorder_control,
+                                            "snippet",
+                                            *favourite_slot,
+                                        );
                                     if move_up {
-                                        self.request_edit_navigation(EditNavigation::MoveSnippet {
-                                            group_index: *group_index,
-                                            snippet_index: *snippet_index,
-                                            offset: -1,
-                                        });
+                                        self.selected_group = *group_index;
+                                        self.selected_snippet = *snippet_index;
+                                        self.move_selected_editor_snippet(-1);
                                     } else if move_down {
-                                        self.request_edit_navigation(EditNavigation::MoveSnippet {
+                                        self.selected_group = *group_index;
+                                        self.selected_snippet = *snippet_index;
+                                        self.move_selected_editor_snippet(1);
+                                    } else if drag_response
+                                        .as_ref()
+                                        .is_some_and(egui::Response::drag_started)
+                                    {
+                                        if self.editor_has_unsaved_changes() && !selected {
+                                            self.request_edit_navigation(EditNavigation::Snippet {
+                                                group_index: *group_index,
+                                                snippet_index: *snippet_index,
+                                            });
+                                        } else {
+                                            if !selected {
+                                                self.apply_edit_navigation(
+                                                    EditNavigation::Snippet {
+                                                        group_index: *group_index,
+                                                        snippet_index: *snippet_index,
+                                                    },
+                                                );
+                                            }
+                                            self.dragged_edit_item =
+                                                Some(DraggedEditItem::Snippet {
+                                                    group_index: *group_index,
+                                                    snippet_index: *snippet_index,
+                                                });
+                                        }
+                                    }
+                                    if ui.input(|input| {
+                                        input.pointer.primary_down()
+                                            && input.pointer.interact_pos().is_some_and(
+                                                |position| response.rect.contains(position),
+                                            )
+                                    }) && let Some(DraggedEditItem::Snippet {
+                                        group_index: source_group,
+                                        snippet_index: source_snippet,
+                                    }) = self.dragged_edit_item
+                                        && source_group == *group_index
+                                        && source_snippet != *snippet_index
+                                    {
+                                        self.reorder_editor_snippet(
+                                            *group_index,
+                                            source_snippet,
+                                            *snippet_index,
+                                        );
+                                        self.dragged_edit_item = Some(DraggedEditItem::Snippet {
                                             group_index: *group_index,
                                             snippet_index: *snippet_index,
-                                            offset: 1,
                                         });
                                     } else if response.clicked() {
                                         self.request_edit_navigation(EditNavigation::Snippet {
@@ -3054,6 +3158,9 @@ impl TypeTextApp {
     }
 
     fn ui_edit(&mut self, ui: &mut egui::Ui) {
+        if !ui.input(|input| input.pointer.primary_down()) {
+            self.dragged_edit_item = None;
+        }
         let edit_heading = match self.edit_panel {
             EditPanel::Groups => "Edit Group",
             EditPanel::Snippets => "Edit Snippet",
@@ -3420,29 +3527,52 @@ impl TypeTextApp {
                                     for (index, name) in &token_names {
                                         let selected =
                                             self.edit_token_active && self.selected_token == *index;
-                                        let (response, move_up, move_down) = sidebar_reorder_row(
-                                            ui,
-                                            &format!("{{{name}}}"),
-                                            selected,
-                                            *index > 0,
-                                            *index + 1 < self.tokens.custom_tokens.len(),
-                                            "token",
-                                            None,
-                                        );
+                                        let (response, drag_response, move_up, move_down) =
+                                            sidebar_reorder_row(
+                                                ui,
+                                                &format!("{{{name}}}"),
+                                                selected,
+                                                self.tokens.custom_tokens.len() > 1,
+                                                *index > 0,
+                                                *index + 1 < self.tokens.custom_tokens.len(),
+                                                self.settings.editor_reorder_control,
+                                                "token",
+                                                None,
+                                            );
                                         if move_up {
-                                            self.request_edit_navigation(
-                                                EditNavigation::MoveToken {
-                                                    token_index: *index,
-                                                    offset: -1,
-                                                },
-                                            );
+                                            self.reorder_editor_token(*index, *index - 1);
                                         } else if move_down {
-                                            self.request_edit_navigation(
-                                                EditNavigation::MoveToken {
-                                                    token_index: *index,
-                                                    offset: 1,
-                                                },
-                                            );
+                                            self.reorder_editor_token(*index, *index + 1);
+                                        } else if drag_response
+                                            .as_ref()
+                                            .is_some_and(egui::Response::drag_started)
+                                        {
+                                            if self.editor_has_unsaved_changes() && !selected {
+                                                self.request_edit_navigation(
+                                                    EditNavigation::Token(*index),
+                                                );
+                                            } else {
+                                                if !selected {
+                                                    self.apply_edit_navigation(
+                                                        EditNavigation::Token(*index),
+                                                    );
+                                                }
+                                                self.dragged_edit_item =
+                                                    Some(DraggedEditItem::Token(*index));
+                                            }
+                                        }
+                                        if ui.input(|input| {
+                                            input.pointer.primary_down()
+                                                && input.pointer.interact_pos().is_some_and(
+                                                    |position| response.rect.contains(position),
+                                                )
+                                        }) && let Some(DraggedEditItem::Token(source)) =
+                                            self.dragged_edit_item
+                                            && source != *index
+                                        {
+                                            self.reorder_editor_token(source, *index);
+                                            self.dragged_edit_item =
+                                                Some(DraggedEditItem::Token(*index));
                                         } else if response.clicked() {
                                             self.request_edit_navigation(EditNavigation::Token(
                                                 *index,
@@ -3770,30 +3900,6 @@ impl TypeTextApp {
                         "Alphabetical (Z–A)",
                     );
                 });
-
-            let can_reorder = self.edit_snippet_active && current_sort == SnippetSortOrder::Custom;
-            let can_move_earlier = can_reorder && self.selected_snippet > 0;
-            let snippet_count = self
-                .snippets
-                .groups
-                .get(self.selected_group)
-                .map(|group| group.snippets.len())
-                .unwrap_or_default();
-            let can_move_later = can_reorder && self.selected_snippet + 1 < snippet_count;
-            if ui
-                .add_enabled(can_move_earlier, egui::Button::new("Earlier"))
-                .on_hover_text("Move selected snippet earlier in the custom order")
-                .clicked()
-            {
-                self.move_selected_editor_snippet(-1);
-            }
-            if ui
-                .add_enabled(can_move_later, egui::Button::new("Later"))
-                .on_hover_text("Move selected snippet later in the custom order")
-                .clicked()
-            {
-                self.move_selected_editor_snippet(1);
-            }
         });
         if requested_sort != current_sort
             && let Some(group) = self.selected_group_mut()
@@ -4002,20 +4108,17 @@ impl TypeTextApp {
         }
     }
 
-    fn move_selected_editor_group(&mut self, offset: isize) {
-        let current = self.selected_group;
-        let Some(target) = current.checked_add_signed(offset) else {
-            return;
-        };
-        if target >= self.snippets.groups.len() {
+    fn reorder_editor_group(&mut self, source: usize, target: usize) {
+        if source == target
+            || source >= self.snippets.groups.len()
+            || target >= self.snippets.groups.len()
+        {
             return;
         }
-        self.snippets.groups.swap(current, target);
+        let group = self.snippets.groups.remove(source);
+        self.snippets.groups.insert(target, group);
         self.selected_group = target;
-        self.selected_snippet = 0;
         self.edit_group_active = true;
-        self.edit_snippet_active = false;
-        self.load_selected_editor_snippet();
         self.save_snippets();
     }
 
@@ -4159,20 +4262,39 @@ impl TypeTextApp {
         }
     }
 
-    fn move_selected_editor_token(&mut self, offset: isize) {
-        let current = self.selected_token;
-        let Some(target) = current.checked_add_signed(offset) else {
-            return;
-        };
-        if target >= self.tokens.custom_tokens.len() {
+    fn reorder_editor_token(&mut self, source: usize, target: usize) {
+        if source == target
+            || source >= self.tokens.custom_tokens.len()
+            || target >= self.tokens.custom_tokens.len()
+        {
             return;
         }
-        self.tokens.custom_tokens.swap(current, target);
+        let token = self.tokens.custom_tokens.remove(source);
+        self.tokens.custom_tokens.insert(target, token);
         self.selected_token = target;
         self.selected_token_kind = TokenSelection::Custom;
         self.edit_token_active = true;
-        self.load_selected_editor_token();
         self.save_tokens();
+    }
+
+    fn reorder_editor_snippet(&mut self, group_index: usize, source: usize, target: usize) {
+        let Some(group) = self.snippets.groups.get_mut(group_index) else {
+            return;
+        };
+        if group.sort_order != SnippetSortOrder::Custom
+            || source == target
+            || source >= group.snippets.len()
+            || target >= group.snippets.len()
+        {
+            return;
+        }
+        let snippet = group.snippets.remove(source);
+        group.snippets.insert(target, snippet);
+        self.selected_group = group_index;
+        self.selected_snippet = target;
+        self.edit_group_active = true;
+        self.edit_snippet_active = true;
+        self.save_snippets();
     }
 
     fn move_selected_editor_snippet(&mut self, offset: isize) {
@@ -4362,7 +4484,7 @@ impl TypeTextApp {
                                 ("Favourites", "Manage direct snippet hotkeys")
                             }
                             SettingsPanel::Appearance => {
-                                ("Appearance", "Choose the application theme and accent")
+                                ("Appearance", "Choose theme, accent, and editor controls")
                             }
                             SettingsPanel::Data => {
                                 ("Data", "Manage updates, snippet data, and storage")
@@ -4701,6 +4823,41 @@ impl TypeTextApp {
                             );
                         }
                     });
+                    });
+                    section_gap(ui);
+                    framed_section(ui, "Editor Reordering", "mouse controls", |ui| {
+                        ui.label(
+                            egui::RichText::new(
+                                "Choose how reorder controls appear beside groups, snippets, and custom tokens.",
+                            )
+                            .small()
+                            .weak(),
+                        );
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            for (value, label) in [
+                                (EditorReorderControl::DragHandles, "Drag handles"),
+                                (EditorReorderControl::ArrowButtons, "Arrow buttons"),
+                            ] {
+                                if ui
+                                    .add(egui::Button::selectable(
+                                        self.settings.editor_reorder_control == value,
+                                        label,
+                                    ))
+                                    .clicked()
+                                {
+                                    self.settings.editor_reorder_control = value;
+                                    self.mark_settings_dirty();
+                                }
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(
+                                "Arrow buttons can be keyboard focused when keyboard-friendly reordering is preferred.",
+                            )
+                            .small()
+                            .weak(),
+                        );
                     });
                 }
 
