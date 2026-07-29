@@ -139,7 +139,7 @@ const SETTINGS_PANELS: &[(SettingsPanel, &str, &str)] = &[
     (
         SettingsPanel::Selection,
         "Selection",
-        "selection queued snippet clicks behavior add again remove from chain",
+        "selection queued snippet clicks behavior left click right click double click add again remove from chain",
     ),
     (
         SettingsPanel::Favourites,
@@ -3830,8 +3830,15 @@ impl TypeTextApp {
                     let result = self.results[index].clone();
                     let selected = self.selected_result == index;
                     let queued = self.result_is_queued(&result);
-                    let response = compact_snippet_row(ui, &result, selected, queued);
-                    if response.clicked() {
+                    let mut response = compact_snippet_row(ui, &result, selected, queued);
+                    if queued {
+                        response = response
+                            .on_hover_text("Right-click to remove this snippet from the queue");
+                    }
+                    if response.secondary_clicked() && queued {
+                        self.remove_result_from_chain(index);
+                        self.selected_result = usize::MAX;
+                    } else if response.clicked() && !response.double_clicked() {
                         if queued
                             && self.settings.queued_snippet_click_action
                                 == QueuedSnippetClickAction::Remove
@@ -3841,12 +3848,6 @@ impl TypeTextApp {
                         } else {
                             self.selected_result = index;
                             self.add_result_to_chain(index);
-                        }
-                    }
-                    if response.double_clicked() {
-                        self.selected_result = index;
-                        if self.snippet_chain.len() == 1 {
-                            self.insert_selected(ctx);
                         }
                     }
                 }
@@ -5694,6 +5695,30 @@ impl TypeTextApp {
                             }
                         }
                     });
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "Left-click an unqueued snippet to add it. The option above controls \
+                             what happens when that snippet is already queued.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "Right-click a queued snippet to remove its most recently queued \
+                             occurrence.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "Double-click has no separate action and behaves like one click.",
+                        )
+                        .small()
+                        .weak(),
+                    );
                     });
                 }
 
