@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RootDir = Split-Path -Parent $PSScriptRoot
+$OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
 $TemplatePath = Join-Path $RootDir "docs\user-guide.template.html"
 $HtmlPath = Join-Path $OutputDir "TypeText-User-Guide.html"
 $PdfPath = Join-Path $OutputDir "TypeText-User-Guide.pdf"
