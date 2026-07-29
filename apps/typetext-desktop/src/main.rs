@@ -4072,6 +4072,7 @@ impl TypeTextApp {
     }
 
     fn ui_edit_actions(&mut self, ui: &mut egui::Ui) {
+        ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
         match self.edit_panel {
             EditPanel::Groups => {
                 let can_edit =
