@@ -53,8 +53,10 @@ fi
 
 PROFILE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/typetext-guide.XXXXXX")"
 trap 'rm -rf "$PROFILE_DIR"' EXIT
-"$BROWSER" --headless=new --disable-gpu --no-first-run \
-  --no-default-browser-check --no-pdf-header-footer --print-to-pdf-no-header \
+"$BROWSER" --headless=new --disable-gpu --disable-background-mode \
+  --disable-background-networking --disable-component-update --disable-default-apps \
+  --disable-sync --no-first-run --no-default-browser-check --no-service-autorun \
+  --no-pdf-header-footer --print-to-pdf-no-header \
   "--user-data-dir=$PROFILE_DIR" "--print-to-pdf=$PDF_PATH" "file://$HTML_PATH"
 [[ -f "$PDF_PATH" ]] || { echo "Browser PDF generation failed." >&2; exit 1; }
 
