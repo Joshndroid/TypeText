@@ -15,6 +15,7 @@ APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
 APPLE_APP_PASSWORD="${APPLE_APP_PASSWORD:-${APPLE_PASSWORD:-}}"
 VERSION="$(typetext_version "$ROOT_DIR")"
 PACKAGE_VERSION="$(typetext_package_version "$VERSION")"
+GUIDE_BUILD_DIR="$ROOT_DIR/dist/user-guide"
 
 set_notarytool_args() {
   if [[ -n "$APPLE_NOTARY_PROFILE" ]]; then
@@ -80,6 +81,10 @@ fi
 cd "$ROOT_DIR"
 echo "Version: $VERSION"
 echo "Target: $MACOS_TARGET"
+bash "$ROOT_DIR/Scripts/build-user-guide.sh" \
+  --version "$VERSION" \
+  --source "$ROOT_DIR/docs/user-guide.md" \
+  --output-dir "$GUIDE_BUILD_DIR"
 "$CARGO_BIN" build --release --target "$MACOS_TARGET" -p typetext-desktop --locked
 
 APP_DIR="$ROOT_DIR/dist/TypeText.app"
@@ -110,6 +115,7 @@ if [[ ! -f "$ROOT_DIR/LICENSE" ]]; then
 fi
 # Must happen before codesign so the bundle signature covers the license.
 cp "$ROOT_DIR/LICENSE" "$RESOURCES_DIR/LICENSE.txt"
+cp "$GUIDE_BUILD_DIR/TypeText-User-Guide.pdf" "$RESOURCES_DIR/TypeText-User-Guide.pdf"
 
 if ! file "$MACOS_DIR/TypeText" | grep -q "arm64"; then
   file "$MACOS_DIR/TypeText" >&2

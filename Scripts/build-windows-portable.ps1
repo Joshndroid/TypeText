@@ -30,6 +30,8 @@ $SettingsSource = Join-Path $RootDir "examples\settings.json"
 $OfflineSettingsSource = Join-Path $RootDir "examples\settings.offline.json"
 $TokensSource = Join-Path $RootDir "examples\tokens.json"
 $LicenseSource = Join-Path $RootDir "LICENSE"
+$GuideBuildDir = Join-Path $RootDir "dist\user-guide"
+$GuidePdf = Join-Path $GuideBuildDir "TypeText-User-Guide.pdf"
 if (!(Test-Path $LicenseSource)) {
     throw "Expected license file was not found: $LicenseSource"
 }
@@ -215,6 +217,13 @@ Write-Host "Building TypeText for Windows target: $WindowsTarget"
 Write-Host "Version: $Version"
 Write-Host "Variant: $Variant"
 Write-Host "If the target is missing, run: rustup target add $WindowsTarget"
+& (Join-Path $RootDir "Scripts\build-user-guide.ps1") `
+    -Version $Version `
+    -Source (Join-Path $RootDir "docs\user-guide.md") `
+    -OutputDir $GuideBuildDir
+if (!(Test-Path -LiteralPath $GuidePdf)) {
+    throw "User guide generation did not create the expected PDF: $GuidePdf"
+}
 
 if ($Variant -in @("All", "Standard")) {
     if (Test-Path $ExeSource) {
@@ -240,6 +249,7 @@ if ($Variant -in @("All", "Standard")) {
     New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
     Copy-Item $ExeSource $ExeDest
     Copy-Item $LicenseSource (Join-Path $DistDir "LICENSE.txt")
+    Copy-Item $GuidePdf (Join-Path $DistDir "TypeText-User-Guide.pdf")
     Invoke-TypeTextOptionalSigning -Path $ExeDest
 
     if (Test-Path $SnippetsSource) {
@@ -317,6 +327,7 @@ if ($Variant -in @("All", "Offline")) {
     New-Item -ItemType Directory -Path $OfflineDataDir -Force | Out-Null
     Copy-Item $ExeSource $OfflineExeDest
     Copy-Item $LicenseSource (Join-Path $OfflineDistDir "LICENSE.txt")
+    Copy-Item $GuidePdf (Join-Path $OfflineDistDir "TypeText-User-Guide.pdf")
     Invoke-TypeTextOptionalSigning -Path $OfflineExeDest
 
     if (Test-Path $SnippetsSource) {

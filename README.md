@@ -60,6 +60,8 @@ apps/
 
 docs/
   macos-notes.md
+  user-guide.md          source for the versioned HTML/PDF user guide
+  user-guide.template.html
 
 examples/
   snippets.json
@@ -67,7 +69,6 @@ examples/
   settings.offline.json
   tokens.json
 
-quickstart.txt          user-facing setup and usage handout
 ```
 
 ## App Data
@@ -313,7 +314,20 @@ offers assets with valid SHA-256 metadata from GitHub and displays the expected
 digest for verification after download. TypeText does not download, execute, or
 replace the running app automatically.
 
-For a user-facing setup guide to include with releases, see `quickstart.txt`.
+The detailed release guide is maintained in `docs/user-guide.md`. Every Windows
+and macOS package build generates version-stamped HTML and PDF documentation,
+then bundles `TypeText-User-Guide.pdf` with the application.
+
+To generate the two guide files without building the application:
+
+```text
+Scripts\build-user-guide.ps1 -Version v1.2.3 -Source docs\user-guide.md -OutputDir dist\user-guide
+```
+
+The guide is designed once as responsive HTML. Its print stylesheet and the
+system installation of Microsoft Edge, Google Chrome, or Chromium produce the
+bundled PDF from that same HTML, keeping the web and print editions visually
+consistent. No Python runtime or additional packages are required.
 
 Check the shared core and desktop app:
 
