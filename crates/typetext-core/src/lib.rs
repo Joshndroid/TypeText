@@ -25,6 +25,9 @@ pub const MAX_CUSTOM_TOKENS: usize = 1_000;
 pub const MAX_FAVOURITES: usize = 10;
 pub const MAX_TOKEN_NAME_CHARS: usize = 128;
 pub const MAX_TOKEN_VALUE_CHARS: usize = 100_000;
+const CURRENT_TOKEN_FILE_VERSION: u32 = 2;
+const STARTER_CUSTOM_TOKEN_NAME: &str = "Program.Version";
+const STARTER_CUSTOM_TOKEN_VALUE: &str = "1.0.0";
 pub const SUPPORTED_SNIPPET_TOKENS: &[(&str, &str)] = &[
     ("time.today", "Current time (legacy DropText alias)"),
     ("time.now", "Current time"),
@@ -203,7 +206,7 @@ impl Default for SnippetFile {
 impl Default for TokenFile {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: CURRENT_TOKEN_FILE_VERSION,
             static_tokens: SUPPORTED_SNIPPET_TOKENS
                 .iter()
                 .map(|(name, description)| StaticToken {
@@ -211,8 +214,15 @@ impl Default for TokenFile {
                     response: (*description).to_string(),
                 })
                 .collect(),
-            custom_tokens: Vec::new(),
+            custom_tokens: vec![starter_custom_token()],
         }
+    }
+}
+
+fn starter_custom_token() -> CustomToken {
+    CustomToken {
+        name: STARTER_CUSTOM_TOKEN_NAME.to_string(),
+        value: STARTER_CUSTOM_TOKEN_VALUE.to_string(),
     }
 }
 
@@ -411,11 +421,20 @@ pub fn load_or_create_tokens(paths: &PortablePaths) -> Result<TokenFile> {
         &TokenFile::default(),
         MAX_TOKEN_FILE_BYTES,
     )?;
+    let tokens_upgraded = if tokens.version < CURRENT_TOKEN_FILE_VERSION {
+        if tokens.custom_tokens.is_empty() {
+            tokens.custom_tokens.push(starter_custom_token());
+        }
+        tokens.version = CURRENT_TOKEN_FILE_VERSION;
+        true
+    } else {
+        false
+    };
     let default_static_tokens = TokenFile::default().static_tokens;
     let static_tokens_changed = tokens.static_tokens != default_static_tokens;
     tokens.static_tokens = default_static_tokens;
     validate_tokens(&tokens)?;
-    if !existed || static_tokens_changed {
+    if !existed || tokens_upgraded || static_tokens_changed {
         save_tokens(paths, &tokens)?;
     }
     Ok(tokens)
@@ -1249,6 +1268,47 @@ fn default_check_for_updates() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_tokens_include_an_editable_custom_token_example() {
+        let tokens = TokenFile::default();
+
+        assert_eq!(tokens.version, CURRENT_TOKEN_FILE_VERSION);
+        assert_eq!(tokens.custom_tokens, [starter_custom_token()]);
+    }
+
+    #[test]
+    fn legacy_empty_token_files_receive_the_starter_token_once() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "typetext-token-migration-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let paths = PortablePaths::from_data_dir(&data_dir);
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(
+            &paths.tokens_path,
+            r#"{"version":1,"staticTokens":[],"customTokens":[]}"#,
+        )
+        .unwrap();
+
+        let mut tokens = load_or_create_tokens(&paths).unwrap();
+        assert_eq!(tokens.version, CURRENT_TOKEN_FILE_VERSION);
+        assert_eq!(tokens.custom_tokens, [starter_custom_token()]);
+
+        tokens.custom_tokens.clear();
+        save_tokens(&paths, &tokens).unwrap();
+        assert!(
+            load_or_create_tokens(&paths)
+                .unwrap()
+                .custom_tokens
+                .is_empty()
+        );
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
 
     #[test]
     fn search_matches_title_body_and_group() {
