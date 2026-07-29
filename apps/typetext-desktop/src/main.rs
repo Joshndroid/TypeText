@@ -165,6 +165,35 @@ enum TokenSelection {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditNavigation {
+    View(View),
+    Panel(EditPanel),
+    Group(usize),
+    Snippet {
+        group_index: usize,
+        snippet_index: usize,
+    },
+    TokenKind(TokenSelection),
+    Token(usize),
+    MoveGroup {
+        group_index: usize,
+        offset: isize,
+    },
+    MoveSnippet {
+        group_index: usize,
+        snippet_index: usize,
+        offset: isize,
+    },
+    MoveToken {
+        token_index: usize,
+        offset: isize,
+    },
+    AddGroup,
+    AddSnippet,
+    AddToken,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
     not(any(windows, target_os = "macos")),
     expect(
@@ -349,6 +378,7 @@ struct TypeTextApp {
     confirm_clear_all: bool,
     confirm_import: bool,
     pending_favourite_slot: Option<u8>,
+    pending_edit_navigation: Option<EditNavigation>,
     capturing_hotkey: Option<platform::HotkeyAction>,
     settings_dirty: bool,
     applied_startup_enabled: bool,
@@ -1151,6 +1181,7 @@ impl TypeTextApp {
             confirm_clear_all: false,
             confirm_import: false,
             pending_favourite_slot: None,
+            pending_edit_navigation: None,
             capturing_hotkey: None,
             settings_dirty: false,
             applied_startup_enabled,
@@ -1318,10 +1349,140 @@ impl TypeTextApp {
     }
 
     fn switch_view(&mut self, view: View) {
-        if self.view == View::Edit && view != View::Edit {
-            self.clear_edit_selection();
+        self.request_edit_navigation(EditNavigation::View(view));
+    }
+
+    fn editor_has_unsaved_changes(&self) -> bool {
+        match self.edit_panel {
+            EditPanel::Groups => {
+                self.edit_group_active
+                    && self
+                        .snippets
+                        .groups
+                        .get(self.selected_group)
+                        .is_some_and(|group| self.edit_group_name != group.name)
+            }
+            EditPanel::Snippets => {
+                self.edit_snippet_active
+                    && self
+                        .snippets
+                        .groups
+                        .get(self.selected_group)
+                        .and_then(|group| group.snippets.get(self.selected_snippet))
+                        .is_some_and(|snippet| {
+                            self.edit_title != snippet.title || self.edit_body != snippet.body
+                        })
+            }
+            EditPanel::Tokens => {
+                self.selected_token_kind == TokenSelection::Custom
+                    && self.edit_token_active
+                    && self
+                        .tokens
+                        .custom_tokens
+                        .get(self.selected_token)
+                        .is_some_and(|token| {
+                            self.edit_token_name != token.name
+                                || self.edit_token_value != token.value
+                        })
+            }
         }
-        self.view = view;
+    }
+
+    fn request_edit_navigation(&mut self, navigation: EditNavigation) {
+        let is_noop = match navigation {
+            EditNavigation::View(view) => self.view == view,
+            EditNavigation::Panel(panel) => self.edit_panel == panel,
+            EditNavigation::Group(group_index) => {
+                self.edit_group_active && self.selected_group == group_index
+            }
+            EditNavigation::Snippet {
+                group_index,
+                snippet_index,
+            } => {
+                self.edit_snippet_active
+                    && self.selected_group == group_index
+                    && self.selected_snippet == snippet_index
+            }
+            EditNavigation::TokenKind(kind) => self.selected_token_kind == kind,
+            EditNavigation::Token(token_index) => {
+                self.edit_token_active && self.selected_token == token_index
+            }
+            _ => false,
+        };
+        if is_noop {
+            return;
+        }
+        if self.view == View::Edit && self.editor_has_unsaved_changes() {
+            self.pending_edit_navigation = Some(navigation);
+        } else {
+            self.apply_edit_navigation(navigation);
+        }
+    }
+
+    fn apply_edit_navigation(&mut self, navigation: EditNavigation) {
+        match navigation {
+            EditNavigation::View(view) => {
+                if self.view == View::Edit && view != View::Edit {
+                    self.clear_edit_selection();
+                }
+                self.view = view;
+            }
+            EditNavigation::Panel(panel) => self.edit_panel = panel,
+            EditNavigation::Group(group_index) => {
+                self.selected_group = group_index;
+                self.selected_snippet = 0;
+                self.edit_group_active = true;
+                self.edit_snippet_active = false;
+                self.load_selected_editor_snippet();
+            }
+            EditNavigation::Snippet {
+                group_index,
+                snippet_index,
+            } => {
+                self.selected_group = group_index;
+                self.selected_snippet = snippet_index;
+                self.edit_group_active = true;
+                self.edit_snippet_active = true;
+                self.load_selected_editor_snippet();
+            }
+            EditNavigation::TokenKind(kind) => self.select_editor_token_kind(kind),
+            EditNavigation::Token(token_index) => {
+                self.selected_token = token_index;
+                self.edit_token_active = true;
+                self.load_selected_editor_token();
+            }
+            EditNavigation::MoveGroup {
+                group_index,
+                offset,
+            } => {
+                self.selected_group = group_index;
+                self.edit_group_active = true;
+                self.move_selected_editor_group(offset);
+            }
+            EditNavigation::MoveSnippet {
+                group_index,
+                snippet_index,
+                offset,
+            } => {
+                self.selected_group = group_index;
+                self.selected_snippet = snippet_index;
+                self.edit_snippet_active = true;
+                self.load_selected_editor_snippet();
+                self.move_selected_editor_snippet(offset);
+            }
+            EditNavigation::MoveToken {
+                token_index,
+                offset,
+            } => {
+                self.selected_token = token_index;
+                self.edit_token_active = true;
+                self.load_selected_editor_token();
+                self.move_selected_editor_token(offset);
+            }
+            EditNavigation::AddGroup => self.add_editor_group(),
+            EditNavigation::AddSnippet => self.add_editor_snippet(),
+            EditNavigation::AddToken => self.add_editor_token(),
+        }
     }
 
     fn clear_edit_selection(&mut self) {
@@ -1754,19 +1915,17 @@ impl TypeTextApp {
                                         None,
                                     );
                                     if move_up {
-                                        self.selected_group = *index;
-                                        self.edit_group_active = true;
-                                        self.move_selected_editor_group(-1);
+                                        self.request_edit_navigation(EditNavigation::MoveGroup {
+                                            group_index: *index,
+                                            offset: -1,
+                                        });
                                     } else if move_down {
-                                        self.selected_group = *index;
-                                        self.edit_group_active = true;
-                                        self.move_selected_editor_group(1);
+                                        self.request_edit_navigation(EditNavigation::MoveGroup {
+                                            group_index: *index,
+                                            offset: 1,
+                                        });
                                     } else if response.clicked() {
-                                        self.selected_group = *index;
-                                        self.selected_snippet = 0;
-                                        self.edit_group_active = true;
-                                        self.edit_snippet_active = false;
-                                        self.load_selected_editor_snippet();
+                                        self.request_edit_navigation(EditNavigation::Group(*index));
                                     }
                                     ui.add_space(1.0);
                                 }
@@ -1908,21 +2067,22 @@ impl TypeTextApp {
                                         *favourite_slot,
                                     );
                                     if move_up {
-                                        self.selected_snippet = *snippet_index;
-                                        self.edit_snippet_active = true;
-                                        self.load_selected_editor_snippet();
-                                        self.move_selected_editor_snippet(-1);
+                                        self.request_edit_navigation(EditNavigation::MoveSnippet {
+                                            group_index: *group_index,
+                                            snippet_index: *snippet_index,
+                                            offset: -1,
+                                        });
                                     } else if move_down {
-                                        self.selected_snippet = *snippet_index;
-                                        self.edit_snippet_active = true;
-                                        self.load_selected_editor_snippet();
-                                        self.move_selected_editor_snippet(1);
+                                        self.request_edit_navigation(EditNavigation::MoveSnippet {
+                                            group_index: *group_index,
+                                            snippet_index: *snippet_index,
+                                            offset: 1,
+                                        });
                                     } else if response.clicked() {
-                                        self.selected_group = *group_index;
-                                        self.selected_snippet = *snippet_index;
-                                        self.edit_group_active = true;
-                                        self.edit_snippet_active = true;
-                                        self.load_selected_editor_snippet();
+                                        self.request_edit_navigation(EditNavigation::Snippet {
+                                            group_index: *group_index,
+                                            snippet_index: *snippet_index,
+                                        });
                                     }
                                     ui.add_space(1.0);
                                 }
@@ -2201,6 +2361,7 @@ impl eframe::App for TypeTextApp {
         self.ui_clear_all_confirmation(&ctx);
         self.ui_import_confirmation(&ctx);
         self.ui_favourite_confirmation(&ctx);
+        self.ui_unsaved_editor_confirmation(&ctx);
         self.ui_background_notice(&ctx);
         self.ui_warning_popup(&ctx);
         self.ui_error_popup(&ctx);
@@ -2237,6 +2398,57 @@ fn resolve_paths() -> anyhow::Result<PortablePaths> {
 }
 
 impl TypeTextApp {
+    fn ui_unsaved_editor_confirmation(&mut self, ctx: &egui::Context) {
+        if self.pending_edit_navigation.is_none() {
+            return;
+        }
+
+        let mut discard = false;
+        let mut cancel = false;
+        egui::Area::new(egui::Id::new("unsaved_editor_confirmation_dialog"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                egui::Frame::window(ui.style())
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        ui.set_max_width(440.0);
+                        ui.label(
+                            egui::RichText::new("Discard unsaved changes?")
+                                .strong()
+                                .size(15.5),
+                        );
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::Label::new(
+                                "The fields in this editor have changed since you last saved them.",
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("Keep Editing").clicked() {
+                                cancel = true;
+                            }
+                            if ui.button("Discard Changes").clicked() {
+                                discard = true;
+                            }
+                        });
+                    });
+            });
+
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            cancel = true;
+        }
+        if discard {
+            if let Some(navigation) = self.pending_edit_navigation.take() {
+                self.apply_edit_navigation(navigation);
+            }
+        } else if cancel {
+            self.pending_edit_navigation = None;
+        }
+    }
+
     fn ui_favourite_confirmation(&mut self, ctx: &egui::Context) {
         let Some(slot) = self.pending_favourite_slot else {
             return;
@@ -2866,9 +3078,19 @@ impl TypeTextApp {
         let editor_width = ui.available_width();
         ui.horizontal(|ui| {
             let row_left = ui.cursor().left();
-            ui.selectable_value(&mut self.edit_panel, EditPanel::Groups, "Groups");
-            ui.selectable_value(&mut self.edit_panel, EditPanel::Snippets, "Snippets");
-            ui.selectable_value(&mut self.edit_panel, EditPanel::Tokens, "Tokens");
+            for (panel, label) in [
+                (EditPanel::Groups, "Groups"),
+                (EditPanel::Snippets, "Snippets"),
+                (EditPanel::Tokens, "Tokens"),
+            ] {
+                if ui
+                    .selectable_label(self.edit_panel == panel, label)
+                    .clicked()
+                    && self.edit_panel != panel
+                {
+                    self.request_edit_navigation(EditNavigation::Panel(panel));
+                }
+            }
             if self.edit_panel == EditPanel::Snippets && !self.snippets.groups.is_empty() {
                 let target_left =
                     row_left + edit_sidebar_width(editor_width) + DETAIL_HEADER_SEPARATOR_OFFSET;
@@ -2923,11 +3145,7 @@ impl TypeTextApp {
                         .selectable_label(self.selected_group == index, name)
                         .clicked()
                     {
-                        self.selected_group = index;
-                        self.selected_snippet = 0;
-                        self.edit_group_active = true;
-                        self.edit_snippet_active = false;
-                        self.load_selected_editor_snippet();
+                        self.request_edit_navigation(EditNavigation::Group(index));
                         ui.close();
                     }
                 }
@@ -2967,7 +3185,7 @@ impl TypeTextApp {
                     )
                     .clicked()
                 {
-                    self.select_editor_token_kind(TokenSelection::Custom);
+                    self.request_edit_navigation(EditNavigation::TokenKind(TokenSelection::Custom));
                     ui.close();
                 }
                 if ui
@@ -2977,7 +3195,7 @@ impl TypeTextApp {
                     )
                     .clicked()
                 {
-                    self.select_editor_token_kind(TokenSelection::Static);
+                    self.request_edit_navigation(EditNavigation::TokenKind(TokenSelection::Static));
                     ui.close();
                 }
             });
@@ -3003,7 +3221,7 @@ impl TypeTextApp {
                     self.save_selected_editor_group();
                 }
                 if ui.button("Add").on_hover_text("Add group").clicked() {
-                    self.add_editor_group();
+                    self.request_edit_navigation(EditNavigation::AddGroup);
                 }
             }
             EditPanel::Snippets => {
@@ -3029,7 +3247,7 @@ impl TypeTextApp {
                     self.save_selected_editor_snippet();
                 }
                 if ui.button("Add").on_hover_text("Add snippet").clicked() {
-                    self.add_editor_snippet();
+                    self.request_edit_navigation(EditNavigation::AddSnippet);
                 }
                 let current_slot = self
                     .snippets
@@ -3118,7 +3336,7 @@ impl TypeTextApp {
                     self.save_selected_editor_token();
                 }
                 if ui.button("Add").on_hover_text("Add custom token").clicked() {
-                    self.add_editor_token();
+                    self.request_edit_navigation(EditNavigation::AddToken);
                 }
             }
         }
@@ -3212,19 +3430,23 @@ impl TypeTextApp {
                                             None,
                                         );
                                         if move_up {
-                                            self.selected_token = *index;
-                                            self.edit_token_active = true;
-                                            self.load_selected_editor_token();
-                                            self.move_selected_editor_token(-1);
+                                            self.request_edit_navigation(
+                                                EditNavigation::MoveToken {
+                                                    token_index: *index,
+                                                    offset: -1,
+                                                },
+                                            );
                                         } else if move_down {
-                                            self.selected_token = *index;
-                                            self.edit_token_active = true;
-                                            self.load_selected_editor_token();
-                                            self.move_selected_editor_token(1);
+                                            self.request_edit_navigation(
+                                                EditNavigation::MoveToken {
+                                                    token_index: *index,
+                                                    offset: 1,
+                                                },
+                                            );
                                         } else if response.clicked() {
-                                            self.selected_token = *index;
-                                            self.edit_token_active = true;
-                                            self.load_selected_editor_token();
+                                            self.request_edit_navigation(EditNavigation::Token(
+                                                *index,
+                                            ));
                                         }
                                         ui.add_space(1.0);
                                     }
@@ -3622,9 +3844,10 @@ impl TypeTextApp {
                             )
                             .clicked()
                         {
-                            self.selected_snippet = *index;
-                            self.edit_snippet_active = true;
-                            self.load_selected_editor_snippet();
+                            self.request_edit_navigation(EditNavigation::Snippet {
+                                group_index: self.selected_group,
+                                snippet_index: *index,
+                            });
                         }
                     }
                 });
