@@ -534,6 +534,7 @@ struct TypeTextApp {
     settings_dirty: bool,
     applied_startup_enabled: bool,
     snippet_chain: Vec<SearchResult>,
+    snippet_chain_actions: Vec<usize>,
     insert_when_focus_lost: bool,
     registered_hotkeys: Vec<platform::HotkeyBinding>,
     hotkey_tx: Sender<platform::HotkeyAction>,
@@ -1421,6 +1422,7 @@ impl TypeTextApp {
             settings_dirty: false,
             applied_startup_enabled,
             snippet_chain: Vec::new(),
+            snippet_chain_actions: Vec::new(),
             insert_when_focus_lost: false,
             registered_hotkeys,
             hotkey_tx: tx,
@@ -1513,6 +1515,7 @@ impl TypeTextApp {
                 self.status = format!("Typed {}", insertion.title);
                 if used_chain {
                     self.snippet_chain.clear();
+                    self.snippet_chain_actions.clear();
                 }
             }
             Err(error) => {
@@ -2056,6 +2059,7 @@ impl TypeTextApp {
         self.chooser_group = None;
         self.selected_result = 0;
         self.snippet_chain.clear();
+        self.snippet_chain_actions.clear();
         self.insert_when_focus_lost = false;
         self.load_selected_editor_snippet();
 
@@ -2073,11 +2077,45 @@ impl TypeTextApp {
             return;
         };
         self.snippet_chain.push(result);
+        self.snippet_chain_actions.push(1);
+        self.update_queue_status();
+    }
+
+    fn add_group_to_chain(&mut self, group_index: usize) {
+        let group_results: Vec<_> = search_snippets(&self.snippets, "")
+            .into_iter()
+            .filter(|result| result.group_index == group_index)
+            .collect();
+        if group_results.is_empty() {
+            return;
+        }
+
+        let added = group_results.len();
+        self.snippet_chain.extend(group_results);
+        self.snippet_chain_actions.push(added);
+        self.update_queue_status();
+    }
+
+    fn undo_last_queue_action(&mut self) {
+        let Some(action_size) = self.snippet_chain_actions.pop() else {
+            return;
+        };
+        let retained = self.snippet_chain.len().saturating_sub(action_size);
+        self.snippet_chain.truncate(retained);
+        self.update_queue_status();
+    }
+
+    fn update_queue_status(&mut self) {
         self.insert_when_focus_lost = true;
-        self.status = format!(
-            "Queued {} snippets - click the target text field",
-            self.snippet_chain.len()
-        );
+        if self.snippet_chain.is_empty() {
+            self.insert_when_focus_lost = false;
+            self.status = "Chain cleared".to_string();
+        } else {
+            self.status = format!(
+                "Queued {} snippets - click the target text field",
+                self.snippet_chain.len()
+            );
+        }
     }
 
     fn ui_edit_groups(&mut self, ui: &mut egui::Ui, edit_rect: egui::Rect) {
@@ -2410,15 +2448,17 @@ impl TypeTextApp {
             queued.group_index == result.group_index && queued.snippet_index == result.snippet_index
         }) {
             self.snippet_chain.remove(chain_index);
-            self.insert_when_focus_lost = !self.snippet_chain.is_empty();
-            self.status = if self.snippet_chain.is_empty() {
-                "Chain cleared".to_string()
-            } else {
-                format!(
-                    "Queued {} snippets - click the target text field",
-                    self.snippet_chain.len()
-                )
-            };
+            let mut action_start = 0;
+            for action_size in &mut self.snippet_chain_actions {
+                if chain_index < action_start + *action_size {
+                    *action_size -= 1;
+                    break;
+                }
+                action_start += *action_size;
+            }
+            self.snippet_chain_actions
+                .retain(|action_size| *action_size > 0);
+            self.update_queue_status();
         }
     }
 
@@ -2458,6 +2498,7 @@ impl TypeTextApp {
             Ok(()) => {
                 self.status = format!("Typed {}", insertion.title);
                 self.snippet_chain.clear();
+                self.snippet_chain_actions.clear();
             }
             Err(error) => {
                 self.show_error(error.to_string());
@@ -3363,27 +3404,64 @@ impl TypeTextApp {
         });
 
         section_gap(ui);
-        framed_section(ui, "Groups", "filter snippets", |ui| {
-            ui.horizontal_wrapped(|ui| {
-                if filter_button(ui, self.chooser_group.is_none(), "All").clicked() {
-                    self.select_chooser_group(None);
-                }
-
-                let group_tabs: Vec<(usize, String)> = self
-                    .snippets
-                    .groups
-                    .iter()
-                    .enumerate()
-                    .map(|(index, group)| (index, group.name.clone()))
-                    .collect();
-
-                for (index, name) in group_tabs {
-                    if filter_button(ui, self.chooser_group == Some(index), &name).clicked() {
-                        self.select_chooser_group(Some(index));
-                    }
-                }
-            });
+        let selected_group = self.chooser_group;
+        let can_add_group = selected_group.is_some_and(|group_index| {
+            self.snippets
+                .groups
+                .get(group_index)
+                .is_some_and(|group| !group.snippets.is_empty())
         });
+        let mut add_selected_group = false;
+        egui::Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Groups")
+                            .strong()
+                            .size(12.5)
+                            .color(ui.visuals().text_color()),
+                    );
+                    ui.label(
+                        egui::RichText::new("filter snippets")
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        add_selected_group = ui
+                            .add_enabled(can_add_group, egui::Button::new("Add Group"))
+                            .on_hover_text("Add every snippet in the selected group to the queue")
+                            .clicked();
+                    });
+                });
+                ui.add_space(5.0);
+                ui.horizontal_wrapped(|ui| {
+                    if filter_button(ui, self.chooser_group.is_none(), "All").clicked() {
+                        self.select_chooser_group(None);
+                    }
+
+                    let group_tabs: Vec<(usize, String)> = self
+                        .snippets
+                        .groups
+                        .iter()
+                        .enumerate()
+                        .map(|(index, group)| (index, group.name.clone()))
+                        .collect();
+
+                    for (index, name) in group_tabs {
+                        if filter_button(ui, self.chooser_group == Some(index), &name).clicked() {
+                            self.select_chooser_group(Some(index));
+                        }
+                    }
+                });
+            });
+        if add_selected_group && let Some(group_index) = selected_group {
+            self.add_group_to_chain(group_index);
+        }
 
         section_gap(ui);
         egui::Frame::new()
@@ -3450,16 +3528,7 @@ impl TypeTextApp {
                         .inner
                         .clicked()
                     {
-                        self.snippet_chain.pop();
-                        self.insert_when_focus_lost = !self.snippet_chain.is_empty();
-                        self.status = if self.snippet_chain.is_empty() {
-                            "Chain cleared".to_string()
-                        } else {
-                            format!(
-                                "Queued {} snippets - click the target text field",
-                                self.snippet_chain.len()
-                            )
-                        };
+                        self.undo_last_queue_action();
                     }
                     if ui
                         .add_enabled_ui(!self.snippet_chain.is_empty(), |ui| {
@@ -3469,6 +3538,7 @@ impl TypeTextApp {
                         .clicked()
                     {
                         self.snippet_chain.clear();
+                        self.snippet_chain_actions.clear();
                         self.insert_when_focus_lost = false;
                         self.status = "Chain cleared".to_string();
                     }
