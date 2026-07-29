@@ -2673,29 +2673,19 @@ impl TypeTextApp {
         section_gap(ui);
 
         framed_section(ui, "Search", "filter snippets", |ui| {
-            ui.horizontal(|ui| {
-                let response = ui.add_sized(
-                    [ui.available_width() - 84.0, 24.0],
-                    egui::TextEdit::singleline(&mut self.search)
-                        .hint_text("Search snippets")
-                        .vertical_align(egui::Align::Center),
-                );
-                if response.changed() {
-                    self.refresh_results();
-                }
-                if ui.button("Reload").clicked() {
-                    match load_or_create_snippets(&self.paths) {
-                        Ok(snippets) => {
-                            self.snippets = snippets;
-                            self.refresh_results();
-                            self.status = "Reloaded".to_string();
-                        }
-                        Err(error) => self.show_error(error.to_string()),
-                    }
-                }
-            });
+            let response = ui.add_sized(
+                [ui.available_width(), 24.0],
+                egui::TextEdit::singleline(&mut self.search)
+                    .hint_text("Search snippets")
+                    .vertical_align(egui::Align::Center),
+            );
+            if response.changed() {
+                self.refresh_results();
+            }
+        });
 
-            ui.add_space(5.0);
+        section_gap(ui);
+        framed_section(ui, "Groups", "filter snippets", |ui| {
             ui.horizontal_wrapped(|ui| {
                 if filter_button(ui, self.chooser_group.is_none(), "All").clicked() {
                     self.select_chooser_group(None);
