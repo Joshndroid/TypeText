@@ -687,15 +687,7 @@ fn window_resize_handles(ui: &mut egui::Ui, ctx: &egui::Context) {
     }
 }
 
-fn group_editor_list_width(width: f32) -> f32 {
-    (width * 0.34).clamp(220.0, 320.0).min(width * 0.45)
-}
-
-fn snippet_editor_list_width(width: f32) -> f32 {
-    (width * 0.34).clamp(220.0, 340.0).min(width * 0.45)
-}
-
-fn token_editor_list_width(width: f32) -> f32 {
+fn edit_sidebar_width(width: f32) -> f32 {
     (width * 0.34).clamp(220.0, 320.0).min(width * 0.45)
 }
 
@@ -1654,7 +1646,7 @@ impl TypeTextApp {
     }
 
     fn ui_edit_groups(&mut self, ui: &mut egui::Ui, edit_rect: egui::Rect) {
-        let list_width = group_editor_list_width(edit_rect.width());
+        let list_width = edit_sidebar_width(edit_rect.width());
         ui.set_clip_rect(edit_rect);
         ui.set_width_range(edit_rect.width()..=edit_rect.width());
         ui.set_height_range(edit_rect.height()..=edit_rect.height());
@@ -1748,7 +1740,7 @@ impl TypeTextApp {
     }
 
     fn ui_edit_snippets(&mut self, ui: &mut egui::Ui, edit_rect: egui::Rect) {
-        let list_width = snippet_editor_list_width(edit_rect.width());
+        let list_width = edit_sidebar_width(edit_rect.width());
         ui.set_clip_rect(edit_rect);
         ui.set_width_range(edit_rect.width()..=edit_rect.width());
         ui.set_height_range(edit_rect.height()..=edit_rect.height());
@@ -2816,15 +2808,13 @@ impl TypeTextApp {
             ui.selectable_value(&mut self.edit_panel, EditPanel::Snippets, "Snippets");
             ui.selectable_value(&mut self.edit_panel, EditPanel::Tokens, "Tokens");
             if self.edit_panel == EditPanel::Snippets && !self.snippets.groups.is_empty() {
-                let target_left = row_left
-                    + snippet_editor_list_width(editor_width)
-                    + DETAIL_HEADER_SEPARATOR_OFFSET;
+                let target_left =
+                    row_left + edit_sidebar_width(editor_width) + DETAIL_HEADER_SEPARATOR_OFFSET;
                 ui.add_space((target_left - ui.cursor().left()).max(0.0));
                 self.ui_snippet_group_selector(ui, EDIT_HEADER_COMBO_WIDTH);
             } else if self.edit_panel == EditPanel::Tokens {
-                let target_left = row_left
-                    + token_editor_list_width(editor_width)
-                    + DETAIL_HEADER_SEPARATOR_OFFSET;
+                let target_left =
+                    row_left + edit_sidebar_width(editor_width) + DETAIL_HEADER_SEPARATOR_OFFSET;
                 ui.add_space((target_left - ui.cursor().left()).max(0.0));
                 self.ui_token_kind_selector(ui, EDIT_HEADER_COMBO_WIDTH);
             }
@@ -3079,7 +3069,7 @@ impl TypeTextApp {
 
         let content_top = ui.cursor().top();
         let content_height = (tokens_rect.bottom() - content_top).max(0.0);
-        let list_width = token_editor_list_width(tokens_rect.width());
+        let list_width = edit_sidebar_width(tokens_rect.width());
         let (content_rect, _) = ui.allocate_exact_size(
             egui::vec2(tokens_rect.width(), content_height),
             egui::Sense::hover(),
