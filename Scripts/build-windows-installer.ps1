@@ -59,6 +59,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
 OutputDir=$OutputDirForInno
 OutputBaseFilename=TypeText-Windows-x64-Setup
 Compression=zip
@@ -89,8 +90,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-Type: files; Name: "{userappdata}\Microsoft\Windows\Start Menu\Programs\Startup\TypeText.lnk"
-Type: files; Name: "{userappdata}\Microsoft\Windows\Start Menu\Programs\Startup\TypeText.cmd"
+Type: files; Name: "{autostartup}\TypeText.lnk"
+Type: files; Name: "{autostartup}\TypeText.cmd"
 
 [Code]
 function InitializeUninstall(): Boolean;
@@ -114,8 +115,8 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
   begin
-    { The app registers open-on-startup through this HKCU Run value; remove it
-      so Windows does not try to launch the uninstalled app at logon. }
+    { This per-user installer runs in the same user's context, so its HKCU
+      startup registration can be removed safely. }
     RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'TypeText');
 
     { Never delete user snippets silently: ask first, keep them by default,
