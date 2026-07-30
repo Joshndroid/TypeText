@@ -32,6 +32,7 @@ Thumbs.db
 
 # Private local security-review harnesses (reports are already under dist/)
 /Scripts/*security-review*.ps1
+**/security-review-*.md
 
 # Shared build policy is required by the tracked Windows packaging script
 !/Scripts/security-review-policy.ps1
