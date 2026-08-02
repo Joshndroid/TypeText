@@ -10,6 +10,47 @@ use std::sync::mpsc::Sender;
 
 use crate::TrayCommand;
 
+#[cfg(all(not(windows), not(feature = "offline-portable")))]
+pub fn open_url(url: &str) -> Result<()> {
+    let parsed = url::Url::parse(url).context("Invalid URL")?;
+    anyhow::ensure!(parsed.scheme() == "https", "Only HTTPS links can be opened");
+
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    Command::new(opener)
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(Into::into)
+}
+
+#[cfg(all(not(windows), not(feature = "offline-portable")))]
+pub fn fetch_text(url: &str) -> Result<String> {
+    let output = Command::new("curl")
+        .args([
+            "-fsSL",
+            "--connect-timeout",
+            "10",
+            "--max-time",
+            "30",
+            "-H",
+            "User-Agent: TypeText",
+            url,
+        ])
+        .output()
+        .context("Could not run curl update check")?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(anyhow!("Update request failed. {}", stderr.trim()))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotkeyAction {
     OpenChooser,
@@ -1598,45 +1639,6 @@ mod macos_platform {
         None
     }
 
-    /// Open an HTTPS link in the default browser. The scheme check keeps
-    /// `open` from ever launching local files or applications, even if a
-    /// future caller passes an unvalidated URL.
-    #[cfg(not(feature = "offline-portable"))]
-    pub fn open_url(url: &str) -> Result<()> {
-        let parsed = url::Url::parse(url).context("Invalid URL")?;
-        anyhow::ensure!(parsed.scheme() == "https", "Only HTTPS links can be opened");
-
-        Command::new("open")
-            .arg(url)
-            .spawn()
-            .map(|_| ())
-            .map_err(Into::into)
-    }
-
-    #[cfg(not(feature = "offline-portable"))]
-    pub fn fetch_text(url: &str) -> Result<String> {
-        let output = Command::new("curl")
-            .args([
-                "-fsSL",
-                "--connect-timeout",
-                "10",
-                "--max-time",
-                "30",
-                "-H",
-                "User-Agent: TypeText",
-                url,
-            ])
-            .output()
-            .context("Could not run curl update check")?;
-
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(anyhow!("Update request failed. {}", stderr.trim()))
-        }
-    }
-
     pub fn open_droptext_file_dialog() -> Result<Option<PathBuf>> {
         let script = r#"
 try
@@ -2172,45 +2174,6 @@ mod fallback_platform {
         None
     }
 
-    /// Open an HTTPS link in the default browser. The scheme check keeps
-    /// `xdg-open` from ever launching local files or applications, even if a
-    /// future caller passes an unvalidated URL.
-    #[cfg(not(feature = "offline-portable"))]
-    pub fn open_url(url: &str) -> Result<()> {
-        let parsed = url::Url::parse(url).context("Invalid URL")?;
-        anyhow::ensure!(parsed.scheme() == "https", "Only HTTPS links can be opened");
-
-        Command::new("xdg-open")
-            .arg(url)
-            .spawn()
-            .map(|_| ())
-            .map_err(Into::into)
-    }
-
-    #[cfg(not(feature = "offline-portable"))]
-    pub fn fetch_text(url: &str) -> Result<String> {
-        let output = Command::new("curl")
-            .args([
-                "-fsSL",
-                "--connect-timeout",
-                "10",
-                "--max-time",
-                "30",
-                "-H",
-                "User-Agent: TypeText",
-                url,
-            ])
-            .output()
-            .context("Could not run curl update check")?;
-
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(anyhow!("Update request failed. {}", stderr.trim()))
-        }
-    }
-
     pub fn open_droptext_file_dialog() -> Result<Option<std::path::PathBuf>> {
         Err(anyhow!(
             "Native DropText file picker is only implemented on macOS and Windows."
@@ -2288,14 +2251,6 @@ pub use windows_platform::{
     tray_status, type_text, type_text_current_focus,
 };
 
-#[cfg(all(
-    not(feature = "offline-portable"),
-    not(windows),
-    not(target_os = "macos")
-))]
-pub use fallback_platform::{fetch_text, open_url};
-#[cfg(all(not(feature = "offline-portable"), target_os = "macos"))]
-pub use macos_platform::{fetch_text, open_url};
 #[cfg(all(not(feature = "offline-portable"), windows))]
 pub use windows_platform::{fetch_text, open_url};
 

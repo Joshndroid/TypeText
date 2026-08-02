@@ -65,54 +65,6 @@ jobs:
     needs: verify
     uses: ./.github/workflows/release-documents.yml
 
-  defender-preflight:
-    name: Defender preflight check
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - name: Verify Microsoft Defender is usable on hosted runners
-        shell: pwsh
-        run: |
-          # Cheap canary that runs BEFORE the expensive build jobs: if the
-          # current runner image ships with Defender disabled, fail in ~1
-          # minute instead of after 15 minutes of builds.
-          foreach ($serviceName in @("WinDefend", "BITS", "wuauserv")) {
-            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-            if ($null -eq $service) {
-              Write-Warning "Service $serviceName not found on this runner."
-              continue
-            }
-            if ($service.Status -ne "Running") {
-              Write-Host "Starting service $serviceName (currently $($service.Status))..."
-              try {
-                Start-Service -Name $serviceName -ErrorAction Stop
-                $service.WaitForStatus("Running", [TimeSpan]::FromSeconds(60))
-                Write-Host "Service $serviceName is running."
-              } catch {
-                Write-Warning "Could not start ${serviceName}: $_"
-              }
-            } else {
-              Write-Host "Service $serviceName is running."
-            }
-          }
-
-          $status = $null
-          foreach ($attempt in 1..6) {
-            $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
-            if ($status -and $status.AMServiceEnabled -and $status.AntivirusEnabled -and $status.AMRunningMode -eq "Normal") {
-              break
-            }
-            Write-Host "Defender not ready yet (attempt $attempt of 6); waiting 10 seconds..."
-            Start-Sleep -Seconds 10
-          }
-
-          if (-not $status -or -not $status.AMServiceEnabled -or -not $status.AntivirusEnabled -or $status.AMRunningMode -ne "Normal") {
-            if ($status) { $status | Format-List | Out-String | Write-Host }
-            throw "Microsoft Defender is not usable on this runner image; re-run the workflow to get a different runner."
-          }
-
-          $status | Select-Object AMRunningMode, AMServiceEnabled, AntivirusEnabled, AMEngineVersion, AntivirusSignatureVersion | Format-List
-
   macos:
     name: macOS app
     runs-on: macos-latest
@@ -232,7 +184,7 @@ jobs:
   windows-portable:
     name: Windows portable
     runs-on: windows-latest
-    needs: [verify, release-documents, defender-preflight]
+    needs: [verify, release-documents]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -270,7 +222,7 @@ jobs:
   windows-offline-portable:
     name: Windows offline portable
     runs-on: windows-latest
-    needs: [verify, release-documents, defender-preflight]
+    needs: [verify, release-documents]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -307,7 +259,7 @@ jobs:
   windows-installer:
     name: Windows installer
     runs-on: windows-latest
-    needs: [verify, release-documents, defender-preflight]
+    needs: [verify, release-documents]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

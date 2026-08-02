@@ -517,10 +517,6 @@ pub fn import_legacy_typetext_folder(data_dir: impl AsRef<Path>) -> Result<Legac
     })
 }
 
-pub fn import_droptext(path: impl AsRef<Path>) -> Result<SnippetFile> {
-    Ok(import_droptext_with_warnings(path)?.snippets)
-}
-
 pub fn import_droptext_with_warnings(path: impl AsRef<Path>) -> Result<DropTextImport> {
     let path = path.as_ref();
     let bytes = read_limited(path, MAX_SNIPPET_FILE_BYTES)?;
@@ -573,10 +569,6 @@ fn parse_droptext_csv_with_warnings(raw: &str) -> Result<DropTextImport> {
     let mut warnings = Vec::new();
     let snippets = parse_droptext_data(&droptext_data, true, &mut warnings)?;
     Ok(DropTextImport { snippets, warnings })
-}
-
-pub fn expand_snippet_tokens(body: &str) -> String {
-    expand_snippet_tokens_at(body, Local::now().fixed_offset(), &[])
 }
 
 pub fn expand_snippet_tokens_with_custom(body: &str, custom_tokens: &[CustomToken]) -> String {
