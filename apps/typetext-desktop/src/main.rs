@@ -1987,7 +1987,7 @@ impl TypeTextApp {
                     Err(error) => self.show_error(error.to_string()),
                 }
             }
-            Err(error) => self.show_error(error.to_string()),
+            Err(error) => self.show_error(format!("{error:#}")),
         }
     }
 
