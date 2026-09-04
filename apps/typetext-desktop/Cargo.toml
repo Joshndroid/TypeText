@@ -24,7 +24,7 @@ url = "2.5.8"
 # wgpu instance eframe uses. A version mismatch silently produces a second,
 # unused wgpu and leaves eframe's copy with NO graphics backends (app won't
 # open). Only bump together with eframe.
-wgpu = { version = "29.0.4", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "wgsl"] }
+wgpu = { version = "30.0.0", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "wgsl"] }
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 tray-icon = { version = "0.24.1", default-features = false }
