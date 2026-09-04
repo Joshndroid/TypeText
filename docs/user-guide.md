@@ -101,6 +101,8 @@ Open **Settings > Hotkey Hints** for a read-only reference covering the configur
 
 Click an existing group to edit it. Group details appear only after a group is selected or added.
 
+Use **Hide** in Group Details when you want to retain a group in Edit without showing the group or any of its snippets in Choose. Save the group to apply the change; **Show** reverses it. Saving a hidden group also removes its snippets from the current queue.
+
 ### Create a snippet
 
 1. Open **Edit > Snippets**.
@@ -111,6 +113,8 @@ Click an existing group to edit it. Group details appear only after a group is s
 6. Click **Save**.
 
 The snippet editor appears only after a snippet is selected or added. Use **Copy** to duplicate a snippet into another group, or **Move** to transfer it. Copying a favourite does not copy its favourite slot; moving one retains its slot.
+
+Use **Hide** in Snippet Details to retain a snippet in Edit while excluding it from Choose, search results, whole-group queueing, and the current queue. Save the snippet to apply the change; **Show** reverses it. Hidden items are marked in the Edit lists.
 
 ### Arrange snippets
 

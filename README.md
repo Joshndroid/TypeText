@@ -19,6 +19,7 @@ system APIs rather than a browser engine or web-based application runtime.
 - Configurable queued-snippet behavior: add duplicates or remove queued entries
 - Configurable paragraph separators between queued snippets
 - Built-in group, snippet, and token editor
+- Hideable groups and snippets that remain available in Edit
 - Borderless app window with in-app Min, Max, and Exit controls
 - DropText INI/CSV import, older TypeText data-folder migration, and TypeText JSON export
 - Simple JSON snippet/settings storage
@@ -225,6 +226,11 @@ The Edit tab has separate Groups, Snippets, and Tokens views. In the Snippets
 view, the header dropdown selects the active snippet group, and Snippet Details
 provides Copy, Move, and Tokens menus. In the Tokens view, the header dropdown
 switches the sidebar between Custom Tokens and Static Tokens.
+
+Groups and snippets can be hidden from Choose while remaining visible and
+recoverable in Edit. Hidden groups and snippets are excluded from search and
+whole-group queueing, and saving the hidden state removes them from the current
+queue.
 
 The action buttons use a consistent height in all three editor views. Keyboard
 shortcuts use **Ctrl** on Windows and **Cmd** on macOS:

@@ -96,6 +96,8 @@ pub struct SnippetGroup {
     pub snippets: Vec<Snippet>,
     #[serde(default)]
     pub sort_order: SnippetSortOrder,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -114,6 +116,12 @@ pub struct Snippet {
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub favourite_slot: Option<u8>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,19 +229,23 @@ impl Default for SnippetFile {
                         title: "Getting Started".to_string(),
                         body: "Welcome to TypeText!\n\nClick a snippet in Choose to add it to the queue. Select a group and use Queue Group to queue every snippet in it.\n\nOpen Edit to create your own groups, snippets, and custom tokens. You can use tokens such as {date.today} or {Program.Version} inside snippet text.\n\nEdit or delete this starter snippet whenever you are ready.".to_string(),
                         favourite_slot: None,
+                        hidden: false,
                     },
                     Snippet {
                         title: "Follow up".to_string(),
                         body: "Hi, just following up on this. Please let me know if you need anything else.".to_string(),
                         favourite_slot: None,
+                        hidden: false,
                     },
                     Snippet {
                         title: "Thanks".to_string(),
                         body: "Thanks for your help. I appreciate it.".to_string(),
                         favourite_slot: None,
+                        hidden: false,
                     },
                 ],
                 sort_order: SnippetSortOrder::Custom,
+                hidden: false,
             }],
         }
     }
@@ -672,6 +684,7 @@ fn parse_droptext_data(
                     name: name.to_string(),
                     snippets: Vec::new(),
                     sort_order: SnippetSortOrder::Custom,
+                    hidden: false,
                 });
                 current_group = Some(groups.len() - 1);
             }
@@ -714,6 +727,7 @@ fn parse_droptext_data(
             title: title.to_string(),
             body,
             favourite_slot: None,
+            hidden: false,
         });
     }
 
@@ -737,12 +751,18 @@ pub fn search_snippets(snippets: &SnippetFile, query: &str) -> Vec<SearchResult>
         .iter()
         .enumerate()
         .flat_map(|(group_index, group)| {
+            if group.hidden {
+                return Vec::new();
+            }
             let query = query.clone();
             let mut matches: Vec<_> = group
                 .snippets
                 .iter()
                 .enumerate()
                 .filter_map(move |(snippet_index, snippet)| {
+                    if snippet.hidden {
+                        return None;
+                    }
                     let haystack =
                         format!("{} {} {}", group.name, snippet.title, snippet.body).to_lowercase();
                     if query.is_empty() || haystack.contains(&query) {
@@ -1456,6 +1476,23 @@ mod tests {
         .unwrap();
 
         assert_eq!(snippets.groups[0].snippets[0].favourite_slot, None);
+        assert!(!snippets.groups[0].hidden);
+        assert!(!snippets.groups[0].snippets[0].hidden);
+    }
+
+    #[test]
+    fn search_excludes_hidden_groups_and_snippets() {
+        let mut snippets = SnippetFile::default();
+        snippets.groups[0].snippets[0].hidden = true;
+
+        let visible_titles: Vec<_> = search_snippets(&snippets, "")
+            .into_iter()
+            .map(|result| result.title)
+            .collect();
+        assert_eq!(visible_titles, ["Follow up", "Thanks"]);
+
+        snippets.groups[0].hidden = true;
+        assert!(search_snippets(&snippets, "").is_empty());
     }
 
     #[test]

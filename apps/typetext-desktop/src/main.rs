@@ -530,8 +530,10 @@ struct TypeTextApp {
     edit_group_active: bool,
     edit_snippet_active: bool,
     edit_group_name: String,
+    edit_group_hidden: bool,
     edit_title: String,
     edit_body: String,
+    edit_snippet_hidden: bool,
     edit_body_selection: (usize, usize),
     edit_body_pending_cursor: Option<usize>,
     selected_token: usize,
@@ -1451,8 +1453,10 @@ impl TypeTextApp {
             edit_group_active: false,
             edit_snippet_active: false,
             edit_group_name: String::new(),
+            edit_group_hidden: false,
             edit_title: String::new(),
             edit_body: String::new(),
+            edit_snippet_hidden: false,
             edit_body_selection: (0, 0),
             edit_body_pending_cursor: None,
             selected_token: 0,
@@ -1504,10 +1508,12 @@ impl TypeTextApp {
     }
 
     fn refresh_results(&mut self) {
-        if self
-            .chooser_group
-            .is_some_and(|group_index| group_index >= self.snippets.groups.len())
-        {
+        if self.chooser_group.is_some_and(|group_index| {
+            self.snippets
+                .groups
+                .get(group_index)
+                .is_none_or(|group| group.hidden)
+        }) {
             self.chooser_group = None;
         }
 
@@ -1650,7 +1656,10 @@ impl TypeTextApp {
                         .snippets
                         .groups
                         .get(self.selected_group)
-                        .is_some_and(|group| self.edit_group_name != group.name)
+                        .is_some_and(|group| {
+                            self.edit_group_name != group.name
+                                || self.edit_group_hidden != group.hidden
+                        })
             }
             EditPanel::Snippets => {
                 self.edit_snippet_active
@@ -1660,7 +1669,9 @@ impl TypeTextApp {
                         .get(self.selected_group)
                         .and_then(|group| group.snippets.get(self.selected_snippet))
                         .is_some_and(|snippet| {
-                            self.edit_title != snippet.title || self.edit_body != snippet.body
+                            self.edit_title != snippet.title
+                                || self.edit_body != snippet.body
+                                || self.edit_snippet_hidden != snippet.hidden
                         })
             }
             EditPanel::Tokens => {
@@ -1758,8 +1769,10 @@ impl TypeTextApp {
         self.edit_group_active = false;
         self.edit_snippet_active = false;
         self.edit_group_name.clear();
+        self.edit_group_hidden = false;
         self.edit_title.clear();
         self.edit_body.clear();
+        self.edit_snippet_hidden = false;
         self.edit_body_selection = (0, 0);
         self.edit_body_pending_cursor = None;
         self.edit_token_active = false;
@@ -2239,6 +2252,26 @@ impl TypeTextApp {
         self.update_queue_status();
     }
 
+    fn remove_hidden_from_queue(&mut self) {
+        let previous_len = self.snippet_chain.len();
+        let snippets = &self.snippets;
+        self.snippet_chain.retain(|queued| {
+            snippets
+                .groups
+                .get(queued.group_index)
+                .filter(|group| !group.hidden)
+                .and_then(|group| group.snippets.get(queued.snippet_index))
+                .is_some_and(|snippet| !snippet.hidden)
+        });
+        if self.snippet_chain.len() != previous_len {
+            self.snippet_chain_actions = (!self.snippet_chain.is_empty())
+                .then_some(self.snippet_chain.len())
+                .into_iter()
+                .collect();
+            self.insert_when_focus_lost = !self.snippet_chain.is_empty();
+        }
+    }
+
     fn undo_last_queue_action(&mut self) {
         let Some(action_size) = self.snippet_chain_actions.pop() else {
             return;
@@ -2302,7 +2335,14 @@ impl TypeTextApp {
                                         query.is_empty()
                                             || group.name.to_lowercase().contains(&query)
                                     })
-                                    .map(|(index, group)| (index, group.name.clone()))
+                                    .map(|(index, group)| {
+                                        let name = if group.hidden {
+                                            format!("{}  ·  Hidden", group.name)
+                                        } else {
+                                            group.name.clone()
+                                        };
+                                        (index, name)
+                                    })
                                     .collect();
                                 for (index, name) in &group_names {
                                     let selected =
@@ -2381,7 +2421,24 @@ impl TypeTextApp {
                     |ui| {
                         let can_edit = self.edit_group_active
                             && self.selected_group < self.snippets.groups.len();
-                        detail_header(ui, "Group Details", |_| {});
+                        detail_header(ui, "Group Details", |ui| {
+                            let label = if self.edit_group_hidden {
+                                "Show"
+                            } else {
+                                "Hide"
+                            };
+                            if ui
+                                .add_enabled(can_edit, egui::Button::new(label))
+                                .on_hover_text(if self.edit_group_hidden {
+                                    "Show this group and its snippets in Choose after saving"
+                                } else {
+                                    "Hide this group and its snippets from Choose after saving"
+                                })
+                                .clicked()
+                            {
+                                self.edit_group_hidden = !self.edit_group_hidden;
+                            }
+                        });
                         section_gap(ui);
                         if can_edit {
                             ui.add(
@@ -2425,6 +2482,7 @@ impl TypeTextApp {
                                     .enumerate()
                                     .flat_map(|(group_index, group)| {
                                         let group_name = group.name.clone();
+                                        let group_hidden = group.hidden;
                                         let group_matches =
                                             group_name.to_lowercase().contains(&query);
                                         let filter_query = query.clone();
@@ -2447,7 +2505,16 @@ impl TypeTextApp {
                                                 (
                                                     group_index,
                                                     snippet_index,
-                                                    format!("{}  ·  {}", snippet.title, group_name),
+                                                    format!(
+                                                        "{}{}  ·  {}",
+                                                        snippet.title,
+                                                        if snippet.hidden || group_hidden {
+                                                            "  ·  Hidden"
+                                                        } else {
+                                                            ""
+                                                        },
+                                                        group_name
+                                                    ),
                                                     snippet.favourite_slot,
                                                 )
                                             })
@@ -2466,7 +2533,11 @@ impl TypeTextApp {
                                                 (
                                                     self.selected_group,
                                                     snippet_index,
-                                                    snippet.title.clone(),
+                                                    if snippet.hidden {
+                                                        format!("{}  ·  Hidden", snippet.title)
+                                                    } else {
+                                                        snippet.title.clone()
+                                                    },
                                                     snippet.favourite_slot,
                                                 )
                                             })
@@ -2849,6 +2920,11 @@ impl TypeTextApp {
             .get(self.selected_group)
             .map(|group| group.name.clone())
             .unwrap_or_default();
+        self.edit_group_hidden = self
+            .snippets
+            .groups
+            .get(self.selected_group)
+            .is_some_and(|group| group.hidden);
 
         if let Some(snippet) = self
             .snippets
@@ -2858,9 +2934,11 @@ impl TypeTextApp {
         {
             self.edit_title = snippet.title.clone();
             self.edit_body = snippet.body.clone();
+            self.edit_snippet_hidden = snippet.hidden;
         } else {
             self.edit_title.clear();
             self.edit_body.clear();
+            self.edit_snippet_hidden = false;
         }
         let end = self.edit_body.chars().count();
         self.edit_body_selection = (end, end);
@@ -3675,10 +3753,9 @@ impl TypeTextApp {
         section_gap(ui);
         let selected_group = self.chooser_group;
         let can_add_group = selected_group.is_some_and(|group_index| {
-            self.snippets
-                .groups
-                .get(group_index)
-                .is_some_and(|group| !group.snippets.is_empty())
+            self.snippets.groups.get(group_index).is_some_and(|group| {
+                !group.hidden && group.snippets.iter().any(|snippet| !snippet.hidden)
+            })
         });
         let mut add_selected_group = false;
         egui::Frame::new()
@@ -3718,6 +3795,7 @@ impl TypeTextApp {
                         .groups
                         .iter()
                         .enumerate()
+                        .filter(|(_, group)| !group.hidden)
                         .map(|(index, group)| (index, group.name.clone()))
                         .collect();
 
@@ -4026,7 +4104,13 @@ impl TypeTextApp {
                     .snippets
                     .groups
                     .iter()
-                    .map(|group| group.name.clone())
+                    .map(|group| {
+                        if group.hidden {
+                            format!("{}  ·  Hidden", group.name)
+                        } else {
+                            group.name.clone()
+                        }
+                    })
                     .collect();
                 for (index, name) in group_names.iter().enumerate() {
                     if ui
@@ -4560,6 +4644,22 @@ impl TypeTextApp {
         let mut requested_duplicate = false;
 
         detail_header(ui, "Snippet Details", |ui| {
+            let visibility_label = if self.edit_snippet_hidden {
+                "Show"
+            } else {
+                "Hide"
+            };
+            if ui
+                .add_enabled(can_edit_snippet, egui::Button::new(visibility_label))
+                .on_hover_text(if self.edit_snippet_hidden {
+                    "Show this snippet in Choose after saving"
+                } else {
+                    "Hide this snippet from Choose after saving"
+                })
+                .clicked()
+            {
+                self.edit_snippet_hidden = !self.edit_snippet_hidden;
+            }
             ui.add_enabled_ui(can_edit_snippet, |ui| {
                 self.ui_token_picker(ui, SNIPPET_TRANSFER_COMBO_WIDTH);
             })
@@ -4627,7 +4727,9 @@ impl TypeTextApp {
             .get(self.selected_group)
             .and_then(|group| group.snippets.get(self.selected_snippet))
             .is_some_and(|snippet| {
-                self.edit_title != snippet.title || self.edit_body != snippet.body
+                self.edit_title != snippet.title
+                    || self.edit_body != snippet.body
+                    || self.edit_snippet_hidden != snippet.hidden
             });
         ui.add_space(5.0);
         ui.horizontal(|ui| {
@@ -4788,6 +4890,7 @@ impl TypeTextApp {
             name: "New Group".to_string(),
             snippets: Vec::new(),
             sort_order: SnippetSortOrder::Custom,
+            hidden: false,
         });
         self.selected_group = self.snippets.groups.len() - 1;
         self.selected_snippet = 0;
@@ -4799,10 +4902,13 @@ impl TypeTextApp {
 
     fn save_selected_editor_group(&mut self) {
         let name = self.edit_group_name.trim().to_string();
+        let hidden = self.edit_group_hidden;
         if name.is_empty() {
             self.show_error("Group name is required");
         } else if let Some(group) = self.selected_group_mut() {
             group.name = name;
+            group.hidden = hidden;
+            self.remove_hidden_from_queue();
             self.save_snippets();
         }
     }
@@ -4839,6 +4945,7 @@ impl TypeTextApp {
                 name: "Common Replies".to_string(),
                 snippets: Vec::new(),
                 sort_order: SnippetSortOrder::Custom,
+                hidden: false,
             });
             self.selected_group = 0;
         }
@@ -4849,6 +4956,7 @@ impl TypeTextApp {
                 title: "New Snippet".to_string(),
                 body: "Type your reusable text here.".to_string(),
                 favourite_slot: None,
+                hidden: false,
             });
             self.selected_snippet = group.snippets.len() - 1;
             self.edit_snippet_active = true;
@@ -4859,6 +4967,7 @@ impl TypeTextApp {
 
     fn save_selected_editor_snippet(&mut self) {
         let body = self.edit_body.clone();
+        let hidden = self.edit_snippet_hidden;
         let title = self.edit_title.trim().to_string();
         let title = if title.is_empty() {
             title_from_body(&body)
@@ -4874,7 +4983,9 @@ impl TypeTextApp {
         if let Some(snippet) = self.selected_snippet_mut() {
             snippet.title = title.clone();
             snippet.body = body;
+            snippet.hidden = hidden;
             self.edit_title = title;
+            self.remove_hidden_from_queue();
             self.save_snippets();
             return;
         }
@@ -4884,6 +4995,7 @@ impl TypeTextApp {
                 name: "Common Replies".to_string(),
                 snippets: Vec::new(),
                 sort_order: SnippetSortOrder::Custom,
+                hidden: false,
             });
             self.selected_group = 0;
         }
@@ -4893,6 +5005,7 @@ impl TypeTextApp {
                 title,
                 body,
                 favourite_slot: None,
+                hidden: false,
             });
             self.selected_snippet = group.snippets.len() - 1;
             self.load_selected_editor_snippet();
@@ -4915,6 +5028,7 @@ impl TypeTextApp {
 
     fn duplicate_selected_editor_snippet(&mut self) {
         let body = self.edit_body.clone();
+        let hidden = self.edit_snippet_hidden;
         let title = self.edit_title.trim().to_string();
         let title = if title.is_empty() {
             title_from_body(&body)
@@ -4935,17 +5049,21 @@ impl TypeTextApp {
         };
         source.title = title.clone();
         source.body = body.clone();
+        source.hidden = hidden;
+        let source_hidden = source.hidden;
 
         let duplicate_title = duplicate_snippet_title(&title, group);
         group.snippets.push(Snippet {
             title: duplicate_title,
             body,
             favourite_slot: None,
+            hidden: source_hidden,
         });
         self.selected_snippet = group.snippets.len() - 1;
         self.edit_group_active = true;
         self.edit_snippet_active = true;
         self.load_selected_editor_snippet();
+        self.remove_hidden_from_queue();
         self.save_snippets();
         self.status = "Duplicated snippet in current group".to_string();
     }
@@ -5027,6 +5145,7 @@ impl TypeTextApp {
 
     fn transfer_selected_editor_snippet(&mut self, target_group: usize, transfer: SnippetTransfer) {
         let body = self.edit_body.clone();
+        let hidden = self.edit_snippet_hidden;
         let title = self.edit_title.trim().to_string();
         let title = if title.is_empty() {
             title_from_body(&body)
@@ -5053,6 +5172,7 @@ impl TypeTextApp {
         if let Some(snippet) = self.selected_snippet_mut() {
             snippet.title = title;
             snippet.body = body;
+            snippet.hidden = hidden;
         } else {
             return;
         }
@@ -5066,6 +5186,7 @@ impl TypeTextApp {
         ) else {
             return;
         };
+        self.remove_hidden_from_queue();
 
         let action = match transfer {
             SnippetTransfer::Copy => "Copied",
@@ -6364,13 +6485,16 @@ mod tests {
                         title: "Greeting".to_string(),
                         body: "Hello".to_string(),
                         favourite_slot: None,
+                        hidden: false,
                     }],
                     sort_order: SnippetSortOrder::Custom,
+                    hidden: false,
                 },
                 SnippetGroup {
                     name: "Target".to_string(),
                     snippets: Vec::new(),
                     sort_order: SnippetSortOrder::Custom,
+                    hidden: false,
                 },
             ],
         }
@@ -6401,6 +6525,7 @@ mod tests {
             title: "Greeting Copy".to_string(),
             body: "Hello".to_string(),
             favourite_slot: None,
+            hidden: false,
         });
         assert_eq!(
             duplicate_snippet_title("Greeting", &group),
