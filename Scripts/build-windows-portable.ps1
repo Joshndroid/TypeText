@@ -288,9 +288,19 @@ if ($Variant -in @("All", "Offline")) {
         "features",
         "--locked"
     )
-    $TreeOutput = & cargo @TreeArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "cargo $($TreeArgs -join ' ') failed with exit code $LASTEXITCODE. $($TreeOutput | Out-String)"
+    # Windows PowerShell 5 surfaces redirected native stderr as PowerShell error
+    # records. With the script-wide Stop preference, even a Cargo warning would
+    # terminate this check before its real process exit code can be inspected.
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $TreeOutput = & cargo @TreeArgs 2>&1
+        $TreeExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+    if ($TreeExitCode -ne 0) {
+        throw "cargo $($TreeArgs -join ' ') failed with exit code $TreeExitCode. $($TreeOutput | Out-String)"
     }
 
     $RegistryFeatures = $TreeOutput | Select-String -Pattern "Win32_System_Registry|windows-startup-registry"
