@@ -48,6 +48,38 @@ function Invoke-TypeTextCargo {
     }
 }
 
+function Invoke-TypeTextCompressArchive {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationPath
+    )
+
+    $MaxAttempts = 5
+    for ($Attempt = 1; $Attempt -le $MaxAttempts; $Attempt++) {
+        try {
+            Compress-Archive `
+                -LiteralPath $Path `
+                -DestinationPath $DestinationPath `
+                -Force `
+                -ErrorAction Stop
+            return
+        } catch {
+            if ($Attempt -eq $MaxAttempts) {
+                throw
+            }
+
+            # Antivirus and sync clients can briefly lock a newly copied or
+            # signed executable. Discard any partial archive before retrying.
+            Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction SilentlyContinue
+            $DelayMilliseconds = 500 * $Attempt
+            Write-Warning "Archive creation attempt $Attempt failed: $($_.Exception.Message) Retrying in $DelayMilliseconds ms."
+            Start-Sleep -Milliseconds $DelayMilliseconds
+        }
+    }
+}
+
 function Assert-TypeTextBuiltExecutable {
     param(
         [Parameter(Mandatory = $true)]
@@ -266,7 +298,7 @@ if ($Variant -in @("All", "Standard")) {
     if (Test-Path $ZipPath) {
         Remove-Item $ZipPath -Force
     }
-    Compress-Archive -Path $DistDir -DestinationPath $ZipPath -Force
+    Invoke-TypeTextCompressArchive -Path $DistDir -DestinationPath $ZipPath
     Write-TypeTextSha256Checksum -Path $ZipPath
 
     Write-Host "Built $DistDir"
@@ -354,7 +386,7 @@ if ($Variant -in @("All", "Offline")) {
     if (Test-Path $OfflineZipPath) {
         Remove-Item $OfflineZipPath -Force
     }
-    Compress-Archive -Path $OfflineDistDir -DestinationPath $OfflineZipPath -Force
+    Invoke-TypeTextCompressArchive -Path $OfflineDistDir -DestinationPath $OfflineZipPath
     Write-TypeTextSha256Checksum -Path $OfflineZipPath
 
     Write-Host "Built $OfflineDistDir"
