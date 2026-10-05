@@ -27,7 +27,7 @@ url = "2.5.8"
 wgpu = { version = "30.0.0", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "wgsl"] }
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
-tray-icon = { version = "0.25.0", default-features = false }
+tray-icon = { version = "0.26.0", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [
