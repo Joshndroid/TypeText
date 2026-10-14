@@ -173,7 +173,7 @@ jobs:
           rm -f "$RUNNER_TEMP/developer-id.p12"
 
       - name: Upload macOS app
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: TypeText-macOS
           path: |
@@ -213,7 +213,7 @@ jobs:
         run: Scripts\build-windows-portable.ps1 -Variant Standard
 
       - name: Upload standard portable app
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: TypeText-Windows-x64-portable
           path: dist/TypeText-Windows-x64.zip
@@ -250,7 +250,7 @@ jobs:
         run: Scripts\build-windows-portable.ps1 -Variant Offline
 
       - name: Upload offline portable app
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: TypeText-Windows-x64-offline-portable
           path: dist/TypeText-Windows-x64-Offline-Portable.zip
@@ -287,7 +287,7 @@ jobs:
         run: Scripts\build-windows-installer.ps1
 
       - name: Upload installer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: TypeText-Windows-x64-installer
           path: dist/TypeText-Windows-x64-Setup.exe
@@ -479,7 +479,7 @@ jobs:
           Get-Content $reportPath
 
       - name: Upload Microsoft Defender scan metadata
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: TypeText-Windows-Defender-scan-report
           path: |
@@ -611,7 +611,7 @@ jobs:
           sha256sum "${expected_assets[@]/#/release-assets/}" > release-assets.sha256
 
       - name: Upload dry-run summary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: TypeText-release-dry-run-summary
           path: |
