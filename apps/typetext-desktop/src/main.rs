@@ -876,7 +876,7 @@ fn window_resize_interaction(
     direction: egui::viewport::ResizeDirection,
     cursor: egui::CursorIcon,
 ) {
-    let response = ui.interact(rect, ui.id().with(id), egui::Sense::drag());
+    let response = ui.interact(rect, ui.scope_id().with(id), egui::Sense::drag());
     if response.hovered() || response.dragged() {
         ctx.set_cursor_icon(cursor);
     }
@@ -2443,7 +2443,7 @@ impl TypeTextApp {
                         if can_edit {
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.edit_group_name)
-                                    .vertical_align(egui::Align::Center),
+                                    .align(egui::Align2::LEFT_CENTER),
                             );
                         }
                     },
@@ -2870,7 +2870,7 @@ impl TypeTextApp {
             .collect::<Vec<_>>();
         let mut migrate = false;
 
-        egui::Area::new(egui::Id::new("data_migration_dialog"))
+        egui::Area::new(egui::Id::unique("data_migration_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -3145,7 +3145,7 @@ impl TypeTextApp {
 
         let mut confirm = false;
         let mut cancel = false;
-        egui::Area::new(egui::Id::new("editor_deletion_confirmation_dialog"))
+        egui::Area::new(egui::Id::unique("editor_deletion_confirmation_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -3235,7 +3235,7 @@ impl TypeTextApp {
 
         let mut discard = false;
         let mut cancel = false;
-        egui::Area::new(egui::Id::new("unsaved_editor_confirmation_dialog"))
+        egui::Area::new(egui::Id::unique("unsaved_editor_confirmation_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -3301,7 +3301,7 @@ impl TypeTextApp {
             .unwrap_or_else(|| "another snippet".to_string());
         let mut replace = false;
         let mut cancel = false;
-        egui::Area::new(egui::Id::new("favourite_confirmation_dialog"))
+        egui::Area::new(egui::Id::unique("favourite_confirmation_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -3357,7 +3357,7 @@ impl TypeTextApp {
         let mut cancel = false;
         let mut choose_file = false;
         let mut choose_folder = false;
-        egui::Area::new(egui::Id::new("import_confirmation_dialog"))
+        egui::Area::new(egui::Id::unique("import_confirmation_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -3422,7 +3422,7 @@ impl TypeTextApp {
 
         let mut keep_running = false;
         let mut exit = false;
-        egui::Area::new(egui::Id::new("background_notice_dialog"))
+        egui::Area::new(egui::Id::unique("background_notice_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -3494,7 +3494,7 @@ impl TypeTextApp {
         let mut cancel = false;
         let mut confirm = false;
 
-        egui::Area::new(egui::Id::new("clear_all_confirmation_dialog"))
+        egui::Area::new(egui::Id::unique("clear_all_confirmation_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -3557,7 +3557,7 @@ impl TypeTextApp {
         };
 
         let mut dismiss = false;
-        egui::Area::new(egui::Id::new("error_popup_dialog"))
+        egui::Area::new(egui::Id::unique("error_popup_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -3604,7 +3604,7 @@ impl TypeTextApp {
         };
 
         let mut dismiss = false;
-        egui::Area::new(egui::Id::new("warning_popup_dialog"))
+        egui::Area::new(egui::Id::unique("warning_popup_dialog"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -3702,7 +3702,7 @@ impl TypeTextApp {
                 if drag_rect.is_positive() {
                     let drag_response = ui.interact(
                         drag_rect,
-                        ui.id().with("header_drag_gap"),
+                        ui.scope_id().with("header_drag_gap"),
                         egui::Sense::drag(),
                     );
                     start_window_drag_on_response(&drag_response, ctx);
@@ -3743,7 +3743,7 @@ impl TypeTextApp {
                 [ui.available_width(), 24.0],
                 egui::TextEdit::singleline(&mut self.search)
                     .hint_text("Search snippets")
-                    .vertical_align(egui::Align::Center),
+                    .align(egui::Align2::LEFT_CENTER),
             );
             if response.changed() {
                 self.refresh_results();
@@ -4001,7 +4001,7 @@ impl TypeTextApp {
                 [ui.available_width(), 24.0],
                 egui::TextEdit::singleline(&mut self.edit_search)
                     .hint_text("Search groups, snippets, or tokens")
-                    .vertical_align(egui::Align::Center),
+                    .align(egui::Align2::LEFT_CENTER),
             );
         });
         section_gap(ui);
@@ -4503,7 +4503,7 @@ impl TypeTextApp {
                         } else if can_edit {
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.edit_token_name)
-                                    .vertical_align(egui::Align::Center),
+                                    .align(egui::Align2::LEFT_CENTER),
                             );
                             ui.add_space(6.0);
                             ui.label(egui::RichText::new("Value").small());
@@ -4709,7 +4709,7 @@ impl TypeTextApp {
 
         ui.add_sized(
             [ui.available_width(), 24.0],
-            egui::TextEdit::singleline(&mut self.edit_title).vertical_align(egui::Align::Center),
+            egui::TextEdit::singleline(&mut self.edit_title).align(egui::Align2::LEFT_CENTER),
         );
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Body").small());
@@ -5234,7 +5234,7 @@ impl TypeTextApp {
                     [ui.available_width(), 24.0],
                     egui::TextEdit::singleline(&mut self.settings_search)
                         .hint_text("Search settings")
-                        .vertical_align(egui::Align::Center),
+                        .align(egui::Align2::LEFT_CENTER),
                 )
                 .changed();
         });
@@ -5369,7 +5369,7 @@ impl TypeTextApp {
                             .add_sized(
                                 [220.0, 24.0],
                                 egui::TextEdit::singleline(&mut self.settings.hotkey)
-                                    .vertical_align(egui::Align::Center),
+                                    .align(egui::Align2::LEFT_CENTER),
                             )
                             .changed()
                         {
@@ -5607,7 +5607,7 @@ impl TypeTextApp {
                                         &mut self.settings.favourite_hotkeys[slot_index],
                                     )
                                     .hint_text("Optional hotkey")
-                                    .vertical_align(egui::Align::Center),
+                                    .align(egui::Align2::LEFT_CENTER),
                                 )
                                 .changed()
                             {
@@ -5754,7 +5754,7 @@ impl TypeTextApp {
                                             &mut self.settings.accent_color,
                                         )
                                         .hint_text("#0A7E76")
-                                        .vertical_align(egui::Align::Center),
+                                        .align(egui::Align2::LEFT_CENTER),
                                     )
                                     .changed()
                                 {
